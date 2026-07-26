@@ -54,25 +54,35 @@ These are the ones that matter. The portal **warns the partner on the success
 screen** about each drop rather than failing silently — but a warning is not a
 fix.
 
-### 🔴 C1 — partner-authored moods cannot be saved
+### 🟠 C1 — partner-authored moods: honest, but not yet possible
 
 `create_venue` requires moods to already exist in the curated Mood list, and the
-collection exposes no endpoint to create or suggest one.
+API exposes no endpoint to create or suggest one.
 
-The portal lets a partner type any mood (the C1 decision, and what the designs
-show). Canonical matches are sent; anything new is **dropped with a warning**.
-Sending it anyway is not an option — `create_venue` rejects unknown moods, which
-would fail the entire submit.
+**Frontend behaviour has been changed to match.** An unmatched mood is now
+refused *at the point of entry*, with the closest real alternatives offered and
+the full list browsable. Previously it was accepted, and the partner only learned
+four steps later — on the success screen — that it had been dropped. That was the
+actual defect; a late warning is not much better than a silent one.
 
-**To close this**, the backend needs either:
-- a `Mood Suggestion` doctype plus an endpoint to file one, and a Desk queue to
-  merge them (this is what the C1 decision assumed), **or**
-- an explicit reversal of C1, in which case the mood step should be changed to
-  select-only and the designs revisited.
+Alias resolution still works, so "boys night" → **Boys Night Out** as before.
 
-There is also **no endpoint that lists the curated moods**, even though
-`create_venue` validates against it. Until one exists the typeahead reads
-fixtures, so a partner can be shown a mood the backend will then reject.
+**To restore the decided C1 behaviour**, `backend/mood_suggestions.py` is
+drop-in ready: `get_moods`, `resolve_mood` and `approve_mood_suggestion`, plus
+the `Mood Alias` and `Mood Suggestion` doctype definitions. The frontend already
+supports the result — `MoodStep` still handles `status: "suggested"` and
+`MoodPill` still has the outlined variant — so restoring it is deleting a branch,
+not writing a feature.
+
+Two things there matter more than the endpoints:
+- **A Desk queue must call `approve_mood_suggestion`.** Without one, suggestions
+  accumulate unseen and the venues attached to them never reach customer search.
+- **`create_venue` should accept a suggestion in `moods`**, so a venue starts
+  appearing the moment its suggestion is approved. Otherwise approving fixes the
+  vocabulary but not the venues that asked for it.
+
+`get_moods` is worth adding **even if C1 is reversed**: without it the portal's
+list is fixtures, so it can offer a partner a mood the backend will then reject.
 
 ### 🟠 C3 — operating hours: bridged, with one loss
 
