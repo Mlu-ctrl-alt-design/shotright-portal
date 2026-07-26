@@ -14,26 +14,30 @@ This repo is one of three surfaces:
 
 ## Status
 
-The design system, app shell and the five-step venue setup wizard are built and
-verified in a browser. Three of the five wizard steps are complete; the
-remaining two are blocked on the decisions tracked in
-[`docs/PRD-shot-right-partner-portal.md`](docs/PRD-shot-right-partner-portal.md)
-§7.5, and render an on-screen note naming their blocker rather than failing
-silently.
+All five wizard steps are built and verified end to end in a browser: a partner
+can go from login through moods, venue details, operating hours and menu to a
+submitted venue.
 
 | Step | State |
 |---|---|
-| 1. Setup Mood | ✅ Built — free text with canonical resolution + suggestions (conflict C1) |
-| 2. Your venue's details | ⏳ Needs a rich-text editor chosen |
-| 3. Your operating hours | ✅ Built — weekday / weekend / public holiday |
-| 4. Your menu options | ⏳ Blocked on C4 (item images + rich text) |
-| 5. Almost done | ⏳ Built last, reflects the steps above |
+| 1. Setup Mood | ✅ Free text resolved onto canonical moods, with suggestions for anything new (conflict C1) |
+| 2. Your venue's details | ✅ Includes a rich-text description (TipTap, lazy-loaded) |
+| 3. Your operating hours | ✅ Weekday / weekend / public holiday, per the designs |
+| 4. Your menu options | ✅ Categories, items with photos, per-category Excel import (conflict C4) |
+| 5. Almost done | ✅ Read-only review, then SUBMIT |
 
 **The backend does not exist yet.** None of the Sho't Right doctypes are on the
 bench, so the portal ships with `VITE_USE_MOCKS=true` and runs end-to-end on
 in-memory fixtures. Every Frappe integration point is isolated in
 `src/services/vendor.js`, which picks between the real endpoint and the mock per
 call — flipping the flag is the only change needed once the app is installed.
+
+Two things the backend must enforce, since the client cannot: sanitising the
+rich-text HTML before the customer app renders it, and the image type and size
+limits on menu photo uploads.
+
+Still to design (see the PRD §7.5): the Settings screen, and the path back for a
+partner whose venue is declined.
 
 ## Running
 

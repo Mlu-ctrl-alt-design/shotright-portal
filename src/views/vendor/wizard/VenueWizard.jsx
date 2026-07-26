@@ -1,20 +1,21 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useCreateVenue } from '../../../hooks/useVendor'
 import WizardLayout from '../../../components/wizard/WizardLayout'
+import { Alert } from '../../../components/ui'
 import MoodStep from './steps/MoodStep'
 import VenueDetailsStep from './steps/VenueDetailsStep'
 import MenuStep from './steps/MenuStep'
+import ReviewStep from './steps/ReviewStep'
+import WizardSuccess from './WizardSuccess'
 import OperatingHoursStep from './steps/OperatingHoursStep'
-import PendingStep from './steps/PendingStep'
 
 /**
  * The five-step venue setup wizard.
  *
  * Step labels and order are taken verbatim from the progress rail in the
- * designs. The chrome (rail, ticks, Cancel/Previous/Next, back-navigation to
- * visited steps) is complete; step bodies still blocked on the conflicts in
- * docs/PRD-shot-right-partner-portal.md §7.5 render a PendingStep that names
- * the blocker.
+ * designs. All five steps are built; SUBMIT on the last one creates the Venue,
+ * which always enters review rather than going live (#15).
  */
 const STEPS = [
   { key: 'mood', label: 'Setup Mood' },
@@ -52,23 +53,92 @@ export default function VenueWizard() {
   const [hours, setHours] = useState(INITIAL_HOURS)
   const [menu, setMenu] = useState({ categories: [] })
 
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState(null)
+  const [created, setCreated] = useState(null)
+  const createVenue = useCreateVenue()
+
   const step = STEPS[currentIndex]
   const isLast = currentIndex === STEPS.length - 1
 
   const markComplete = (index) =>
     setCompleted((prev) => (prev.includes(index) ? prev : [...prev, index]))
 
-  const handleNext = () => {
-    markComplete(currentIndex)
-    if (isLast) {
-      // Submission lands here once the doctypes exist (PRD §7.3).
+  /**
+   * Flatten wizard state into the Venue payload.
+   *
+   * Moods carry their resolution status through unchanged: the backend needs to
+   * know which are canonical Moods and which are Mood Suggestions awaiting
+   * review (C1), and that distinction is lost if we send bare labels.
+   */
+  const buildPayload = () => ({
+    venue_name: details.venue_name,
+    manager_name: details.manager_name,
+    manager_surname: details.manager_surname,
+    contact_number: details.contact_number,
+    address: details.address,
+    dress_code: details.dress_code,
+    atmosphere: details.atmosphere,
+    summary: details.summary,
+    moods: moods.moods.map((m) => ({ mood: m.mood, status: m.status, label: m.label })),
+    operating_hours: {
+      days: hours.days,
+      weekend_starts_friday: hours.weekendStartsFriday,
+      weekday: hours.weekday,
+      weekend: hours.weekend,
+      public_holiday: hours.publicHoliday,
+    },
+    menu: menu.categories.map((c) => ({
+      heading: c.name,
+      items: c.items.map((i) => ({
+        item_name: i.name,
+        price: i.price,
+        description: i.details,
+        image: i.image || null,
+      })),
+    })),
+  })
+
+  const handleSubmit = async () => {
+    if (!details.venue_name.trim()) {
+      setSubmitError('Your venue needs a name — add one on “Your venue’s details”.')
       return
     }
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const venue = await createVenue.mutateAsync(buildPayload())
+      markComplete(currentIndex)
+      setCreated(venue)
+    } catch (err) {
+      setSubmitError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleNext = () => {
+    markComplete(currentIndex)
+    if (isLast) return handleSubmit()
     setCurrentIndex((i) => i + 1)
   }
 
   const handlePrevious = () => setCurrentIndex((i) => Math.max(0, i - 1))
   const handleCancel = () => navigate('/')
+
+  const restart = () => {
+    setCreated(null)
+    setCompleted([])
+    setCurrentIndex(0)
+    setMoods({ moods: [] })
+    setDetails(INITIAL_DETAILS)
+    setHours(INITIAL_HOURS)
+    setMenu({ categories: [] })
+  }
+
+  if (created) {
+    return <WizardSuccess venueName={created.venue_name} onAddAnother={restart} />
+  }
 
   const COPY = {
     mood: {
@@ -104,13 +174,7 @@ export default function VenueWizard() {
       case 'menu':
         return <MenuStep value={menu} onChange={setMenu} />
       case 'review':
-        return (
-          <PendingStep
-            blockedBy="the four steps above"
-            summary="The review screen reflects whatever the earlier steps captured, so it is built last. Layout is settled: mood pills, a tinted venue summary panel, the three hour ranges, and one expandable section per menu category."
-            screens={['venue summary screen.png']}
-          />
-        )
+        return <ReviewStep moods={moods} details={details} hours={hours} menu={menu} />
       default:
         return null
     }
@@ -128,8 +192,13 @@ export default function VenueWizard() {
       onPrevious={handlePrevious}
       onNext={handleNext}
       nextLabel={isLast ? 'Submit' : 'Next'}
-      nextDisabled={isLast}
+      nextLoading={submitting}
     >
+      {submitError && (
+        <div className="mb-5">
+          <Alert variant="danger">{submitError}</Alert>
+        </div>
+      )}
       {renderStep()}
     </WizardLayout>
   )
