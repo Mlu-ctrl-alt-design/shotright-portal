@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useDashboard } from '../../hooks/useVendor'
 import { Badge, Button, Card, MetricCard, EmptyState, Alert } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
+import { stateLabel } from './VenueList'
 
 /**
  * Issue #18 — Vendor Portal Dashboard.
@@ -46,11 +47,31 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* Each tile is a link to the tab it counts. "3 pending" raises the
+          question "which three?" and the tile is where that gets asked. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Total venues" value={stats.total} />
-        <MetricCard label="Approved" value={stats.approved} tone="positive" />
-        <MetricCard label="Pending review" value={stats.pending} tone="warning" />
-        <MetricCard label="Rejected" value={stats.rejected} tone="negative" />
+        <MetricCard as={Link} to="/venues" label="Total venues" value={stats.total} />
+        <MetricCard
+          as={Link}
+          to="/venues?status=approved"
+          label="Approved"
+          value={stats.approved}
+          tone="positive"
+        />
+        <MetricCard
+          as={Link}
+          to="/venues?status=pending"
+          label="Pending review"
+          value={stats.pending}
+          tone="warning"
+        />
+        <MetricCard
+          as={Link}
+          to="/venues?status=declined"
+          label="Declined"
+          value={stats.rejected}
+          tone="negative"
+        />
       </div>
 
       <Card
@@ -80,7 +101,7 @@ export default function Dashboard() {
                   <p className="truncate text-xs text-ink-500">{venue.address}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <Badge>{venue.workflow_state}</Badge>
+                  <Badge tone={venue.workflow_state}>{stateLabel(venue.workflow_state)}</Badge>
                   <Link
                     to={`/venues/${venue.name}/edit`}
                     className="text-sm font-medium text-brand-600 hover:underline"

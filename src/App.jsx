@@ -48,17 +48,23 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<Shell />}>
           <Route path="/" element={<Dashboard />} />
+          {/* One list, filtered by ?status=. Approval state is a state OF a
+              venue, not a place in the app — see VenueList.jsx. */}
           <Route path="/venues" element={<VenueList />} />
           {/* The designs route "Add New" into the five-step wizard. VenueForm
               stays behind the edit route until the wizard can also edit. */}
           <Route path="/venues/new" element={<VenueWizard />} />
+          {/* Kept as redirects rather than deleted. These were real pages, so
+              they are in partners' history and bookmarks; letting them fall
+              through to the catch-all would silently dump someone on the
+              dashboard, which nobody would think to report as a bug. */}
           <Route
             path="/venues/declined"
-            element={<VenueList status="Rejected" heading="Declined venues" />}
+            element={<Navigate to="/venues?status=declined" replace />}
           />
           <Route
             path="/venues/pending"
-            element={<VenueList status="Pending" heading="Pending venues" />}
+            element={<Navigate to="/venues?status=pending" replace />}
           />
           <Route path="/venues/:venueId/edit" element={<VenueForm />} />
           <Route path="/venues/:venueId/menu" element={<VenueMenu />} />

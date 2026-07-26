@@ -440,18 +440,33 @@ export function Card({ title, action, children, className }) {
 
 /* ------------------------------------------------------------ MetricCard */
 // UNTITLED UI: https://www.untitledui.com/react/components/metrics
-export function MetricCard({ label, value, tone = 'default' }) {
+/**
+ * `as` lets the caller pass a router Link so the tile becomes the way through
+ * to the list it counts. A count you cannot act on is a dead end, and "3
+ * pending" is a question ("which three?") that the tile should answer.
+ *
+ * The whole tile is the target rather than the number, so it clears the 44px
+ * touch minimum without any extra work.
+ */
+export function MetricCard({ label, value, tone = 'default', as: Component = 'div', ...props }) {
   const tones = {
     default: 'text-ink-900',
     positive: 'text-green-700',
     warning: 'text-brand-700',
     negative: 'text-red-700',
   }
+  const interactive = Component !== 'div'
   return (
-    <div className="rounded-3xl bg-white p-5 ring-1 ring-brand-200">
-      <p className="text-xs font-semibold tracking-wide uppercase text-ink-500">{label}</p>
+    <Component
+      className={clsx(
+        'block rounded-3xl bg-white p-5 ring-1 ring-brand-200',
+        interactive && 'transition hover:ring-2 hover:ring-brand-edge',
+      )}
+      {...props}
+    >
+      <p className="text-xs font-semibold tracking-wide text-ink-500 uppercase">{label}</p>
       <p className={clsx('mt-2 text-3xl font-bold', tones[tone])}>{value}</p>
-    </div>
+    </Component>
   )
 }
 

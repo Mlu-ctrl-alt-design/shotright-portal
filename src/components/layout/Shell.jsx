@@ -27,11 +27,21 @@ import NavDrawer from './NavDrawer'
  * an item ends up on desktop and not on mobile.
  */
 // UNTITLED UI: https://www.untitledui.com/react/components/application-shell
+/**
+ * Declined and Pending used to sit here as their own destinations. They are not
+ * destinations — they are states of a venue, and putting a state in the nav
+ * means the nav grows every time the workflow does. They are tabs on
+ * `/venues` now, so this list stays four items however many states the
+ * approval flow ends up with.
+ *
+ * `end` on My Venues so it does not stay highlighted while you are inside
+ * /venues/new or /venues/:id/edit — those are different places, and a nav that
+ * claims otherwise is lying about where you are.
+ */
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
+  { to: '/venues', label: 'My Venues', end: true },
   { to: '/venues/new', label: 'Add New' },
-  { to: '/venues/declined', label: 'Declined' },
-  { to: '/venues/pending', label: 'Pending' },
   { to: '/profile', label: 'Settings' },
 ]
 
