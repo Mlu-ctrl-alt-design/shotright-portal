@@ -1,6 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
-import { USE_MOCKS } from '../../services/api'
 import { clsx } from '../../utils/clsx'
 import Logo from './Logo'
 
@@ -98,26 +97,40 @@ export default function Shell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mb-4 flex items-center justify-between gap-4 rounded-3xl bg-brand-500 px-5 py-3 lg:hidden">
-          <Logo size="sm" />
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex items-center gap-2 text-sm font-semibold text-ink-900"
-          >
-            <PowerIcon />
-            Logout
-          </button>
+        {/* Below lg the sidebar is hidden, so without this there is no way to
+            reach Add New, Declined, Pending or Settings on a phone at all. */}
+        <header className="mb-4 rounded-3xl bg-brand-500 px-5 py-3 lg:hidden">
+          <div className="flex items-center justify-between gap-4">
+            <Logo size="sm" />
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-sm font-semibold text-ink-900"
+            >
+              <PowerIcon />
+              Logout
+            </button>
+          </div>
+
+          <nav aria-label="Main" className="-mx-1 mt-3 flex gap-1 overflow-x-auto pb-1">
+            {NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  clsx(
+                    'shrink-0 rounded-full px-3 py-1.5 text-sm font-bold whitespace-nowrap transition',
+                    isActive ? 'bg-white text-ink-900' : 'text-ink-900/80 hover:bg-white/40',
+                  )
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
         </header>
 
-        {/* MAX_CONTENT keeps long tables and wizard forms to a readable measure
-            on wide screens instead of stretching edge to edge. */}
-        {USE_MOCKS && (
-          <div className="mx-auto mb-4 w-full max-w-content rounded-2xl bg-brand-100 px-6 py-2 text-center text-xs font-medium text-brand-900 lg:ml-4">
-            Demo mode — running on in-memory fixtures. The Sho't Right doctypes are not on the bench
-            yet; set <code className="font-mono">VITE_USE_MOCKS=false</code> once they are.
-          </div>
-        )}
 
         <main id="main" tabIndex={-1} className="min-w-0 flex-1 lg:pl-4">
           <div className="mx-auto w-full max-w-content">

@@ -89,11 +89,29 @@ body {
 /* A single visible focus treatment for everything focusable. Several controls
    here are custom (day chips, colour swatches, the remember-me circle), and
    without this the browser default is suppressed by the reset on some of them —
-   leaving keyboard users with no visible position. */
+   leaving keyboard users with no visible position.
+
+   Deliberately NO border-radius here. Setting one overrode each control's own
+   shape, so a pill-shaped input got a nearly-square focus ring. Modern browsers
+   already draw the outline following the element's border-radius, so the
+   correct fix is to say nothing. */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 3px solid var(--color-brand-ink);
   outline-offset: 2px;
-  border-radius: 0.25rem;
+}
+
+/* iOS Safari zooms the whole page in whenever a focused form control has a
+   font-size below 16px — our fields are 14px, so tapping one visibly blew the
+   layout up and pushed it off screen. This is that fix, not a design change:
+   16px only below the sm breakpoint, 14px everywhere the zoom never happens.
+   The alternative (maximum-scale=1 on the viewport meta) blocks pinch-zoom
+   entirely and fails WCAG 1.4.4. */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 /* Respect users who have asked for less motion. */
