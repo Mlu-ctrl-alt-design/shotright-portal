@@ -107,15 +107,19 @@ export default function Shell() {
           </button>
         </header>
 
+        {/* MAX_CONTENT keeps long tables and wizard forms to a readable measure
+            on wide screens instead of stretching edge to edge. */}
         {USE_MOCKS && (
-          <div className="mb-4 rounded-2xl bg-brand-100 px-6 py-2 text-center text-xs font-medium text-brand-900 lg:ml-4">
+          <div className="mx-auto mb-4 w-full max-w-content rounded-2xl bg-brand-100 px-6 py-2 text-center text-xs font-medium text-brand-900 lg:ml-4">
             Demo mode — running on in-memory fixtures. The Sho't Right doctypes are not on the bench
             yet; set <code className="font-mono">VITE_USE_MOCKS=false</code> once they are.
           </div>
         )}
 
         <main className="min-w-0 flex-1 lg:pl-4">
-          <Outlet />
+          <div className="mx-auto w-full max-w-content">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

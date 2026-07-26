@@ -113,13 +113,24 @@ export default function RichTextEditor({ value, onChange, placeholder, ariaLabel
           'prose-editor min-h-56 max-h-[28rem] overflow-y-auto px-5 py-4 text-sm text-ink-900 focus:outline-none',
       },
     },
-    onUpdate: ({ editor }) => onChange(editor.getHTML()),
+    onUpdate: ({ editor }) => {
+      if (editor.isDestroyed) return
+      onChange(editor.getHTML())
+    },
   })
 
   // Re-sync only when the value genuinely diverges — e.g. stepping back into
-  // this wizard step. Without the guard every keystroke would reset the cursor.
+  // this wizard step. Without the divergence check every keystroke would reset
+  // the cursor.
+  //
+  // The isDestroyed guard is load-bearing, not defensive noise: mounting this
+  // editor inside a Suspense boundary produces a mount → unmount → mount cycle,
+  // and the effect from the first pass runs against the torn-down instance.
+  // TipTap nulls the schema on destroy, so getHTML() then throws inside
+  // ProseMirror's DOMSerializer rather than returning anything.
   useEffect(() => {
-    if (editor && value !== undefined && value !== editor.getHTML()) {
+    if (!editor || editor.isDestroyed || value === undefined) return
+    if (value !== editor.getHTML()) {
       editor.commands.setContent(value || '', { emitUpdate: false })
     }
   }, [value, editor])

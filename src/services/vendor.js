@@ -84,6 +84,33 @@ export const resolveMood = (text) =>
     () => mockBackend.resolveMood(text),
   )()
 
+/**
+ * Upload a menu item photo (conflict C4, resolved: images live on the bench).
+ *
+ * Posts to Frappe's stock `upload_file`, which creates a File record and returns
+ * its `file_url`. The upload happens before the venue exists, so the File is
+ * created unattached and linked to the Product Item on submit — Frappe allows
+ * this, and it means a partner sees their photo immediately rather than only
+ * after the whole wizard is saved.
+ *
+ * `is_private: 0` because these are shown to customers in the app.
+ */
+export const uploadMenuImage = (file) =>
+  pick(
+    () => {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('is_private', '0')
+      form.append('folder', 'Home/Attachments')
+      return api
+        .post('/api/method/upload_file', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        .then((r) => r.data.message)
+    },
+    () => mockBackend.uploadMenuImage(file),
+  )()
+
 /** Dropdown data for the venue details step — dress codes and atmospheres. */
 export const getVenueLookups = () =>
   pick(

@@ -156,6 +156,20 @@ export const mockBackend = {
   },
 
   /**
+   * Stand-in for Frappe's upload_file (C4 — images live on the bench).
+   *
+   * Returns the same shape the real endpoint does, so callers only ever read
+   * `file_url`. Here that URL is an object URL valid for this page session;
+   * on the bench it is a real, servable path.
+   */
+  async uploadMenuImage(file) {
+    await delay(400)
+    if (!file.type.startsWith('image/')) throw new Error('That file is not an image.')
+    if (file.size > 5 * 1024 * 1024) throw new Error('Images must be under 5MB.')
+    return { file_url: URL.createObjectURL(file), file_name: file.name }
+  },
+
+  /**
    * Dropdown data for wizard step 2. Both lists are Desk-managed on the real
    * bench (Frappe Link fields), so they are fetched rather than hard-coded in
    * the view — staff can extend them without a portal release.

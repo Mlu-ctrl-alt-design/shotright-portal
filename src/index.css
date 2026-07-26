@@ -36,6 +36,9 @@
   --color-canvas: #f7f7f7;
   --color-tint: #fff3e0;
 
+  /* Readable measure for the authenticated content column. */
+  --container-content: 960px;
+
   --color-ink-50: #f6f6f7;
   --color-ink-200: #e5e5e5;
   --color-ink-500: #6b7280;

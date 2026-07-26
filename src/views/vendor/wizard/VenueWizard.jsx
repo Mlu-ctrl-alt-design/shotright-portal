@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import WizardLayout from '../../../components/wizard/WizardLayout'
 import MoodStep from './steps/MoodStep'
 import VenueDetailsStep from './steps/VenueDetailsStep'
+import MenuStep from './steps/MenuStep'
 import OperatingHoursStep from './steps/OperatingHoursStep'
 import PendingStep from './steps/PendingStep'
 
@@ -49,6 +50,7 @@ export default function VenueWizard() {
   const [moods, setMoods] = useState({ moods: [] })
   const [details, setDetails] = useState(INITIAL_DETAILS)
   const [hours, setHours] = useState(INITIAL_HOURS)
+  const [menu, setMenu] = useState({ categories: [] })
 
   const step = STEPS[currentIndex]
   const isLast = currentIndex === STEPS.length - 1
@@ -100,13 +102,7 @@ export default function VenueWizard() {
       case 'details':
         return <VenueDetailsStep value={details} onChange={setDetails} />
       case 'menu':
-        return (
-          <PendingStep
-            blockedBy="conflict C4 — menu item images and rich text"
-            summary="Menu items carry an image and a rich-text description, and each category has its own Excel upload plus a downloadable template. Needs file storage and an upload policy first."
-            screens={['add a menu.png', 'menu items loaded.png', 'edit a menu item.png']}
-          />
-        )
+        return <MenuStep value={menu} onChange={setMenu} />
       case 'review':
         return (
           <PendingStep
