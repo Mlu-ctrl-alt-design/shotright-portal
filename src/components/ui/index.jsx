@@ -12,7 +12,7 @@
  * label, secondary actions are white with a yellow border, and CANCEL is bare
  * yellow text with no box.
  */
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { clsx } from '../../utils/clsx'
 
 /* ---------------------------------------------------------------- Button */
@@ -99,6 +99,84 @@ export function Input({ label, error, hint, className, id, trailing, ...props })
             {trailing}
           </span>
         )}
+      </div>
+      {error && <p className="mt-1.5 px-2 text-xs text-red-700">{error}</p>}
+      {hint && !error && <p className="mt-1.5 px-2 text-xs text-ink-500">{hint}</p>}
+    </div>
+  )
+}
+
+/* --------------------------------------------------------- PasswordInput */
+/**
+ * A password field with a show/hide control.
+ *
+ * Separate from `Input` rather than a `trailing` slot because that slot is
+ * `pointer-events-none` — it exists to hang decorative icons off, and a control
+ * you cannot click is not a control.
+ *
+ * ACCESSIBILITY, and the reason this is a `<button>` and not a styled `<span>`:
+ *
+ *  - `type="button"` — inside a form, a bare button submits it. Revealing your
+ *    password must not post the form.
+ *  - `aria-pressed` carries the state, so a screen reader announces "show
+ *    password, pressed" rather than leaving the toggle silent. The visible
+ *    label changes with it for everyone else.
+ *  - `aria-controls` ties the button to the field it governs.
+ *  - The eye glyph is `aria-hidden`; the accessible name comes from the label,
+ *    because an icon alone gives a screen reader nothing to read.
+ *  - It sits in the tab order between this field and the next, which is where
+ *    someone would reach for it.
+ *
+ * The revealed value is `type="text"`, which means autofill and password
+ * managers see a text input while shown. That is the standard trade and is what
+ * makes the toggle work at all; the field is `autoComplete="new-password"` on
+ * the register form, so nothing is being re-typed into it anyway.
+ */
+export function PasswordInput({ label, error, hint, className, id, ...props }) {
+  const generatedId = useId()
+  const inputId = id || generatedId
+  const [shown, setShown] = useState(false)
+
+  return (
+    <div className={className}>
+      {label && (
+        <label htmlFor={inputId} className="mb-1.5 block text-sm font-semibold text-ink-900">
+          {label}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          id={inputId}
+          type={shown ? 'text' : 'password'}
+          className={clsx(
+            'block w-full rounded-full border-2 bg-white py-2.5 pr-24 pl-5 text-sm text-ink-900',
+            'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
+            error ? 'border-red-700' : 'border-field',
+          )}
+          {...props}
+        />
+        <button
+          type="button"
+          onClick={() => setShown((v) => !v)}
+          aria-pressed={shown}
+          aria-controls={inputId}
+          className={clsx(
+            'absolute inset-y-1 right-1.5 inline-flex items-center gap-1.5 rounded-full px-3',
+            'text-xs font-semibold text-ink-700 hover:bg-brand-50 hover:text-ink-900',
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1',
+          )}
+        >
+          <svg
+            viewBox="0 0 20 20"
+            aria-hidden="true"
+            className="size-4 shrink-0 fill-none stroke-current stroke-[1.5]"
+          >
+            <path d="M1.5 10S4.9 4.5 10 4.5 18.5 10 18.5 10 15.1 15.5 10 15.5 1.5 10 1.5 10Z" />
+            <circle cx="10" cy="10" r="2.5" />
+            {shown && <path d="M3.5 16.5 16.5 3.5" strokeLinecap="round" />}
+          </svg>
+          {shown ? 'Hide' : 'Show'}
+        </button>
       </div>
       {error && <p className="mt-1.5 px-2 text-xs text-red-700">{error}</p>}
       {hint && !error && <p className="mt-1.5 px-2 text-xs text-ink-500">{hint}</p>}

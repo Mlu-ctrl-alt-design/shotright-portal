@@ -14,7 +14,23 @@ export default function Dashboard() {
   if (isLoading) return <Spinner label="Loading dashboard…" />
   if (error) return <Alert variant="danger">{error.message}</Alert>
 
-  const { stats, venues, profile } = data
+  // The fixtures always returned a complete payload, so this used to destructure
+  // straight into `stats.total` and `venues.length`. The live bench makes no
+  // such promise — a vendor with no venues can come back with no `stats` key at
+  // all — and the result was a white screen with a console error, which is the
+  // worst possible way to learn you have no venues yet.
+  //
+  // Counts are derived from `venues` when the backend omits them rather than
+  // rendered as zero, so the tiles always agree with the list underneath them.
+  const profile = data?.profile
+  const venues = data?.venues ?? []
+  const countBy = (state) => venues.filter((v) => v.workflow_state === state).length
+  const stats = data?.stats ?? {
+    total: venues.length,
+    approved: countBy('Approved'),
+    pending: countBy('Pending'),
+    rejected: countBy('Rejected'),
+  }
 
   return (
     <div className="space-y-8">

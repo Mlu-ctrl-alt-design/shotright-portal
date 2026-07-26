@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
-import { Button, Input, Alert } from '../../components/ui'
+import { Button, Input, PasswordInput, Alert } from '../../components/ui'
 import AuthLayout from '../../components/layout/AuthLayout'
 
 /**
@@ -118,10 +118,13 @@ export default function Register() {
           value={form.business_name}
           onChange={set('business_name')}
         />
+        {/* Both password fields reveal independently. Confirm-password exists to
+            catch a typo you cannot see, so being able to see it is the point —
+            and someone who checks one usually wants to check the other against
+            it. A single shared toggle would make that comparison impossible. */}
         <div>
-          <Input
+          <PasswordInput
             name="password"
-            type="password"
             autoComplete="new-password"
             aria-label="Password"
             placeholder="Please type in password"
@@ -133,9 +136,8 @@ export default function Register() {
             <p className={`mt-1.5 px-2 text-xs font-semibold ${strength.tone}`}>{strength.label}</p>
           )}
         </div>
-        <Input
+        <PasswordInput
           name="confirm_password"
-          type="password"
           autoComplete="new-password"
           aria-label="Confirm password"
           placeholder="Confirm password"

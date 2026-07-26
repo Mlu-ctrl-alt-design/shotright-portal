@@ -1,11 +1,43 @@
 # Backend integration — status and gaps
 
-**The backend exists.** The `shotright` Frappe app is deployed at
-**`shotright.thedaystar.co.za`** (not `bloop`, which earlier notes referenced).
-The portal is wired to it. This document records what is connected, what is not,
-and what has to change before `VITE_USE_MOCKS=false` is safe.
+**The backend exists and the deployed portal now uses it.** The `shotright`
+Frappe app is deployed at **`shotright.thedaystar.co.za`** (not `bloop`, which
+earlier notes referenced). This document records what is connected, what is not,
+and what still needs backend work.
 
 Source of truth: the Sho't Right API Postman collection.
+
+---
+
+## 0. Fixtures are dev-only (changed)
+
+Until this change, `VITE_USE_MOCKS` defaulted to **on** and applied in every
+environment. The Vercel deployment carried `VITE_USE_MOCKS=true`, so partners
+opening the live portal saw the invented venues in `src/services/mockBackend.js`
+— "The Rooftop, Braamfontein", "Kota King, Soweto" — as though they were their
+own listings. The demo-mode banner that had been the only signal was removed
+shortly before, on the reasonable assumption that the portal was live.
+
+The flag is now:
+
+```js
+USE_MOCKS = import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true'
+```
+
+Two changes, both deliberate:
+
+- **Gated on `DEV`.** No deployed build can select fixtures whatever the hosting
+  dashboard says. The env var in Vercel is now inert; it does not need removing,
+  though removing it is tidier.
+- **Default inverted.** It was "mocks unless explicitly off", so a missing or
+  misspelt variable silently produced fake data. It is now "real unless
+  explicitly on", so the failure mode of a missing variable is a visible
+  connection error rather than a convincing lie.
+
+`mockBackend.js` also throws if it is ever called in a production build, so a
+future rewiring mistake fails loudly instead of quietly returning fiction.
+
+To work offline: `VITE_USE_MOCKS=true npm run dev`.
 
 ---
 
@@ -81,8 +113,22 @@ Two things there matter more than the endpoints:
   appearing the moment its suggestion is approved. Otherwise approving fixes the
   vocabulary but not the venues that asked for it.
 
-`get_moods` is worth adding **even if C1 is reversed**: without it the portal's
-list is fixtures, so it can offer a partner a mood the backend will then reject.
+**Mood matching now runs against whatever list is live.** It used to match
+against fourteen hard-coded fixtures even with the real backend connected — so
+the portal could accept a mood the bench has never heard of, and `create_venue`
+would then reject the entire submission. `matchMood()` in `src/services/moods.js`
+is now a pure function of (list, text), and `getMoods()` reads the real Mood
+doctype through Frappe's generic resource API:
+
+```
+GET /api/resource/Mood?fields=["name","mood_name"]&limit_page_length=0
+```
+
+**This needs read permission on `Mood` for the Vendor role.** If the read fails
+— no permission, doctype named differently, bench down — the portal falls back
+to `FALLBACK_MOODS` in `moods.js` so the wizard keeps working, and warns to the
+console. That fallback is a guess about the bench's vocabulary, which is why
+`get_moods` is still worth adding **even if C1 is reversed**.
 
 ### 🟠 C3 — operating hours: bridged, with one loss
 
@@ -136,22 +182,45 @@ field falls back to plain text and tells the partner to drop the pin instead.
 
 ### 🟡 No delete endpoint
 
-`delete_product_item` has no counterpart in the collection, so item deletion is
-mock-only.
+`delete_product_item` has no counterpart in the collection. Deletion used to
+call the fixture unconditionally, which against the real bench meant the row
+vanished from the screen, the partner believed it was gone, and it was still on
+their menu in the customer app after a refresh — a silent no-op dressed as a
+success. It now calls `frappe.client.delete` on `Product Item`, which works if
+the Vendor role has delete permission and returns a real permission error if
+not. **Confirm the doctype name and the role permission**; the error path is
+honest either way, but a working delete is better than an honest failure.
+
+### 🟡 Dress codes and atmospheres are portal-side
+
+No lookup endpoint and no doctype to read generically — `atmosphere_desc` is
+free text on the bench, not a select. The lists live in `src/services/lookups.js`
+and are served in every environment. They are vocabulary, not partner data, so a
+local list misrepresents nothing; a Desk-managed list would still be better, so
+staff can extend it without a portal release.
 
 ---
 
-## 3. Before flipping `VITE_USE_MOCKS=false`
+## 3. Still needed from the backend
 
-- [ ] **Decide C1.** Either add mood suggestions, or reverse the decision and
-      make the mood step select-only. Today a partner can type a mood, be told it
-      saved, and find it silently absent.
-- [ ] **Add a moods list endpoint**, so the typeahead stops guessing.
+The portal is on the real bench now, so these are no longer blockers to cutover
+— they are live gaps that partners can hit.
+
+- [ ] **Decide C1.** Either add mood suggestions, or accept that the mood step is
+      effectively select-only. Today an unmatched mood is refused at entry, which
+      is honest but means a partner whose vibe is not on the list has no route in
+      beyond asking staff.
+- [ ] **Add `get_moods`**, or grant the Vendor role read on `Mood` so the
+      resource-API path works. Without either, the typeahead is guessing from
+      `FALLBACK_MOODS`.
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.
-- [ ] Confirm CORS on the bench, or rely on the Vercel proxy (below).
-- [ ] Re-run the wizard end to end against the real bench.
+- [ ] Confirm the `Product Item` doctype name and delete permission.
+- [ ] Re-run the wizard end to end against the real bench, with a real partner
+      account. **This has not been done from CI** — the build environment has no
+      outbound route to `shotright.thedaystar.co.za`, so the integration was
+      verified against a stubbed bench, not the live one.
 
 ## 4. CORS and the proxy
 

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { USE_MOCKS } from '../../services/api'
-import { Button, Input, Alert } from '../../components/ui'
+import { Button, Input, PasswordInput, Alert } from '../../components/ui'
 import AuthLayout from '../../components/layout/AuthLayout'
 
 /**
@@ -54,9 +54,8 @@ export default function Login() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <Input
+        <PasswordInput
           name="password"
-          type="password"
           autoComplete="current-password"
           aria-label="Password"
           placeholder="Please type in password"

@@ -1,6 +1,22 @@
 import axios from 'axios'
 
-export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
+/**
+ * Fixtures are a LOCAL DEVELOPMENT AFFORDANCE ONLY.
+ *
+ * Gated on `import.meta.env.DEV`, not on the env var alone. A deployed build
+ * must never be able to serve fixture data whatever is set in the hosting
+ * dashboard — that is precisely the failure this replaces: the Vercel
+ * deployment carried `VITE_USE_MOCKS=true`, so partners were shown invented
+ * venues out of `mockBackend.js` with nothing on screen to say so.
+ *
+ * The default is inverted too. It used to be "mocks unless explicitly off", so
+ * a missing or misspelt variable silently produced fake data. It is now "real
+ * unless explicitly on, and only in dev": a missing variable now fails
+ * visibly instead of lying convincingly.
+ *
+ * To use fixtures locally:  VITE_USE_MOCKS=true npm run dev
+ */
+export const USE_MOCKS = import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true'
 
 /**
  * Transport for the `shotright` Frappe app at shotright.thedaystar.co.za.

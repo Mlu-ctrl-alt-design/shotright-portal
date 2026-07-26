@@ -2,7 +2,12 @@
  * Vendor-facing API for the `shotright` Frappe app.
  *
  * Every call site the portal has is in this file, and each picks between the
- * real endpoint and an in-memory mock of the same shape (`VITE_USE_MOCKS`).
+ * real endpoint and an in-memory fixture of the same shape.
+ *
+ * ⚠️ `pick()` selects the fixture ONLY in a local dev build with
+ * `VITE_USE_MOCKS=true`. A deployed build always takes the real branch — see
+ * `USE_MOCKS` in `api.js`. It did not always work that way, and partners were
+ * shown fixture venues in production as a result.
  *
  * The real surface is documented in the Postman collection for
  * shotright.thedaystar.co.za. Three things differ from what the portal UI was
@@ -18,8 +23,10 @@
  *
  * Methods live in a flat `shotright.api.*` namespace — not `.vendor.*`.
  */
-import api, { call, callGet, USE_MOCKS, setAuthToken } from './api'
+import api, { call, callGet, USE_MOCKS, setAuthToken, hasAuthToken } from './api'
 import { mockBackend } from './mockBackend'
+import { matchMood, FALLBACK_MOODS } from './moods'
+import { VENUE_LOOKUPS } from './lookups'
 
 const pick = (real, mock) => (USE_MOCKS ? mock : real)
 
@@ -90,12 +97,20 @@ export const logout = () =>
  * There is no "who am I" endpoint. The dashboard is the cheapest authenticated
  * call that returns the profile, so it doubles as the session probe on reload:
  * if the stored token still works, we are logged in.
+ *
+ * The `hasAuthToken` check is not an optimisation. Without a token this fired
+ * an unauthenticated dashboard request on every cold load of /login, and
+ * treated ANY 200 as proof of a session — so a bench that answered without
+ * erroring would bounce a signed-out visitor into the portal with no profile
+ * behind them. No token means guest; that is answerable without a round trip.
  */
 export const getSession = () =>
   pick(
     async () => {
+      if (!hasAuthToken()) throw Object.assign(new Error('Not signed in'), { status: 401 })
       const dash = await call('shotright.api.get_vendor_dashboard')
-      return { user: dash?.profile?.email, vendor_profile: dash?.profile }
+      if (!dash?.profile) throw Object.assign(new Error('Not signed in'), { status: 401 })
+      return { user: dash.profile.email, vendor_profile: dash.profile }
     },
     () => mockBackend.getLoggedUser(),
   )()
@@ -103,29 +118,81 @@ export const getSession = () =>
 /* -------------------------------------------------------------------- moods */
 
 /**
- * GAP: the collection exposes no endpoint that lists the curated Mood list,
- * even though create_venue requires moods to come from it. Until one exists the
- * typeahead has nothing authoritative to read, so this stays on fixtures even
- * when mocks are otherwise off. Tracked in docs/BACKEND-INTEGRATION.md.
+ * The curated Mood list.
+ *
+ * GAP: the collection still exposes no `get_moods` method, even though
+ * `create_venue` requires every mood to already exist on that list. Rather than
+ * stay pinned to fixtures — which let the portal offer a partner a mood the
+ * bench would then reject, failing the whole submit — this reads the Mood
+ * doctype through Frappe's generic resource API. That needs no new backend
+ * code, only read permission for the Vendor role on Mood.
+ *
+ * If the read fails (no permission, doctype named differently, bench down) the
+ * fixture list is used so the wizard still functions, and `sourceIsFallback` is
+ * set so callers can say so rather than implying authority they don't have.
+ * A dedicated endpoint is still the right fix — `backend/mood_suggestions.py`
+ * has one ready. Tracked in docs/BACKEND-INTEGRATION.md.
  */
-export const getMoods = () => mockBackend.getMoods()
+let moodListPromise = null
+
+export const getMoods = () => {
+  // Cached for the tab. `resolveMood` calls this per typed mood, and the bulk
+  // CSV import calls it once per line — without this, importing a 200-row file
+  // would fire 200 identical requests at the bench.
+  moodListPromise ||= pick(
+    async () => {
+      try {
+        const rows = await api
+          .get('/api/resource/Mood', {
+            params: { fields: JSON.stringify(['name', 'mood_name']), limit_page_length: 0 },
+          })
+          .then((r) => r.data.data)
+        if (Array.isArray(rows) && rows.length) return rows
+        throw new Error('Mood list came back empty')
+      } catch (err) {
+        console.warn(
+          '[shotright] Could not read the live Mood list, falling back to the built-in list. ' +
+            'Moods offered here may not exist on the bench. Cause:',
+          err.message,
+        )
+        const fallback = FALLBACK_MOODS.map((m) => ({ ...m }))
+        fallback.sourceIsFallback = true
+        return fallback
+      }
+    },
+    () => mockBackend.getMoods(),
+  )()
+
+  // A failed lookup must not poison the tab — clear the cache so the next
+  // attempt retries rather than replaying the error forever.
+  return moodListPromise.catch((err) => {
+    moodListPromise = null
+    throw err
+  })
+}
 
 /**
- * GAP: no `resolve_mood` endpoint, and no Mood Suggestion doctype. Resolution
- * therefore runs locally against whatever getMoods() returned. A mood the
- * partner invents resolves to `status: 'suggested'` and is REPORTED to them,
- * but cannot be saved — createVenue drops it and tells the caller which ones
- * went. Do not "fix" that by silently sending it: create_venue rejects unknown
- * moods, which would fail the whole submit.
+ * GAP: no `resolve_mood` endpoint and no Mood Suggestion doctype, so matching
+ * happens client-side. It now runs against the list `getMoods()` actually
+ * returned — previously it matched against fourteen hard-coded fixtures even
+ * with the real backend connected, so the portal could accept a mood the bench
+ * has never heard of.
+ *
+ * An unmatched mood comes back `status: 'unmatched'` and MoodStep refuses it at
+ * the point of entry. Do not "fix" that by sending it anyway: `create_venue`
+ * rejects unknown moods and the entire submission fails.
  */
-export const resolveMood = (text) => mockBackend.resolveMood(text)
+export const resolveMood = async (text) => matchMood(await getMoods(), text)
 
 /**
- * GAP: no lookup endpoint for dress codes or atmospheres. Note the backend's
- * `atmosphere_desc` is free text, not a select, so the portal's dropdown is a
- * convenience over a text field rather than a constrained list.
+ * GAP: no lookup endpoint for dress codes or atmospheres, and no doctype to
+ * read generically — `atmosphere_desc` is free text on the bench, not a select.
+ *
+ * These are served from `lookups.js` in every environment. They are portal-side
+ * vocabulary rather than partner data, so a local list misrepresents nothing;
+ * see that file for why it is not part of the fixtures.
  */
-export const getVenueLookups = () => mockBackend.getVenueLookups()
+export const getVenueLookups = async () => VENUE_LOOKUPS
 
 /* ---------------------------------------------------------------- dashboard */
 
@@ -305,8 +372,23 @@ export const createItem = (headingId, payload) =>
     () => mockBackend.createItem(headingId, payload),
   )()
 
-/** GAP: no delete endpoint in the collection. Mock-only until one exists. */
-export const deleteItem = (itemId) => mockBackend.deleteItem(itemId)
+/**
+ * GAP: the collection has no `delete_product_item`.
+ *
+ * This used to call the mock unconditionally, which meant that against the real
+ * bench the row vanished from the screen, the partner believed it was gone, and
+ * it was still on their menu in the customer app after a refresh. A silent
+ * no-op dressed as a success is worse than no delete at all.
+ *
+ * `frappe.client.delete` is the generic fallback and works if the Vendor role
+ * has delete permission on the item doctype. If it doesn't, the partner gets a
+ * real permission error and knows the item is still there — which is the truth.
+ */
+export const deleteItem = (itemId) =>
+  pick(
+    () => call('frappe.client.delete', { doctype: 'Product Item', name: itemId }),
+    () => mockBackend.deleteItem(itemId),
+  )()
 
 export const importMenu = (venueId, rows) =>
   pick(

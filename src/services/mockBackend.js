@@ -1,61 +1,46 @@
 /**
- * In-memory stand-in for the Frappe backend.
+ * In-memory stand-in for the Frappe backend — LOCAL DEVELOPMENT ONLY.
  *
- * The Sho't Right doctypes (Vendor Profile, Venue, Venue Operating Hours,
- * Product Heading, Product Item) do not exist on the bench yet — issues #14,
- * #15 and #17 introduce them. This module lets the whole portal be built and
- * demoed now, and mirrors the exact shapes the real endpoints will return so
- * swapping `VITE_USE_MOCKS=false` is the only change needed later.
+ * ⚠️ Nothing in this file is real. The venues, profile and menus below are
+ * invented and must never reach a partner. They once did: the Vercel
+ * deployment carried `VITE_USE_MOCKS=true`, so partners were shown these
+ * venues as though they were their own, with nothing on screen to say so.
  *
- * Single swap-point, deliberately mirroring `lib/src/data/mock_data.dart` in
- * the Flutter customer app.
+ * Two things prevent a repeat. `USE_MOCKS` in `api.js` is gated on
+ * `import.meta.env.DEV`, so no deployed build selects this path whatever the
+ * hosting dashboard says; and `assertDev()` below makes an accidental call
+ * fail loudly instead of quietly returning fiction. The fixtures do still ship
+ * in the production bundle — they are dead weight, not a live path — which is
+ * why the runtime guard is here and not only in `api.js`.
+ *
+ * The shapes mirror the real `shotright.api.*` responses so the two paths stay
+ * interchangeable while working offline.
  */
-
-const delay = (ms = 220) => new Promise((resolve) => setTimeout(resolve, ms))
+import { matchMood, FALLBACK_MOODS as MOODS } from './moods'
 
 /**
- * Mood master (#20), Desk-managed.
- *
- * Conflict C1 was resolved in favour of "free text that creates suggestions":
- * a partner types whatever they like, and the backend either resolves it onto a
- * canonical Mood or records a Mood Suggestion for staff to merge. That keeps the
- * partner experience in the designs while keeping customer-facing search clean.
- *
- * `aliases` is what makes the resolution useful — "boys night" and "bn out" both
- * land on the canonical "Boys Night Out" instead of fragmenting the taxonomy.
- * Canonical names are seeded from the moods that appear in the design frames.
+ * A fixture call in a production build is a bug, not a fallback. Throwing means
+ * it surfaces as a visible error the first time it happens, rather than as
+ * plausible-looking data nobody thinks to question.
  */
-const MOODS = [
-  { name: 'MOOD-CHILLED', mood_name: 'Chilled Bar', aliases: ['chilled', 'chill', 'chilled bar'] },
-  { name: 'MOOD-BOYS', mood_name: 'Boys Night Out', aliases: ['boys night', 'boys', 'bn out'] },
-  { name: 'MOOD-GIRLS', mood_name: 'Girls Night Out', aliases: ['girls night', 'girls'] },
-  { name: 'MOOD-SPECIAL', mood_name: 'Special Occasion', aliases: ['special', 'occasion'] },
-  { name: 'MOOD-KIDDIES', mood_name: 'Kiddies Birthday', aliases: ['kiddies', 'kids birthday'] },
-  { name: 'MOOD-MOTHERS', mood_name: 'Mothers Day', aliases: ['mothers', "mother's day"] },
-  { name: 'MOOD-ROOFTOP', mood_name: 'Rooftop', aliases: ['roof top', 'roof'] },
-  { name: 'MOOD-OUTDOOR', mood_name: 'Outdoor', aliases: ['out door', 'outdoors'] },
-  { name: 'MOOD-LOCAL', mood_name: 'Local Lit', aliases: ['local', 'lit'] },
-  { name: 'MOOD-NEWINTOWN', mood_name: 'New In Town', aliases: ['new in town', 'newintown'] },
-  { name: 'MOOD-ROMANTIC', mood_name: 'Romantic', aliases: ['romance', 'date night'] },
-  { name: 'MOOD-FAMILY', mood_name: 'Family', aliases: ['family friendly', 'families'] },
-  { name: 'MOOD-CLASSY', mood_name: 'Classy', aliases: ['upmarket', 'fancy'] },
-  { name: 'MOOD-SPORTY', mood_name: 'Sports', aliases: ['sport', 'sports bar', 'game day'] },
-]
+const assertDev = () => {
+  if (!import.meta.env.DEV) {
+    throw new Error(
+      'mockBackend was called in a production build. Fixtures are dev-only — ' +
+        'this is a wiring bug, not a backend outage.',
+    )
+  }
+}
 
-/** Lowercase, collapse whitespace, drop punctuation — the comparison key. */
-export const normaliseMood = (text) =>
-  String(text || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+const delay = (ms = 220) => {
+  assertDev()
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const DAYS =['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
 const db = {
   user: null,
-  // Partner-typed moods awaiting a Desk decision (C1).
-  moodSuggestions: [],
   vendorProfile: {
     name: 'VP-0001',
     vendor_name: 'Demo Vendor',
@@ -170,89 +155,16 @@ export const mockBackend = {
   },
 
   /**
-   * Dropdown data for wizard step 2. Both lists are Desk-managed on the real
-   * bench (Frappe Link fields), so they are fetched rather than hard-coded in
-   * the view — staff can extend them without a portal release.
+   * Resolve one partner-typed mood against the fixtures.
    *
-   * Seeded from the values in `venue details filled.png` and the review screen:
-   * "Formal Wear" and "Out door laid back".
-   */
-  async getVenueLookups() {
-    await delay(80)
-    return {
-      dress_codes: [
-        'Formal Wear',
-        'Smart Casual',
-        'Casual',
-        'Traditional',
-        'Sports Wear',
-        'No Dress Code',
-      ],
-      atmospheres: [
-        'Out door laid back',
-        'Fine dining',
-        'Family friendly',
-        'Lively and loud',
-        'Quiet and intimate',
-        'Sports bar',
-      ],
-    }
-  },
-
-  /**
-   * Resolve one partner-typed mood (C1).
-   *
-   * Exact hit on a canonical name or alias links straight to that Mood.
-   * Anything else becomes a Mood Suggestion the Desk can later merge or
-   * approve — the venue still gets linked to it so the partner is never
-   * blocked, but it does not reach customer search until staff act.
-   *
-   * `near` carries the closest canonical match back to the UI so the portal can
-   * nudge ("did you mean Boys Night Out?") rather than silently fragmenting.
+   * Delegates to the shared matcher so dev behaves exactly like production —
+   * only the list differs. The Mood Suggestion branch that used to live here is
+   * gone: it invented an id and reported success for something no backend can
+   * store, which is the failure mode the mock existed to avoid.
    */
   async resolveMood(text) {
     await delay(120)
-    const key = normaliseMood(text)
-    if (!key) throw new Error('Please type a mood first.')
-
-    const canonical = MOODS.find(
-      (m) => normaliseMood(m.mood_name) === key || (m.aliases || []).some((a) => normaliseMood(a) === key),
-    )
-    if (canonical) {
-      return { status: 'canonical', mood: canonical.name, label: canonical.mood_name }
-    }
-
-    // Cheap containment check — enough to catch "boys night out party".
-    const near = MOODS.find((m) => {
-      const canonicalKey = normaliseMood(m.mood_name)
-      return canonicalKey.includes(key) || key.includes(canonicalKey)
-    })
-
-    const existing = db.moodSuggestions.find((s) => normaliseMood(s.suggested_name) === key)
-    const suggestion =
-      existing ||
-      (() => {
-        const created = {
-          name: `MOOD-SUG-${String(db.moodSuggestions.length + 1).padStart(4, '0')}`,
-          suggested_name: String(text).trim(),
-          status: 'Pending Review',
-          vendor_profile: db.vendorProfile.name,
-        }
-        db.moodSuggestions.push(created)
-        return created
-      })()
-
-    return {
-      status: 'suggested',
-      mood: suggestion.name,
-      label: suggestion.suggested_name,
-      near: near ? { mood: near.name, label: near.mood_name } : null,
-    }
-  },
-
-  async getMoodSuggestions() {
-    await delay(60)
-    return db.moodSuggestions
+    return matchMood(MOODS, text)
   },
 
   async getDashboard() {
