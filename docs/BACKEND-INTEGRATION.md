@@ -110,11 +110,17 @@ none of which the endpoint takes. All dropped, with a warning.
 ### ✅ Coordinates — closed
 
 The wizard collects an **address** while the API wants **latitude/longitude**.
-That gap is now closed by the map picker on step 2 (`MapPicker.jsx`), which
-offers three routes to a point: geocode the typed address via Nominatim, click
-or drag on the map, or type the numbers directly. The third is the accessible
-path — a map cannot be operated from a keyboard — so the numeric fields are real
-labelled inputs, not a hidden fallback.
+That gap is now closed at the point the address is entered. The Address field is
+an autocomplete (`AddressAutocomplete.jsx`) backed by Nominatim: **picking a
+suggestion sets the address and its coordinates in one action**, so the step a
+partner was most likely to skip no longer exists as a separate step.
+
+Two more routes remain for anything the geocoder does not know — common enough
+for new developments and informal addresses — via `MapPicker.jsx`: click or drag
+the pin, or type the numbers. The last is the accessible path; a map cannot be
+operated from a keyboard, so those are real labelled inputs rather than a hidden
+fallback. The autocomplete itself is a full ARIA combobox (arrow keys, Enter,
+Escape, `aria-activedescendant`).
 
 A partner can still clear the fields by hand, so `createVenue` warns when
 coordinates are missing. Silence there would mean a venue that looks saved and
@@ -122,9 +128,11 @@ is permanently invisible to radius search.
 
 **Runtime note:** tiles and geocoding come from `openstreetmap.org` and
 `nominatim.openstreetmap.org`. No API key, but if a CSP is ever added to the
-portal it must allow those hosts or the map goes blank while the rest of the
-page looks healthy. Nominatim also asks for courteous use — one geocode per
-button press, which is what this does.
+portal it must allow those hosts or the map and suggestions die while the rest
+of the page looks healthy. Nominatim's usage policy asks for at most one request
+per second — the autocomplete debounces at 500ms and aborts in-flight requests,
+so do not lower that or fire per keystroke. A geocoder outage is handled: the
+field falls back to plain text and tells the partner to drop the pin instead.
 
 ### 🟡 No delete endpoint
 

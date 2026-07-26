@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { useVenueLookups } from '../../../../hooks/useVendor'
 import { Input, Select } from '../../../../components/ui'
 import Spinner from '../../../../components/ui/Spinner'
+import AddressAutocomplete from '../../../../components/ui/AddressAutocomplete'
 
 /**
  * TipTap pulls in ProseMirror, which roughly doubles the bundle. Loading it
@@ -33,15 +34,6 @@ const MapPicker = lazy(() => import('../../../../components/ui/MapPicker'))
  * prompt. Each one keeps an aria-label so the form is still navigable by screen
  * reader, where a placeholder alone would not be announced reliably.
  */
-function PinIcon() {
-  return (
-    <svg viewBox="0 0 20 20" className="size-4 fill-none stroke-current stroke-[1.75]">
-      <path d="M10 18s6-5.2 6-9.4A6 6 0 004 8.6C4 12.8 10 18 10 18z" strokeLinejoin="round" />
-      <circle cx="10" cy="8.5" r="2.25" />
-    </svg>
-  )
-}
-
 export default function VenueDetailsStep({ value, onChange }) {
   const { data: lookups, isLoading } = useVenueLookups()
   const set = (key) => (e) => onChange({ ...value, [key]: e.target.value })
@@ -80,12 +72,9 @@ export default function VenueDetailsStep({ value, onChange }) {
           value={value.contact_number}
           onChange={set('contact_number')}
         />
-        <Input
-          aria-label="Address"
-          placeholder="Please type in your venue address"
+        <AddressAutocomplete
           value={value.address}
-          onChange={set('address')}
-          trailing={<PinIcon />}
+          onChange={(patch) => onChange({ ...value, ...patch })}
         />
 
         <Select

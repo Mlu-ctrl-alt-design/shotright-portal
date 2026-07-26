@@ -14,9 +14,9 @@ import { Button, Input, Alert } from './index'
  * Geocoding uses Nominatim, OSM's free service.
  *
  * THREE WAYS IN, deliberately:
- *   1. Search the address (uses what the partner already typed on this step)
- *   2. Click or drag on the map
- *   3. Type the numbers directly
+ *   1. Picking a suggestion in the Address field above (which geocodes it)
+ *   2. Clicking or dragging on the map
+ *   3. Typing the numbers directly
  *
  * (3) is not a fallback for the impatient — it is the accessible path. A map is
  * irreducibly visual and drag-to-place cannot be done from a keyboard, so the
@@ -45,7 +45,7 @@ const PIN = L.divIcon({
 // Johannesburg — a sensible opening view for a South African product.
 const DEFAULT_CENTER = [-26.2041, 28.0473]
 
-export default function MapPicker({ latitude, longitude, address, onChange }) {
+export default function MapPicker({ latitude, longitude, onChange }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
@@ -123,40 +123,6 @@ export default function MapPicker({ latitude, longitude, address, onChange }) {
     map.panTo(latlng)
   }, [latitude, longitude, hasPoint])
 
-  /** Geocode whatever the partner typed as the venue address. */
-  const findAddress = async () => {
-    if (!address?.trim()) {
-      setStatus({ tone: 'warning', text: 'Add the venue address above first, then search for it.' })
-      return
-    }
-    setBusy(true)
-    setStatus(null)
-    try {
-      const url =
-        'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=za&q=' +
-        encodeURIComponent(address)
-      const results = await fetch(url, { headers: { Accept: 'application/json' } }).then((r) => {
-        if (!r.ok) throw new Error(`Address lookup failed (${r.status}).`)
-        return r.json()
-      })
-      if (!results.length) {
-        setStatus({
-          tone: 'warning',
-          text: 'Could not find that address. Drop the pin on the map instead.',
-        })
-        return
-      }
-      const { lat, lon, display_name } = results[0]
-      onChange({ latitude: Number(Number(lat).toFixed(6)), longitude: Number(Number(lon).toFixed(6)) })
-      mapRef.current?.setView([Number(lat), Number(lon)], 17)
-      setStatus({ tone: 'success', text: `Found: ${display_name}. Drag the pin if it is not exact.` })
-    } catch (err) {
-      setStatus({ tone: 'warning', text: `${err.message} Drop the pin on the map instead.` })
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const useMyLocation = () => {
     if (!navigator.geolocation) {
       setStatus({ tone: 'warning', text: 'This browser cannot share your location.' })
@@ -192,15 +158,12 @@ export default function MapPicker({ latitude, longitude, address, onChange }) {
       <div>
         <h2 className="text-lg font-bold text-ink-900">Where is your venue?</h2>
         <p className="mt-0.5 text-sm text-ink-700">
-          Customers find venues near them, so this pin is how your venue gets discovered. Search
-          your address, click the map, or type the coordinates.
+          Customers find venues near them, so this pin is how your venue gets discovered. Picking
+          an address above drops it for you — drag it if it is not exact.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="secondary" onClick={findAddress} loading={busy} type="button">
-          Find my address
-        </Button>
         <Button variant="ghost" onClick={useMyLocation} type="button">
           Use my current location
         </Button>
