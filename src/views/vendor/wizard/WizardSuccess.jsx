@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Button } from '../../../components/ui'
+import { Button, Alert } from '../../../components/ui'
 
 /**
  * Shown after SUBMIT (`venue added success.png`).
@@ -8,7 +8,7 @@ import { Button } from '../../../components/ui'
  * tour needs someone to visit the venue, and the designs set that expectation
  * here. Do not soften it without also changing whatever ops process backs it.
  */
-export default function WizardSuccess({ venueName, onAddAnother }) {
+export default function WizardSuccess({ venueName, warnings = [], onAddAnother }) {
   return (
     <div className="rounded-3xl border border-brand-300 bg-white p-10 text-center">
       <span className="mx-auto grid size-16 place-items-center rounded-full bg-green-50">
@@ -26,6 +26,19 @@ export default function WizardSuccess({ venueName, onAddAnother }) {
         A Bloop representative will contact you to set up your venue&rsquo;s visual tour. Until the
         review is done you&rsquo;ll find this venue under <strong>Pending</strong>.
       </p>
+
+      {/* Anything the backend could not accept is said plainly here. A partner
+          who typed a mood or set public-holiday hours must not be left assuming
+          it saved — a silent drop is worse than an inconvenient truth. */}
+      {warnings.length > 0 && (
+        <div className="mx-auto mt-6 max-w-lg space-y-2 text-left">
+          {warnings.map((w) => (
+            <Alert key={w} variant="warning">
+              {w}
+            </Alert>
+          ))}
+        </div>
+      )}
 
       <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
         <Button variant="secondary" onClick={onAddAnother}>

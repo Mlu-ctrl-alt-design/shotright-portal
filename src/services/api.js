@@ -2,43 +2,79 @@ import axios from 'axios'
 
 export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
 
+/**
+ * Transport for the `shotright` Frappe app at shotright.thedaystar.co.za.
+ *
+ * AUTH IS TOKEN-BASED, NOT COOKIE-BASED. `shotright.api.login` returns a
+ * reusable `api_key`/`api_secret` pair, sent on every later request as
+ *
+ *     Authorization: token <api_key>:<api_secret>
+ *
+ * That is a different model to a normal Frappe portal, and it has consequences
+ * worth stating rather than discovering later:
+ *
+ *  - No session cookie, so no CSRF token and no SameSite problem. The
+ *    `Domain=` attribute risk called out in the deployment notes does not apply.
+ *  - The credential is a long-lived bearer secret. It lives in sessionStorage,
+ *    not localStorage, so it dies with the tab rather than persisting on a
+ *    shared machine. It is still readable by any script on the origin — the
+ *    real mitigation is that the portal ships no third-party scripts and has a
+ *    strict CSP. Treat introducing either as a security change.
+ *  - "Remember me" cannot be honoured across a browser restart without moving
+ *    the secret to localStorage. It currently persists for the tab only.
+ */
 const api = axios.create({
-  // Empty in dev so calls are same-origin and ride the Vite proxy.
+  // Empty in dev so calls are same-origin and ride the Vite proxy; empty in
+  // production too, because vercel.json proxies /api to the bench.
   baseURL: import.meta.env.VITE_API_BASE || '',
-  // Frappe portals authenticate with a session cookie, not a bearer token —
-  // this is what actually carries the login between requests.
-  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Frappe requires a CSRF token on write requests. It is injected into the page
-// as `window.csrf_token` when Frappe serves the HTML — which it does NOT do for
-// a decoupled SPA, so we also accept one captured at login and stored here.
-let csrfToken = null
-export const setCsrfToken = (token) => {
-  csrfToken = token || null
+const TOKEN_KEY = 'shotright.token'
+
+let authToken = null
+try {
+  authToken = JSON.parse(sessionStorage.getItem(TOKEN_KEY) || 'null')
+} catch {
+  authToken = null
 }
 
+/** Store `{api_key, api_secret}` (or null to sign out). */
+export const setAuthToken = (token) => {
+  authToken = token && token.api_key && token.api_secret ? token : null
+  try {
+    if (authToken) sessionStorage.setItem(TOKEN_KEY, JSON.stringify(authToken))
+    else sessionStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // Private-mode Safari throws on write; the in-memory copy still works for
+    // this tab, so a failure here must not break login.
+  }
+}
+
+export const getAuthToken = () => authToken
+export const hasAuthToken = () => Boolean(authToken)
+
 api.interceptors.request.use((config) => {
-  const token = csrfToken || window.csrf_token
-  if (token && config.method !== 'get') {
-    config.headers['X-Frappe-CSRF-Token'] = token
+  if (authToken) {
+    config.headers.Authorization = `token ${authToken.api_key}:${authToken.api_secret}`
   }
   return config
 })
 
 /**
- * Frappe reports auth failures as 401/403, and a stale CSRF token as 417.
- * Anything in that set means the session is no longer usable, so we clear it
- * and let the router bounce the user to /login rather than leaving the UI
- * stuck on a permanently-failing query.
+ * 401/403 means the token is no longer usable. Drop it and let the router bounce
+ * to /login rather than leaving the UI stuck on a permanently-failing query.
+ *
+ * 417 is Frappe's ValidationError status — a real, actionable error (for
+ * example the Surprise Me rate limit), NOT an auth failure. It must not clear
+ * the token.
  */
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status
-    if ([401, 403, 417].includes(status) && !window.location.pathname.startsWith('/login')) {
-      csrfToken = null
+    if ([401, 403].includes(status) && !window.location.pathname.startsWith('/login')) {
+      setAuthToken(null)
       window.dispatchEvent(new CustomEvent('shotright:session-expired'))
     }
     return Promise.reject(normalizeError(error))
@@ -52,10 +88,9 @@ api.interceptors.response.use(
  */
 export function normalizeError(error) {
   const data = error.response?.data
-  let message =
-    data?._server_messages
-      ? safeFirstServerMessage(data._server_messages)
-      : data?.message || data?.exc_type || error.message
+  let message = data?._server_messages
+    ? safeFirstServerMessage(data._server_messages)
+    : data?.message || data?.exc_type || error.message
 
   if (!message) message = 'Something went wrong. Please try again.'
   const normalized = new Error(message)
@@ -74,7 +109,7 @@ function safeFirstServerMessage(raw) {
   }
 }
 
-/** Call a whitelisted Frappe method. Frappe wraps results in `message`. */
+/** Call a whitelisted method. Frappe wraps the return value in `message`. */
 export const call = (method, params = {}, config = {}) =>
   api.post(`/api/method/${method}`, params, config).then((r) => r.data.message)
 

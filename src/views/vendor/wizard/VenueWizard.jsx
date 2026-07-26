@@ -81,13 +81,9 @@ export default function VenueWizard() {
     atmosphere: details.atmosphere,
     summary: details.summary,
     moods: moods.moods.map((m) => ({ mood: m.mood, status: m.status, label: m.label })),
-    operating_hours: {
-      days: hours.days,
-      weekend_starts_friday: hours.weekendStartsFriday,
-      weekday: hours.weekday,
-      weekend: hours.weekend,
-      public_holiday: hours.publicHoliday,
-    },
+    // Passed raw: the service layer converts these three ranges into the
+    // per-day rows the backend stores (C3), and reports what it had to drop.
+    operating_hours: hours,
     menu: menu.categories.map((c) => ({
       heading: c.name,
       items: c.items.map((i) => ({
@@ -107,9 +103,9 @@ export default function VenueWizard() {
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const venue = await createVenue.mutateAsync(buildPayload())
+      const { venue, warnings } = await createVenue.mutateAsync(buildPayload())
       markComplete(currentIndex)
-      setCreated(venue)
+      setCreated({ venue, warnings })
     } catch (err) {
       setSubmitError(err.message)
     } finally {
@@ -137,7 +133,13 @@ export default function VenueWizard() {
   }
 
   if (created) {
-    return <WizardSuccess venueName={created.venue_name} onAddAnother={restart} />
+    return (
+      <WizardSuccess
+        venueName={created.venue?.venue_name ?? details.venue_name}
+        warnings={created.warnings}
+        onAddAnother={restart}
+      />
+    )
   }
 
   const COPY = {

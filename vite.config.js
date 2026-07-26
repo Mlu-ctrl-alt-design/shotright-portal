@@ -9,7 +9,7 @@ import tailwindcss from '@tailwindcss/vite'
 // the static host's rewrite rules) must forward /api to the bench instead.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const target = env.VITE_FRAPPE_URL || 'https://bloop.thedaystar.co.za'
+  const target = env.VITE_FRAPPE_URL || 'https://shotright.thedaystar.co.za'
 
   return {
     plugins: [react(), tailwindcss()],

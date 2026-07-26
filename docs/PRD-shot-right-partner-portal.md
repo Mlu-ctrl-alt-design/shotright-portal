@@ -39,7 +39,7 @@ we settle them before anyone writes more code.
 Sho't Right helps people in South Africa find places to eat and drink based on
 the **mood** they are in — "Boys Night Out", "Kiddies Birthday", "Chilled Bar",
 "Local Lit". The customer app (Flutter) is already scaffolded. The Frappe/ERPNext
-backend runs at `bloop.thedaystar.co.za`.
+backend runs at `shotright.thedaystar.co.za`.
 
 But the app is empty without venues. Right now there is **no way for a restaurant
 owner to add their own venue**. Someone on the Sho't Right team would have to
@@ -321,7 +321,7 @@ is a first-class part of the navigation, not a badge on a list.
 - **Frontend:** React SPA, hosted separately from the bench, talking to Frappe
   over cookie-authenticated JSON. (Decision already taken: decoupled React, not a
   Vue web resource on the bench.)
-- **Backend:** Frappe / ERPNext at `bloop.thedaystar.co.za`.
+- **Backend:** Frappe / ERPNext at `shotright.thedaystar.co.za`.
 - **Approvals:** handled by staff in the ERPNext Desk. We do **not** build an
   admin UI in React.
 - **Rich text:** needs an editor component; plain textareas will not satisfy F3 or F5.

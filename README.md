@@ -2,7 +2,7 @@
 
 Decoupled **React SPA** where restaurant and bar owners list their venue on the
 Sho't Right (Bloop) app. Talks to the Frappe/ERPNext backend at
-`bloop.thedaystar.co.za` over cookie-authenticated JSON.
+`shotright.thedaystar.co.za` over cookie-authenticated JSON.
 
 This repo is one of three surfaces:
 
@@ -10,7 +10,7 @@ This repo is one of three surfaces:
 |---|---|
 | **Partner Portal (this repo)** | `Mlu-ctrl-alt-design/shotright-portal` |
 | Customer app (Flutter) | `Mlu-ctrl-alt-design/shotright` |
-| Admin | Frappe Desk at `bloop.thedaystar.co.za/app` — deliberately not rebuilt in React |
+| Admin | Frappe Desk at `shotright.thedaystar.co.za/app` — deliberately not rebuilt in React |
 
 ## Status
 
@@ -26,15 +26,17 @@ submitted venue.
 | 4. Your menu options | ✅ Categories, items with photos, per-category Excel import (conflict C4) |
 | 5. Almost done | ✅ Read-only review, then SUBMIT |
 
-**The backend does not exist yet.** None of the Sho't Right doctypes are on the
-bench, so the portal ships with `VITE_USE_MOCKS=true` and runs end-to-end on
-in-memory fixtures. Every Frappe integration point is isolated in
-`src/services/vendor.js`, which picks between the real endpoint and the mock per
-call — flipping the flag is the only change needed once the app is installed.
+**The backend is live** at `shotright.thedaystar.co.za` and the portal is wired
+to it — token auth, real method names, real payload shapes. It still ships with
+`VITE_USE_MOCKS=true`, because several things a partner can enter have nowhere
+to be stored yet: partner-authored moods, venue coordinates, menu photos, and
+most of the venue detail fields. The portal warns the partner about each drop on
+submit rather than failing silently, but the gaps need closing before the flag
+flips. See [`docs/BACKEND-INTEGRATION.md`](docs/BACKEND-INTEGRATION.md) §2.
 
 Two things the backend must enforce, since the client cannot: sanitising the
 rich-text HTML before the customer app renders it, and the image type and size
-limits on menu photo uploads.
+limits on uploads.
 
 Still to design (see the PRD §7.5): the Settings screen, and the path back for a
 partner whose venue is declined.

@@ -62,8 +62,11 @@ export default function Register() {
     setBusy(true)
     setError(null)
     try {
+      // The backend takes first and last name separately, which is exactly what
+      // this form collects — the earlier join into one vendor_name is gone.
       await register({
-        vendor_name: `${form.first_name} ${form.surname}`.trim(),
+        first_name: form.first_name,
+        last_name: form.surname,
         business_name: form.business_name,
         email: form.email,
         password: form.password,
