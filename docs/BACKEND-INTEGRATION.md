@@ -97,10 +97,24 @@ will never appear in the customer app. Dropped, with a warning.
 name, manager surname, contact number, address and the rich-text description** —
 none of which the endpoint takes. All dropped, with a warning.
 
-Note also that the wizard collects an **address** while the API wants
-**latitude/longitude**. Nothing geocodes between the two, so venues currently
-submit without coordinates — which matters, because `find_venues` is a radius
-search. **A venue with no coordinates will not be discoverable.**
+### ✅ Coordinates — closed
+
+The wizard collects an **address** while the API wants **latitude/longitude**.
+That gap is now closed by the map picker on step 2 (`MapPicker.jsx`), which
+offers three routes to a point: geocode the typed address via Nominatim, click
+or drag on the map, or type the numbers directly. The third is the accessible
+path — a map cannot be operated from a keyboard — so the numeric fields are real
+labelled inputs, not a hidden fallback.
+
+A partner can still clear the fields by hand, so `createVenue` warns when
+coordinates are missing. Silence there would mean a venue that looks saved and
+is permanently invisible to radius search.
+
+**Runtime note:** tiles and geocoding come from `openstreetmap.org` and
+`nominatim.openstreetmap.org`. No API key, but if a CSP is ever added to the
+portal it must allow those hosts or the map goes blank while the rest of the
+page looks healthy. Nominatim also asks for courteous use — one geocode per
+button press, which is what this does.
 
 ### 🟡 No delete endpoint
 
@@ -115,9 +129,6 @@ mock-only.
       make the mood step select-only. Today a partner can type a mood, be told it
       saved, and find it silently absent.
 - [ ] **Add a moods list endpoint**, so the typeahead stops guessing.
-- [ ] **Resolve coordinates.** Either geocode the address server-side on
-      `create_venue`, or add a map picker to the wizard. Without this new venues
-      are invisible to radius search.
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.

@@ -29,7 +29,7 @@ submitted venue.
 **The backend is live** at `shotright.thedaystar.co.za` and the portal is wired
 to it — token auth, real method names, real payload shapes. It still ships with
 `VITE_USE_MOCKS=true`, because several things a partner can enter have nowhere
-to be stored yet: partner-authored moods, venue coordinates, menu photos, and
+to be stored yet: partner-authored moods, menu photos, and
 most of the venue detail fields. The portal warns the partner about each drop on
 submit rather than failing silently, but the gaps need closing before the flag
 flips. See [`docs/BACKEND-INTEGRATION.md`](docs/BACKEND-INTEGRATION.md) §2.

@@ -223,6 +223,18 @@ export const createVenue = (payload) =>
         )
       }
 
+      // Coordinates are not optional in practice: find_venues is a radius
+      // search, so a venue without them is invisible to customers. The wizard's
+      // map picker makes this hard to hit, but a partner can still clear the
+      // fields by hand, and a silent invisible listing is the worst outcome
+      // here — worse than a noisy warning.
+      if (!Number.isFinite(payload.latitude) || !Number.isFinite(payload.longitude)) {
+        warnings.push(
+          'No map location was set, so this venue will not appear when customers search near ' +
+            'them. Edit the venue and drop the pin to fix it.',
+        )
+      }
+
       const venue = await call('shotright.api.create_venue', {
         venue_name: payload.venue_name,
         latitude: payload.latitude ?? null,

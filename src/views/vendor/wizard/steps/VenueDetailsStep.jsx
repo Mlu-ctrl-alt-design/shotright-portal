@@ -12,6 +12,12 @@ import Spinner from '../../../../components/ui/Spinner'
 const RichTextEditor = lazy(() => import('../../../../components/ui/RichTextEditor'))
 
 /**
+ * Leaflet plus its CSS is another ~150kB. Same treatment as the editor: it only
+ * loads when a partner actually reaches this step.
+ */
+const MapPicker = lazy(() => import('../../../../components/ui/MapPicker'))
+
+/**
  * Wizard step 2 — venue details.
  *
  * Field order and grouping follow `venue details filled.png`: the venue name on
@@ -112,7 +118,22 @@ export default function VenueDetailsStep({ value, onChange }) {
 
       <Suspense
         fallback={
-          <div className="grid min-h-56 place-items-center rounded-3xl border-2 border-brand-500">
+          <div className="grid min-h-80 place-items-center rounded-3xl border-2 border-brand-edge">
+            <Spinner label="Loading map…" />
+          </div>
+        }
+      >
+        <MapPicker
+          latitude={value.latitude}
+          longitude={value.longitude}
+          address={value.address}
+          onChange={({ latitude, longitude }) => onChange({ ...value, latitude, longitude })}
+        />
+      </Suspense>
+
+      <Suspense
+        fallback={
+          <div className="grid min-h-56 place-items-center rounded-3xl border-2 border-brand-edge">
             <Spinner label="Loading editor…" />
           </div>
         }
