@@ -84,6 +84,13 @@ export const resolveMood = (text) =>
     () => mockBackend.resolveMood(text),
   )()
 
+/** Dropdown data for the venue details step — dress codes and atmospheres. */
+export const getVenueLookups = () =>
+  pick(
+    () => callGet('shotright.api.vendor.get_venue_lookups'),
+    () => mockBackend.getVenueLookups(),
+  )()
+
 /* ----------------------------------------------------------- dashboard (#18) */
 
 export const getDashboard = () =>

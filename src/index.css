@@ -73,3 +73,50 @@ input[type='time']::-webkit-calendar-picker-indicator {
   opacity: 0;
   cursor: pointer;
 }
+
+/* Rich-text editor content (RichTextEditor.jsx).
+
+   Tailwind's reset flattens headings, lists and blockquotes to plain text, so
+   inside the editor they would be indistinguishable from a paragraph — the
+   author would apply a heading and see nothing happen. These rules restore just
+   enough structure to make formatting legible while editing, and mirror how the
+   sample copy reads in `venue details filled.png`. */
+.prose-editor :where(h1, h2, h3) {
+  @apply mt-4 mb-1 font-bold text-ink-900;
+}
+.prose-editor h1 {
+  @apply text-lg;
+}
+.prose-editor h2 {
+  @apply text-base;
+}
+.prose-editor h3 {
+  @apply text-sm;
+}
+.prose-editor :where(h1, h2, h3):first-child {
+  @apply mt-0;
+}
+.prose-editor p {
+  @apply mb-2 leading-relaxed;
+}
+.prose-editor p:last-child {
+  @apply mb-0;
+}
+.prose-editor ul {
+  @apply mb-2 list-disc pl-5;
+}
+.prose-editor ol {
+  @apply mb-2 list-decimal pl-5;
+}
+.prose-editor blockquote {
+  @apply my-2 border-l-4 border-brand-300 pl-3 text-ink-700 italic;
+}
+.prose-editor a {
+  @apply text-brand-700 underline;
+}
+.prose-editor code {
+  @apply rounded bg-canvas px-1 py-0.5 font-mono text-xs;
+}
+.prose-editor hr {
+  @apply my-3 border-t border-brand-200;
+}

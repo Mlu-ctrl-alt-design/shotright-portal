@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import WizardLayout from '../../../components/wizard/WizardLayout'
 import MoodStep from './steps/MoodStep'
+import VenueDetailsStep from './steps/VenueDetailsStep'
 import OperatingHoursStep from './steps/OperatingHoursStep'
 import PendingStep from './steps/PendingStep'
 
@@ -22,6 +23,17 @@ const STEPS = [
   { key: 'review', label: 'Almost done' },
 ]
 
+const INITIAL_DETAILS = {
+  venue_name: '',
+  manager_name: '',
+  manager_surname: '',
+  contact_number: '',
+  address: '',
+  dress_code: '',
+  atmosphere: '',
+  summary: '',
+}
+
 const INITIAL_HOURS = {
   days: ['mon', 'tue', 'wed', 'thu', 'fri'],
   weekendStartsFriday: false,
@@ -35,6 +47,7 @@ export default function VenueWizard() {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [completed, setCompleted] = useState([])
   const [moods, setMoods] = useState({ moods: [] })
+  const [details, setDetails] = useState(INITIAL_DETAILS)
   const [hours, setHours] = useState(INITIAL_HOURS)
 
   const step = STEPS[currentIndex]
@@ -85,13 +98,7 @@ export default function VenueWizard() {
       case 'mood':
         return <MoodStep value={moods} onChange={setMoods} />
       case 'details':
-        return (
-          <PendingStep
-            blockedBy="a rich-text editor dependency"
-            summary="Venue name, manager name and surname, cellphone, dress code and address are straightforward, but the venue description is a rich-text field with a formatting toolbar. Pick an editor before building this step."
-            screens={['venue details.png', 'venue details filled.png']}
-          />
-        )
+        return <VenueDetailsStep value={details} onChange={setDetails} />
       case 'menu':
         return (
           <PendingStep

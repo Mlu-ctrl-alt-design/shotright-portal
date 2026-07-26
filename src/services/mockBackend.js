@@ -156,6 +156,36 @@ export const mockBackend = {
   },
 
   /**
+   * Dropdown data for wizard step 2. Both lists are Desk-managed on the real
+   * bench (Frappe Link fields), so they are fetched rather than hard-coded in
+   * the view — staff can extend them without a portal release.
+   *
+   * Seeded from the values in `venue details filled.png` and the review screen:
+   * "Formal Wear" and "Out door laid back".
+   */
+  async getVenueLookups() {
+    await delay(80)
+    return {
+      dress_codes: [
+        'Formal Wear',
+        'Smart Casual',
+        'Casual',
+        'Traditional',
+        'Sports Wear',
+        'No Dress Code',
+      ],
+      atmospheres: [
+        'Out door laid back',
+        'Fine dining',
+        'Family friendly',
+        'Lively and loud',
+        'Quiet and intimate',
+        'Sports bar',
+      ],
+    }
+  },
+
+  /**
    * Resolve one partner-typed mood (C1).
    *
    * Exact hit on a canonical name or alias links straight to that Mood.

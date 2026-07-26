@@ -8,9 +8,19 @@ export const useDashboard = () =>
 
 /* ------------------------------------------------------------------ moods */
 
-// Curated and Desk-managed — safe to cache hard.
+// Canonical list is Desk-managed — safe to cache hard.
 export const useMoods = () =>
   useQuery({ queryKey: ['moods'], queryFn: vendorApi.getMoods, staleTime: 5 * 60 * 1000 })
+
+/* ---------------------------------------------------------------- lookups */
+
+// Dress codes and atmospheres, also Desk-managed — cache just as hard.
+export const useVenueLookups = () =>
+  useQuery({
+    queryKey: ['venue-lookups'],
+    queryFn: vendorApi.getVenueLookups,
+    staleTime: 5 * 60 * 1000,
+  })
 
 /* ----------------------------------------------------------------- venues */
 

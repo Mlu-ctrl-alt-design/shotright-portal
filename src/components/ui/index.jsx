@@ -120,17 +120,27 @@ export function Select({ label, error, className, id, children, ...props }) {
           {label}
         </label>
       )}
-      <select
-        id={inputId}
-        className={clsx(
-          'block w-full appearance-none rounded-full border-2 bg-white px-5 py-2.5 text-sm text-ink-900',
-          'focus:outline-none focus:ring-2 focus:ring-brand-300',
-          error ? 'border-red-500' : 'border-brand-500',
-        )}
-        {...props}
-      >
-        {children}
-      </select>
+      {/* appearance-none strips the native arrow, so the chevron the designs
+          show has to be drawn back in. */}
+      <div className="relative">
+        <select
+          id={inputId}
+          className={clsx(
+            'block w-full appearance-none rounded-full border-2 bg-white py-2.5 pr-11 pl-5 text-sm text-ink-900',
+            'focus:outline-none focus:ring-2 focus:ring-brand-300',
+            'disabled:cursor-not-allowed disabled:opacity-60',
+            error ? 'border-red-500' : 'border-brand-500',
+          )}
+          {...props}
+        >
+          {children}
+        </select>
+        <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-500">
+          <svg viewBox="0 0 14 8" className="h-2 w-3.5 fill-none stroke-current stroke-2">
+            <path d="M1 1l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      </div>
       {error && <p className="mt-1.5 px-2 text-xs text-red-600">{error}</p>}
     </div>
   )
