@@ -66,7 +66,7 @@ function ColourControl({ label, value, onPick, onClear, glyph }) {
         </svg>
       </span>
       {/* Hover/focus popover — no portal needed, the toolbar is the last row. */}
-      <span className="invisible absolute bottom-full left-0 z-20 mb-1 flex gap-1 rounded-xl border-2 border-brand-edge bg-white p-2 opacity-0 shadow-lg transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+      <span className="invisible absolute bottom-full left-0 z-20 mb-1 flex gap-1 rounded-xl border-2 border-field bg-white p-2 opacity-0 shadow-lg transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
         {SWATCHES.map((c) => (
           <button
             key={c}
@@ -141,7 +141,7 @@ export default function RichTextEditor({ value, onChange, placeholder, ariaLabel
   const chain = () => editor.chain().focus()
 
   return (
-    <div className="overflow-hidden rounded-3xl border-2 border-brand-edge bg-white focus-within:ring-2 focus-within:ring-brand-300">
+    <div className="overflow-hidden rounded-3xl border-2 border-field bg-white focus-within:border-brand-edge">
       {editor.isEmpty && placeholder && (
         <p className="px-5 pt-4 text-sm text-ink-500 italic">{placeholder}</p>
       )}

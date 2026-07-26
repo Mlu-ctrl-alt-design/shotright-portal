@@ -34,7 +34,7 @@ export function Button({
     // Solid yellow pill — NEXT, SUBMIT, ADD, Login.
     primary: 'bg-brand-500 text-ink-900 shadow-sm hover:bg-brand-600',
     // White pill with a yellow border — PREVIOUS.
-    secondary: 'bg-white text-brand-ink ring-2 ring-inset ring-brand-edge hover:bg-brand-50',
+    secondary: 'bg-white text-brand-ink ring-2 ring-inset ring-field hover:bg-brand-50',
     // Bare yellow text — CANCEL, View all, Expand.
     ghost: 'text-brand-ink hover:text-brand-900',
     danger: 'bg-red-700 text-white shadow-sm hover:bg-red-800',
@@ -88,14 +88,14 @@ export function Input({ label, error, hint, className, id, trailing, ...props })
           id={inputId}
           className={clsx(
             'block w-full rounded-full border-2 bg-white px-5 py-2.5 text-sm text-ink-900',
-            'placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-brand-300',
+            'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
             trailing && 'pr-11',
-            error ? 'border-red-700' : 'border-brand-edge',
+            error ? 'border-red-700' : 'border-field',
           )}
           {...props}
         />
         {trailing && (
-          <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-ink">
+          <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-ink-500">
             {trailing}
           </span>
         )}
@@ -125,15 +125,15 @@ export function Select({ label, error, className, id, children, ...props }) {
           id={inputId}
           className={clsx(
             'block w-full appearance-none rounded-full border-2 bg-white py-2.5 pr-11 pl-5 text-sm text-ink-900',
-            'focus:outline-none focus:ring-2 focus:ring-brand-300',
+            'focus:border-brand-edge focus:outline-none',
             'disabled:cursor-not-allowed disabled:opacity-60',
-            error ? 'border-red-700' : 'border-brand-edge',
+            error ? 'border-red-700' : 'border-field',
           )}
           {...props}
         >
           {children}
         </select>
-        <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-ink">
+        <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-ink-500">
           <svg viewBox="0 0 14 8" className="h-2 w-3.5 fill-none stroke-current stroke-2">
             <path d="M1 1l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -160,8 +160,8 @@ export function Textarea({ label, error, className, id, ...props }) {
         rows={3}
         className={clsx(
           'block w-full rounded-3xl border-2 bg-white px-5 py-3 text-sm text-ink-900',
-          'placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-brand-300',
-          error ? 'border-red-700' : 'border-brand-edge',
+          'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
+          error ? 'border-red-700' : 'border-field',
         )}
         {...props}
       />
@@ -182,7 +182,7 @@ export function MoodPill({ children, onRemove, variant = 'canonical', className 
   // an override class silently loses (white text on a white pill).
   const variants = {
     canonical: 'bg-deep-500 text-ink-900',
-    suggested: 'bg-white text-brand-ink ring-2 ring-inset ring-brand-edge',
+    suggested: 'bg-white text-brand-ink ring-2 ring-inset ring-field',
   }
   return (
     <span
@@ -222,7 +222,7 @@ export function DayChip({ label, selected, onClick }) {
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600',
         selected
           ? 'bg-brand-500 text-ink-900 shadow-sm'
-          : 'bg-white text-ink-700 ring-2 ring-inset ring-brand-edge hover:ring-brand-ink',
+          : 'bg-white text-ink-700 ring-2 ring-inset ring-field hover:ring-brand-ink',
       )}
     >
       {label}

@@ -175,7 +175,7 @@ export default function MapPicker({ latitude, longitude, onChange }) {
         ref={containerRef}
         role="application"
         aria-label="Venue location map. Click to place the pin, or use the latitude and longitude fields below."
-        className="h-80 w-full overflow-hidden rounded-3xl border-2 border-brand-edge bg-canvas"
+        className="h-80 w-full overflow-hidden rounded-3xl border-2 border-field bg-canvas"
       />
 
       <div className="grid gap-4 sm:grid-cols-2">

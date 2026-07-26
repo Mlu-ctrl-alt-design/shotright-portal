@@ -166,7 +166,7 @@ export default function MoodStep({ value, onChange }) {
             }}
           />
           {matches.length > 0 && (
-            <ul className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-2xl border-2 border-brand-edge bg-white py-1 shadow-lg">
+            <ul className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-2xl border-2 border-field bg-white py-1 shadow-lg">
               {matches.map((m) => (
                 <li key={m.name}>
                   <button
@@ -224,7 +224,7 @@ export default function MoodStep({ value, onChange }) {
                   key={n}
                   type="button"
                   onClick={() => add(n)}
-                  className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-brand-ink ring-2 ring-inset ring-brand-edge hover:bg-brand-50"
+                  className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-brand-ink ring-2 ring-inset ring-field hover:bg-brand-50"
                 >
                   {n}
                 </button>
@@ -245,7 +245,7 @@ export default function MoodStep({ value, onChange }) {
         </Alert>
       )}
 
-      <div className="min-h-64 rounded-3xl border-2 border-brand-edge p-5">
+      <div className="min-h-64 rounded-3xl border-2 border-field p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-ink-700">
             If you&rsquo;re unhappy with a mood, just select and delete it.
@@ -281,7 +281,7 @@ export default function MoodStep({ value, onChange }) {
                   key={m.name}
                   type="button"
                   onClick={() => add(m.mood_name)}
-                  className="rounded-full bg-white px-3 py-1 text-xs font-medium text-ink-900 ring-1 ring-inset ring-brand-edge transition hover:bg-brand-50"
+                  className="rounded-full bg-white px-3 py-1 text-xs font-medium text-ink-900 ring-1 ring-inset ring-field transition hover:bg-brand-50"
                 >
                   {m.mood_name}
                 </button>

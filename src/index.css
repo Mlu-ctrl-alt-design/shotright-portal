@@ -47,6 +47,14 @@
   --color-brand-ink: #8c6419;
   --color-brand-edge: #b28020;
 
+  /* Form-field boundaries are grey, not brand. Yellow on every input read as
+     heavy and made the whole form look like a warning state. This is the
+     LIGHTEST grey that still clears WCAG 1.4.11's 3:1 for a UI boundary on all
+     three surfaces the fields sit on — white 3.44:1, canvas 3.21:1, tint
+     3.13:1 — so it stays quiet without dropping below the bar. Focus still
+     switches to brand-ink, which now reads far more clearly against grey. */
+  --color-field: #8a8a8f;
+
   /* Neutrals. */
   --color-canvas: #f7f7f7;
   --color-tint: #fff3e0;

@@ -160,12 +160,12 @@ export default function AddressAutocomplete({ value, onChange, error }) {
         onFocus={() => options.length && setOpen(true)}
         className={clsx(
           'block w-full rounded-full border-2 bg-white py-2.5 pr-11 pl-5 text-sm text-ink-900',
-          'placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-brand-300',
-          error ? 'border-red-700' : 'border-brand-edge',
+          'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
+          error ? 'border-red-700' : 'border-field',
         )}
       />
 
-      <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-ink">
+      <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-ink-500">
         {loading ? (
           <span
             className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
@@ -184,7 +184,7 @@ export default function AddressAutocomplete({ value, onChange, error }) {
           id={listId}
           role="listbox"
           aria-label="Address suggestions"
-          className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-2xl border-2 border-brand-edge bg-white py-1 shadow-lg"
+          className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-2xl border-2 border-field bg-white py-1 shadow-lg"
         >
           {options.map((o, i) => (
             <li

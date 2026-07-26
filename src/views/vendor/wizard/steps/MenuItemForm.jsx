@@ -54,7 +54,7 @@ export default function MenuItemForm({ item, onSave, onDelete, onCancel }) {
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            className="grid size-28 place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-brand-edge bg-white transition hover:bg-brand-50"
+            className="grid size-28 place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-field bg-white transition hover:bg-brand-50"
           >
             {uploading ? (
               <Spinner />
@@ -103,7 +103,7 @@ export default function MenuItemForm({ item, onSave, onDelete, onCancel }) {
 
       <Suspense
         fallback={
-          <div className="grid min-h-40 place-items-center rounded-3xl border-2 border-brand-edge bg-white">
+          <div className="grid min-h-40 place-items-center rounded-3xl border-2 border-field bg-white">
             <Spinner label="Loading editor…" />
           </div>
         }
