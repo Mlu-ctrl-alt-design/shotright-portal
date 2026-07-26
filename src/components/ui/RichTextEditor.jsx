@@ -39,7 +39,7 @@ function ToolbarButton({ onClick, active, disabled, label, children }) {
       className={clsx(
         'grid size-8 place-items-center rounded-lg text-sm transition',
         'disabled:cursor-not-allowed disabled:opacity-40',
-        active ? 'bg-brand-500 text-white' : 'text-ink-700 hover:bg-brand-50',
+        active ? 'bg-brand-500 text-ink-900' : 'text-ink-700 hover:bg-brand-50',
       )}
     >
       {children}
@@ -66,7 +66,7 @@ function ColourControl({ label, value, onPick, onClear, glyph }) {
         </svg>
       </span>
       {/* Hover/focus popover — no portal needed, the toolbar is the last row. */}
-      <span className="invisible absolute bottom-full left-0 z-20 mb-1 flex gap-1 rounded-xl border-2 border-brand-500 bg-white p-2 opacity-0 shadow-lg transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+      <span className="invisible absolute bottom-full left-0 z-20 mb-1 flex gap-1 rounded-xl border-2 border-brand-edge bg-white p-2 opacity-0 shadow-lg transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
         {SWATCHES.map((c) => (
           <button
             key={c}
@@ -141,7 +141,7 @@ export default function RichTextEditor({ value, onChange, placeholder, ariaLabel
   const chain = () => editor.chain().focus()
 
   return (
-    <div className="overflow-hidden rounded-3xl border-2 border-brand-500 bg-white focus-within:ring-2 focus-within:ring-brand-300">
+    <div className="overflow-hidden rounded-3xl border-2 border-brand-edge bg-white focus-within:ring-2 focus-within:ring-brand-300">
       {editor.isEmpty && placeholder && (
         <p className="px-5 pt-4 text-sm text-ink-500 italic">{placeholder}</p>
       )}

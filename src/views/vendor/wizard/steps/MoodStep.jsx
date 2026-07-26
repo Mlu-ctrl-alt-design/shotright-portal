@@ -132,7 +132,7 @@ export default function MoodStep({ value, onChange }) {
             }}
           />
           {matches.length > 0 && (
-            <ul className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-2xl border-2 border-brand-500 bg-white py-1 shadow-lg">
+            <ul className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-2xl border-2 border-brand-edge bg-white py-1 shadow-lg">
               {matches.map((m) => (
                 <li key={m.name}>
                   <button
@@ -155,7 +155,7 @@ export default function MoodStep({ value, onChange }) {
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="ml-auto shrink-0 py-2.5 text-sm font-bold tracking-wide text-brand-600 uppercase hover:text-brand-700"
+          className="ml-auto shrink-0 py-2.5 text-sm font-bold tracking-wide text-brand-ink uppercase hover:text-brand-ink"
         >
           Upload Excel
         </button>
@@ -172,7 +172,7 @@ export default function MoodStep({ value, onChange }) {
       {error && <Alert variant="danger">{error}</Alert>}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
-      <div className="min-h-64 rounded-3xl border-2 border-brand-500 p-5">
+      <div className="min-h-64 rounded-3xl border-2 border-brand-edge p-5">
         <p className="text-sm text-ink-700">
           If you&rsquo;re unhappy with a mood, just select and delete it.
         </p>

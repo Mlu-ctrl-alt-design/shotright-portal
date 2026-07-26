@@ -54,14 +54,14 @@ export default function MenuItemForm({ item, onSave, onDelete, onCancel }) {
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            className="grid size-28 place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-brand-500 bg-white transition hover:bg-brand-50"
+            className="grid size-28 place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-brand-edge bg-white transition hover:bg-brand-50"
           >
             {uploading ? (
               <Spinner />
             ) : draft.image ? (
               <img src={draft.image} alt="" className="size-full object-cover" />
             ) : (
-              <span className="px-2 text-center text-[10px] font-bold tracking-wide text-brand-600 uppercase">
+              <span className="px-2 text-center text-[10px] font-bold tracking-wide text-brand-ink uppercase">
                 Select image
               </span>
             )}
@@ -77,7 +77,7 @@ export default function MenuItemForm({ item, onSave, onDelete, onCancel }) {
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="mt-2 block w-28 text-center text-[10px] font-bold tracking-wide text-brand-600 uppercase hover:text-brand-700"
+              className="mt-2 block w-28 text-center text-[10px] font-bold tracking-wide text-brand-ink uppercase hover:text-brand-ink"
             >
               Update image
             </button>
@@ -103,7 +103,7 @@ export default function MenuItemForm({ item, onSave, onDelete, onCancel }) {
 
       <Suspense
         fallback={
-          <div className="grid min-h-40 place-items-center rounded-3xl border-2 border-brand-500 bg-white">
+          <div className="grid min-h-40 place-items-center rounded-3xl border-2 border-brand-edge bg-white">
             <Spinner label="Loading editor…" />
           </div>
         }

@@ -32,14 +32,12 @@ export function Button({
 }) {
   const variants = {
     // Solid yellow pill — NEXT, SUBMIT, ADD, Login.
-    primary:
-      'bg-brand-500 text-white shadow-sm hover:bg-brand-600 focus-visible:outline-brand-600',
+    primary: 'bg-brand-500 text-ink-900 shadow-sm hover:bg-brand-600',
     // White pill with a yellow border — PREVIOUS.
-    secondary:
-      'bg-white text-brand-700 ring-2 ring-inset ring-brand-500 hover:bg-brand-50 focus-visible:outline-brand-600',
+    secondary: 'bg-white text-brand-ink ring-2 ring-inset ring-brand-edge hover:bg-brand-50',
     // Bare yellow text — CANCEL, View all, Expand.
-    ghost: 'text-brand-600 hover:text-brand-700 focus-visible:outline-brand-600',
-    danger: 'bg-red-500 text-white shadow-sm hover:bg-red-600 focus-visible:outline-red-600',
+    ghost: 'text-brand-ink hover:text-brand-900',
+    danger: 'bg-red-700 text-white shadow-sm hover:bg-red-800',
   }
   const sizes = {
     sm: 'px-4 py-1.5 text-xs',
@@ -92,17 +90,17 @@ export function Input({ label, error, hint, className, id, trailing, ...props })
             'block w-full rounded-full border-2 bg-white px-5 py-2.5 text-sm text-ink-900',
             'placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-brand-300',
             trailing && 'pr-11',
-            error ? 'border-red-500' : 'border-brand-500',
+            error ? 'border-red-700' : 'border-brand-edge',
           )}
           {...props}
         />
         {trailing && (
-          <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-500">
+          <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-ink">
             {trailing}
           </span>
         )}
       </div>
-      {error && <p className="mt-1.5 px-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-1.5 px-2 text-xs text-red-700">{error}</p>}
       {hint && !error && <p className="mt-1.5 px-2 text-xs text-ink-500">{hint}</p>}
     </div>
   )
@@ -129,19 +127,19 @@ export function Select({ label, error, className, id, children, ...props }) {
             'block w-full appearance-none rounded-full border-2 bg-white py-2.5 pr-11 pl-5 text-sm text-ink-900',
             'focus:outline-none focus:ring-2 focus:ring-brand-300',
             'disabled:cursor-not-allowed disabled:opacity-60',
-            error ? 'border-red-500' : 'border-brand-500',
+            error ? 'border-red-700' : 'border-brand-edge',
           )}
           {...props}
         >
           {children}
         </select>
-        <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-500">
+        <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-brand-ink">
           <svg viewBox="0 0 14 8" className="h-2 w-3.5 fill-none stroke-current stroke-2">
             <path d="M1 1l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
       </div>
-      {error && <p className="mt-1.5 px-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-1.5 px-2 text-xs text-red-700">{error}</p>}
     </div>
   )
 }
@@ -163,11 +161,11 @@ export function Textarea({ label, error, className, id, ...props }) {
         className={clsx(
           'block w-full rounded-3xl border-2 bg-white px-5 py-3 text-sm text-ink-900',
           'placeholder:text-ink-500 focus:outline-none focus:ring-2 focus:ring-brand-300',
-          error ? 'border-red-500' : 'border-brand-500',
+          error ? 'border-red-700' : 'border-brand-edge',
         )}
         {...props}
       />
-      {error && <p className="mt-1.5 px-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-1.5 px-2 text-xs text-red-700">{error}</p>}
     </div>
   )
 }
@@ -183,8 +181,8 @@ export function MoodPill({ children, onRemove, variant = 'canonical', className 
   // competing text-* utilities resolve by stylesheet order, not call order, so
   // an override class silently loses (white text on a white pill).
   const variants = {
-    canonical: 'bg-deep-500 text-white',
-    suggested: 'bg-white text-brand-700 ring-2 ring-inset ring-brand-500',
+    canonical: 'bg-deep-500 text-ink-900',
+    suggested: 'bg-white text-brand-ink ring-2 ring-inset ring-brand-edge',
   }
   return (
     <span
@@ -223,8 +221,8 @@ export function DayChip({ label, selected, onClick }) {
         'w-[4.5rem] rounded-2xl px-2 py-4 text-xs font-bold tracking-wide transition',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600',
         selected
-          ? 'bg-brand-500 text-white shadow-sm'
-          : 'bg-white text-ink-500 ring-2 ring-inset ring-brand-200 hover:ring-brand-400',
+          ? 'bg-brand-500 text-ink-900 shadow-sm'
+          : 'bg-white text-ink-700 ring-2 ring-inset ring-brand-edge hover:ring-brand-ink',
       )}
     >
       {label}
@@ -274,7 +272,7 @@ export function UploadProgress({ fileName, percent }) {
       aria-valuemax={100}
     >
       <div
-        className="flex h-full items-center rounded-full bg-green-500 px-3 whitespace-nowrap transition-[width] duration-300"
+        className="flex h-full items-center rounded-full bg-green-700 px-3 whitespace-nowrap transition-[width] duration-300"
         style={{ width: `${Math.max(pct, 22)}%` }}
       >
         <span className="text-[10px] font-bold text-white">
@@ -290,7 +288,7 @@ export function UploadProgress({ fileName, percent }) {
 export function Toast({ title = 'Chisa!', message, onDismiss }) {
   if (!message) return null
   return (
-    <div className="flex items-start gap-3 rounded-2xl bg-green-50 px-4 py-3 ring-1 ring-green-600/20">
+    <div role="status" aria-live="polite" className="flex items-start gap-3 rounded-2xl bg-green-50 px-4 py-3 ring-1 ring-green-600/20">
       <svg viewBox="0 0 20 20" className="mt-0.5 size-4 shrink-0 fill-green-600">
         <path d="M10 0a10 10 0 100 20 10 10 0 000-20zm4.7 7.7l-5.4 5.4a1 1 0 01-1.4 0L5.3 10.5a1 1 0 111.4-1.4l1.9 1.9 4.7-4.7a1 1 0 111.4 1.4z" />
       </svg>
@@ -393,7 +391,7 @@ export function Alert({ variant = 'info', children }) {
   }
   if (!children) return null
   return (
-    <div className={clsx('rounded-2xl px-4 py-3 text-sm ring-1 ring-inset', variants[variant])}>
+    <div role="alert" className={clsx('rounded-2xl px-4 py-3 text-sm ring-1 ring-inset', variants[variant])}>
       {children}
     </div>
   )

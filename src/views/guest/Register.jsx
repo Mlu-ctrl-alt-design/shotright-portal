@@ -27,7 +27,7 @@ function strengthOf(password) {
   if (/[^A-Za-z0-9]/.test(password)) score++
 
   if (score <= 2) return { label: 'Weak password', tone: 'text-red-600' }
-  if (score === 3) return { label: 'Fair password', tone: 'text-brand-700' }
+  if (score === 3) return { label: 'Fair password', tone: 'text-brand-ink' }
   return { label: 'Strong password', tone: 'text-green-600' }
 }
 

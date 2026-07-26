@@ -207,7 +207,7 @@ export default function VenueForm() {
                     className={clsx(
                       'rounded-full px-4 py-1.5 text-sm font-medium ring-1 ring-inset transition',
                       selected
-                        ? 'bg-brand-600 text-white ring-brand-600'
+                        ? 'bg-brand-500 text-ink-900 ring-brand-edge'
                         : 'bg-white text-ink-700 ring-gray-300 hover:bg-gray-50',
                     )}
                   >
@@ -249,7 +249,7 @@ export default function VenueForm() {
                   type="checkbox"
                   checked={row.closed}
                   onChange={(e) => setHours(index, 'closed', e.target.checked)}
-                  className="size-4 rounded border-gray-300 text-brand-600 focus:ring-brand-600"
+                  className="size-4 rounded border-gray-300 text-brand-ink focus:ring-brand-600"
                 />
                 Closed
               </label>

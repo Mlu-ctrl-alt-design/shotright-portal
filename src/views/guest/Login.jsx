@@ -77,7 +77,7 @@ export default function Login() {
             />
             <span
               className={[
-                'grid size-6 place-items-center rounded-full border-2 border-brand-500 transition',
+                'grid size-6 place-items-center rounded-full border-2 border-brand-edge transition',
                 'peer-focus-visible:outline peer-focus-visible:outline-2',
                 'peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand-600',
                 remember ? 'bg-brand-500' : 'bg-white',

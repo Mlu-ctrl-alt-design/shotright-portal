@@ -32,6 +32,21 @@
   --color-deep-500: #fbab29;
   --color-deep-600: #f59c1c;
 
+  /* Accessible companions to the brand yellow.
+
+     The brand yellow is very light (relative luminance ~0.60), so it can carry
+     dark text but cannot BE text or a boundary on a white surface:
+       white on brand-500 ....... 1.61:1  (WCAG AA needs 4.5)
+       brand-600 text on white .. 1.92:1
+       brand-500 border on white  1.61:1  (WCAG 1.4.11 needs 3.0)
+
+     So yellow stays a FILL, and these two carry the brand where contrast is
+     actually required. Both are the same hue, just darker.
+       brand-ink  on white 5.31:1 — link/ghost text, active rail step
+       brand-edge on white 3.50:1 — input and select boundaries */
+  --color-brand-ink: #8c6419;
+  --color-brand-edge: #b28020;
+
   /* Neutrals. */
   --color-canvas: #f7f7f7;
   --color-tint: #fff3e0;
@@ -63,9 +78,42 @@ body {
   @apply bg-canvas font-sans text-ink-900 antialiased;
 }
 
-/* Placeholders are italic throughout the designs. */
+/* Placeholders are italic throughout the designs. ink-500 clears 4.5:1 on both
+   white and the canvas, so placeholder-as-prompt stays readable. */
 ::placeholder {
   font-style: italic;
+  color: var(--color-ink-500);
+  opacity: 1; /* Firefox dims placeholders by default, which breaks the ratio. */
+}
+
+/* A single visible focus treatment for everything focusable. Several controls
+   here are custom (day chips, colour swatches, the remember-me circle), and
+   without this the browser default is suppressed by the reset on some of them —
+   leaving keyboard users with no visible position. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-brand-ink);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* Respect users who have asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skip link — visually hidden until focused. */
+.skip-link {
+  @apply absolute left-4 z-50 -translate-y-20 rounded-full bg-white px-5 py-2.5 text-sm font-bold text-ink-900 shadow-lg transition-transform;
+}
+.skip-link:focus {
+  @apply translate-y-4;
 }
 
 /* Time fields carry our own yellow clock icon (see the `trailing` prop on

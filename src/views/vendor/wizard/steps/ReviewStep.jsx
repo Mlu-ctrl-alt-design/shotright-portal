@@ -88,7 +88,7 @@ export default function ReviewStep({ moods, details, hours, menu }) {
               <button
                 type="button"
                 onClick={() => setShowAll((v) => !v)}
-                className="mt-1 ml-auto block text-sm text-brand-700 underline"
+                className="mt-1 ml-auto block text-sm text-brand-ink underline"
               >
                 {showAll ? 'Show less' : 'View all'}
               </button>
@@ -122,7 +122,7 @@ export default function ReviewStep({ moods, details, hours, menu }) {
                 <span className="text-lg font-bold tracking-tight text-ink-900 uppercase">
                   {category.name} - Menu
                 </span>
-                <span className="flex items-center gap-2 text-sm font-medium text-brand-600">
+                <span className="flex items-center gap-2 text-sm font-medium text-brand-ink">
                   {isOpen ? 'Collapse' : 'Expand'}
                   <Chevron open={isOpen} />
                 </span>

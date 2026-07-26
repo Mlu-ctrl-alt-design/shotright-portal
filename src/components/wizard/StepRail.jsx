@@ -35,10 +35,10 @@ export default function StepRail({ steps, currentIndex, completed = [], onStepCl
                   'flex items-center gap-2 text-left transition',
                   canNavigate ? 'cursor-pointer hover:underline' : 'cursor-default',
                   isCurrent
-                    ? 'text-lg font-bold text-brand-600'
+                    ? 'text-lg font-bold text-brand-ink'
                     : isDone
-                      ? 'text-base font-semibold text-brand-600'
-                      : 'text-base font-medium text-brand-300',
+                      ? 'text-base font-semibold text-brand-ink'
+                      : 'text-base font-medium text-ink-500',
                 )}
               >
                 <span>{step.label}</span>

@@ -52,6 +52,9 @@ export default function Shell() {
 
   return (
     <div className="flex min-h-full gap-0 bg-canvas p-4">
+      <a href="#main" className="skip-link">
+        Skip to main content
+      </a>
       <aside className="hidden w-64 shrink-0 flex-col rounded-3xl bg-brand-500 py-8 lg:flex">
         <div className="px-6">
           <Logo />
@@ -63,7 +66,7 @@ export default function Shell() {
             exactly the gutter width so it runs flush into the background beside
             the content card. No shadow: a shadow would make it read as sitting
             on top of the sidebar rather than being part of the background. */}
-        <nav className="mt-10 flex-1 space-y-1 pl-4">
+        <nav aria-label="Main" className="mt-10 flex-1 space-y-1 pl-4">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
@@ -74,7 +77,7 @@ export default function Shell() {
                   'flex items-center gap-3 py-2.5 pl-4 pr-6 text-sm font-bold transition',
                   isActive
                     ? '-mr-4 rounded-l-full bg-canvas text-ink-900'
-                    : 'mr-4 rounded-full text-white/95 hover:bg-white/20',
+                    : 'mr-4 rounded-full text-ink-900 hover:bg-white/40',
                 )
               }
             >
@@ -87,7 +90,7 @@ export default function Shell() {
         <button
           type="button"
           onClick={handleLogout}
-          className="mx-6 flex items-center gap-3 rounded-full py-2 text-sm font-medium text-white/95 transition hover:text-white"
+          className="mx-6 flex items-center gap-3 rounded-full py-2 text-sm font-semibold text-ink-900 transition hover:bg-white/40"
         >
           <PowerIcon />
           Logout
@@ -100,7 +103,7 @@ export default function Shell() {
           <button
             type="button"
             onClick={handleLogout}
-            className="flex items-center gap-2 text-sm font-medium text-white"
+            className="flex items-center gap-2 text-sm font-semibold text-ink-900"
           >
             <PowerIcon />
             Logout
@@ -116,7 +119,7 @@ export default function Shell() {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 lg:pl-4">
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 lg:pl-4">
           <div className="mx-auto w-full max-w-content">
             <Outlet />
           </div>

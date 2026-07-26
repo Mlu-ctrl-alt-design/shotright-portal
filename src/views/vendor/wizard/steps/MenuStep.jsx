@@ -56,8 +56,8 @@ function RoundButton({ onClick, label, filled, children }) {
       title={label}
       className={
         filled
-          ? 'grid size-8 place-items-center rounded-full bg-brand-500 text-white transition hover:bg-brand-600'
-          : 'grid size-8 place-items-center rounded-full text-brand-600 ring-2 ring-inset ring-brand-500 transition hover:bg-brand-50'
+          ? 'grid size-8 place-items-center rounded-full bg-brand-500 text-ink-900 transition hover:bg-brand-600'
+          : 'grid size-8 place-items-center rounded-full text-brand-ink ring-2 ring-inset ring-brand-edge transition hover:bg-brand-50'
       }
     >
       {children}
@@ -201,7 +201,7 @@ export default function MenuStep({ value, onChange }) {
         <button
           type="button"
           onClick={downloadTemplate}
-          className="ml-auto shrink-0 py-2.5 text-sm font-bold tracking-wide text-brand-600 uppercase hover:text-brand-700"
+          className="ml-auto shrink-0 py-2.5 text-sm font-bold tracking-wide text-brand-ink uppercase hover:text-brand-900"
         >
           Download menu list template +
         </button>
@@ -245,7 +245,7 @@ export default function MenuStep({ value, onChange }) {
             <button
               type="button"
               onClick={() => importRefs.current[category.id]?.click()}
-              className="ml-auto text-sm font-bold tracking-wide text-brand-600 uppercase hover:text-brand-700"
+              className="ml-auto text-sm font-bold tracking-wide text-brand-ink uppercase hover:text-brand-900"
             >
               Menu upload excel
             </button>
