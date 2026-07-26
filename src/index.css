@@ -122,6 +122,27 @@ body {
   }
 }
 
+/* Navigation drawer (below lg). Applied via `motion-safe:` so they are skipped
+   outright for anyone who has asked for less motion — the panel still arrives,
+   it just arrives without travelling. */
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Respect users who have asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
   *,
