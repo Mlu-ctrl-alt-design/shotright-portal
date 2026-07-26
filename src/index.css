@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Sho't Right Partner Portal — design tokens.
+
+   Every colour below is sampled directly from the approved design PNGs
+   (see docs/PRD-shot-right-partner-portal.md §7.1.1), not eyeballed:
+
+     #FEC32D  sidebar fill, primary buttons, day chips, active borders
+     #FBAB29  login background wash, mood pills, hover states
+     #F7F7F7  app canvas behind the white card
+     #FFF3E0  the review panel tint on wizard step 5
+
+   Note this replaces the earlier orange (#f96f16) palette, which was carried
+   over from the Flutter customer app. The partner portal is yellow.
+--------------------------------------------------------------------------- */
+@theme {
+  /* Brand yellow — 500 is the primary. */
+  --color-brand-50: #fff9e9;
+  --color-brand-100: #fff1c9;
+  --color-brand-200: #fee49a;
+  --color-brand-300: #fed66b;
+  --color-brand-400: #fecc4a;
+  --color-brand-500: #fec32d;
+  --color-brand-600: #fcaa2a;
+  --color-brand-700: #e2941f;
+  --color-brand-800: #b87718;
+  --color-brand-900: #8a5911;
+
+  /* Deep orange — the login background wash and mood pills. */
+  --color-deep-400: #fdbb4a;
+  --color-deep-500: #fbab29;
+  --color-deep-600: #f59c1c;
+
+  /* Neutrals. */
+  --color-canvas: #f7f7f7;
+  --color-tint: #fff3e0;
+
+  --color-ink-50: #f6f6f7;
+  --color-ink-200: #e5e5e5;
+  --color-ink-500: #6b7280;
+  --color-ink-700: #374151;
+  --color-ink-900: #2d2d2d;
+
+  /* The designs use a rounded geometric sans. Poppins/Nunito are the closest
+     web equivalents; we fall back through the system stack so the portal still
+     renders correctly with no webfont available. */
+  --font-sans:
+    'Poppins', 'Nunito Sans', ui-rounded, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-canvas font-sans text-ink-900 antialiased;
+}
+
+/* Placeholders are italic throughout the designs. */
+::placeholder {
+  font-style: italic;
+}
+
+/* Time fields carry our own yellow clock icon (see the `trailing` prop on
+   Input). Chrome also draws its native picker indicator in the same spot, which
+   reads as two clocks — hide it, but keep it in flow and clickable so the
+   picker still opens where the visible icon is. */
+input[type='time']::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  cursor: pointer;
+}
