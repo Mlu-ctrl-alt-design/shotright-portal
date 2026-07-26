@@ -27,6 +27,7 @@ import api, { call, callGet, USE_MOCKS, setAuthToken, hasAuthToken } from './api
 import { mockBackend } from './mockBackend'
 import { matchMood, FALLBACK_MOODS } from './moods'
 import { VENUE_LOOKUPS } from './lookups'
+import { normaliseProfile, toProfilePayload } from './profile'
 
 const pick = (real, mock) => (USE_MOCKS ? mock : real)
 
@@ -346,8 +347,16 @@ export const getVenueLookups = async () => VENUE_LOOKUPS
 
 export const getDashboard = () =>
   pick(
-    () => call('shotright.api.get_vendor_dashboard'),
-    () => mockBackend.getDashboard(),
+    async () => {
+      const dash = await call('shotright.api.get_vendor_dashboard')
+      // Same normalisation as getProfile — the dashboard greets the partner by
+      // name and would otherwise say "Welcome back, Vendor" forever.
+      return dash ? { ...dash, profile: normaliseProfile(dash.profile) } : dash
+    },
+    async () => {
+      const dash = await mockBackend.getDashboard()
+      return { ...dash, profile: normaliseProfile(dash.profile) }
+    },
   )()
 
 /* ------------------------------------------------------------------- venues */
@@ -600,17 +609,34 @@ export const uploadMenuImage = (file) =>
 
 /* ------------------------------------------------------------------ profile */
 
+/**
+ * Normalised so every caller sees a `vendor_name` whatever the bench actually
+ * calls the field — see `services/profile.js` for why that is not a given.
+ */
 export const getProfile = () =>
   pick(
     async () => {
       const dash = await call('shotright.api.get_vendor_dashboard')
-      return dash?.profile
+      return normaliseProfile(dash?.profile)
     },
-    () => mockBackend.getProfile(),
+    async () => normaliseProfile(await mockBackend.getProfile()),
   )()
 
+/**
+ * Returns the profile as the bench holds it AFTER the write, not the write's
+ * own response.
+ *
+ * `update_vendor_profile` returning 200 does not mean it saved what you sent:
+ * Frappe silently drops kwargs a method does not declare, so a field named
+ * wrongly produces a successful no-op. Re-reading is the only way to know, and
+ * the caller compares to decide what to tell the partner. One extra request on
+ * a rare action is a fair price for not lying about it.
+ */
 export const updateProfile = (payload) =>
   pick(
-    () => call('shotright.api.update_vendor_profile', payload),
-    () => mockBackend.updateProfile(payload),
+    async () => {
+      await call('shotright.api.update_vendor_profile', toProfilePayload(payload))
+      return getProfile()
+    },
+    async () => normaliseProfile(await mockBackend.updateProfile(toProfilePayload(payload))),
   )()

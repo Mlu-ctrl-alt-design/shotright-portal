@@ -221,6 +221,44 @@ the Vendor role has delete permission and returns a real permission error if
 not. **Confirm the doctype name and the role permission**; the error path is
 honest either way, but a working delete is better than an honest failure.
 
+### 🔴 Profile name — `vendor_name` does not exist on the bench
+
+**Reported symptom:** Settings showed no name, and editing it did not persist.
+
+The portal was written against `backend/api_reference.py`, which I wrote before
+the real API existed and which invented a single `vendor_name` field. The real
+API has no such field — `register_vendor` takes `first_name` and `last_name`
+separately, and those are what get stored. So:
+
+- **Read** — `profile.vendor_name` is undefined, so "Your name" rendered empty
+  and the dashboard said "Welcome back, Vendor".
+- **Write** — the form posted `vendor_name` to `update_vendor_profile`. Frappe's
+  `call()` filters kwargs down to the method's declared signature, so an
+  argument the method does not accept is **dropped silently**: HTTP 200, nothing
+  saved. The UI reported "Profile updated." on the strength of that 200.
+
+Bridged in `src/services/profile.js`:
+
+- `displayName()` derives the name from `vendor_name`, `full_name`, or
+  `first_name` + `last_name`, whichever the bench actually sends.
+- `toProfilePayload()` sends the name in **both** shapes. That is deliberate,
+  not shotgunning — Frappe drops undeclared kwargs, so the extra pair cannot
+  error, while sending one shape is a coin flip that fails silently if it lands
+  wrong.
+- `updateProfile()` re-reads the profile after writing and `Profile.jsx`
+  compares. A field that did not stick is now reported to the partner by name
+  instead of being covered by a success message.
+
+**⚠️ NOT VERIFIED AGAINST THE LIVE BENCH** — no outbound route from the build
+environment. Verified against four simulated shapes (`first_name`/`last_name`,
+`full_name`, `vendor_name`, and a bench that accepts nothing).
+
+**To close this properly:** confirm `update_vendor_profile`'s real signature and
+what `get_vendor_dashboard` puts in `profile`, then delete the losing half of
+`toProfilePayload()`. If the bench genuinely has no writable name field, that is
+a backend change — the portal cannot fix it, and the warning is the honest
+interim.
+
 ### 🟡 Dress codes and atmospheres are portal-side
 
 No lookup endpoint and no doctype to read generically — `atmosphere_desc` is
@@ -268,6 +306,10 @@ The portal is on the real bench now, so these are no longer blockers to cutover
       `FALLBACK_MOODS`.
 - [ ] Confirm whether a SendGrid account actually exists (see
       `docs/EMAIL-SETUP.md` §1) or use the existing SMTP mailbox.
+- [ ] **Confirm `update_vendor_profile`'s signature** and what
+      `get_vendor_dashboard` returns in `profile`, then delete the losing half
+      of `toProfilePayload()`. See the profile-name section above — this one is
+      a live defect partners can hit, not a future gap.
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.
