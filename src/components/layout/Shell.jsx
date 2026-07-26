@@ -57,7 +57,12 @@ export default function Shell() {
           <Logo />
         </div>
 
-        {/* The active pill bleeds past the sidebar edge, as in the designs. */}
+        {/* The active item is not a floating pill — in the designs it is a
+            notch cut out of the sidebar. It is filled with the page canvas
+            (#F7F7F7, not white), rounded on the left only, and bleeds right by
+            exactly the gutter width so it runs flush into the background beside
+            the content card. No shadow: a shadow would make it read as sitting
+            on top of the sidebar rather than being part of the background. */}
         <nav className="mt-10 flex-1 space-y-1 pl-4">
           {NAV.map((item) => (
             <NavLink
@@ -66,10 +71,10 @@ export default function Shell() {
               end={item.end}
               className={({ isActive }) =>
                 clsx(
-                  'flex items-center gap-3 rounded-full py-2.5 pl-4 pr-6 text-sm font-bold transition',
+                  'flex items-center gap-3 py-2.5 pl-4 pr-6 text-sm font-bold transition',
                   isActive
-                    ? '-mr-4 bg-white text-ink-900 shadow-sm'
-                    : 'mr-4 text-white/95 hover:bg-white/20',
+                    ? '-mr-4 rounded-l-full bg-canvas text-ink-900'
+                    : 'mr-4 rounded-full text-white/95 hover:bg-white/20',
                 )
               }
             >
