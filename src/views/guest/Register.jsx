@@ -64,13 +64,25 @@ export default function Register() {
     try {
       // The backend takes first and last name separately, which is exactly what
       // this form collects — the earlier join into one vendor_name is gone.
-      await register({
+      const result = await register({
         first_name: form.first_name,
         last_name: form.surname,
         business_name: form.business_name,
         email: form.email,
         password: form.password,
       })
+
+      // When the bench requires email verification the account is created but
+      // disabled, and there is no session yet — go and get a code. When it does
+      // not, registration signs the partner straight in as before.
+      //
+      // The address rides in router state, not the URL: a query string would
+      // put it in browser history, in the Referer of any outbound link, and in
+      // whatever records paths.
+      if (result?.otpRequired) {
+        navigate('/verify', { replace: true, state: { email: result.email } })
+        return
+      }
       navigate('/', { replace: true })
     } catch (err) {
       setError(err.message)

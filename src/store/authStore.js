@@ -34,12 +34,44 @@ export const useAuthStore = create((set) => ({
     return session
   },
 
+  /**
+   * Register.
+   *
+   * Returns `{otpRequired: true, email}` when the bench requires email
+   * verification. The store must NOT move to 'authenticated' in that case: the
+   * account exists but is disabled, so dropping it into the portal would mean
+   * every authenticated call failing behind a UI that looks signed in.
+   *
+   * Returns a session as before when verification is not deployed.
+   */
   async register(payload) {
     const session = await vendorApi.register(payload)
+    if (session?.otpRequired) return session
+
     set({
       status: 'authenticated',
       user: session.user,
       vendorProfile: session.vendor_profile,
+    })
+    return session
+  },
+
+  async verifyEmail(email, code) {
+    const session = await vendorApi.verifyOtp(email, code)
+    set({
+      status: 'authenticated',
+      user: session.user ?? email,
+      vendorProfile: session.vendor_profile ?? null,
+    })
+    return session
+  },
+
+  async resetPassword(email, code, newPassword) {
+    const session = await vendorApi.resetPassword(email, code, newPassword)
+    set({
+      status: 'authenticated',
+      user: session.user ?? email,
+      vendorProfile: session.vendor_profile ?? null,
     })
     return session
   },

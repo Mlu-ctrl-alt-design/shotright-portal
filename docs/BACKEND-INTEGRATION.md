@@ -86,32 +86,62 @@ These are the ones that matter. The portal **warns the partner on the success
 screen** about each drop rather than failing silently — but a warning is not a
 fix.
 
-### 🟠 C1 — partner-authored moods: honest, but not yet possible
+### 🔑 Capability detection — how the two sides ship independently
 
-`create_venue` requires moods to already exist in the curated Mood list, and the
-API exposes no endpoint to create or suggest one.
+The portal and the bench release separately, and neither waits for the other.
+Rather than a build flag someone has to remember to flip (which is exactly how
+partners ended up looking at fixture venues), the portal **asks the bench what
+it can do**:
 
-**Frontend behaviour has been changed to match.** An unmatched mood is now
-refused *at the point of entry*, with the closest real alternatives offered and
-the full list browsable. Previously it was accepted, and the partner only learned
-four steps later — on the success screen — that it had been dropped. That was the
-actual defect; a late warning is not much better than a silent one.
+| Endpoint | Present | Absent |
+|---|---|---|
+| `register_vendor` → `otp_required` | code screen | signs in directly, as today |
+| `resolve_mood` | new moods filed for review, shown pending | new moods refused at entry |
+| `get_popular_moods` | usage-ranked smart defaults | head of the alphabetical list |
 
-Alias resolution still works, so "boys night" → **Boys Night Out** as before.
+`withFallback()` in `src/services/vendor.js` treats **only a 404** as "not
+deployed" and caches that verdict per method for the tab. A 403 or 417 is a
+real error and is rethrown — reading a permission failure as "feature absent"
+would silently downgrade the product instead of reporting a misconfiguration.
 
-**To restore the decided C1 behaviour**, `backend/mood_suggestions.py` is
-drop-in ready: `get_moods`, `resolve_mood` and `approve_mood_suggestion`, plus
-the `Mood Alias` and `Mood Suggestion` doctype definitions. The frontend already
-supports the result — `MoodStep` still handles `status: "suggested"` and
-`MoodPill` still has the outlined variant — so restoring it is deleting a branch,
-not writing a feature.
+Deploying any of these turns the feature on with **no frontend release**.
 
-Two things there matter more than the endpoints:
-- **A Desk queue must call `approve_mood_suggestion`.** Without one, suggestions
-  accumulate unseen and the venues attached to them never reach customer search.
-- **`create_venue` should accept a suggestion in `moods`**, so a venue starts
-  appearing the moment its suggestion is approved. Otherwise approving fixes the
-  vocabulary but not the venues that asked for it.
+### 🟢 C1 — partner-authored moods: restored, backend ready to deploy
+
+**Decision reaffirmed**: partners type their own moods, anything new is filed
+for staff, and the platform ranks by real usage to seed the next partner's
+choices. `backend/mood_suggestions.py` is drop-in and now also carries:
+
+- `_record_request()` — counts **distinct vendors** asking for a suggestion, not
+  raw requests, so one partner retyping cannot outrank a genuinely popular mood.
+- `get_popular_moods()` — ranks by **distinct approved venues**, for the
+  onboarding smart default. Pending venues are excluded, or the list would be
+  game-able by bulk submission.
+- `get_mood_demand()` — the Desk queue, sorted by demand rather than date.
+- `_attach_moods()` / `_promote_venue_moods()` — a venue can hold a
+  not-yet-approved mood, and approving it **lights up every venue waiting on
+  it** in one action. Without this, approval fixes the vocabulary but not the
+  venues that asked for it, and every partner would have to come back and
+  re-edit.
+
+Until it is deployed, the portal falls back to refusing unmatched moods at the
+point of entry — see the capability table above.
+
+### 🟠 C1 (historical) — why it was reversed, and then restored
+
+Worth keeping because the reversal is still the live fallback.
+
+The original decision was free-text moods that create suggestions. The live API
+could not honour it: `create_venue` rejects any mood not on the curated list,
+and nothing exposed the list or accepted a suggestion. So the portal was changed
+to refuse unmatched moods **at the point of entry** — previously they were
+accepted and the partner only learned four steps later, on the success screen,
+that the mood had been dropped. A late warning is barely better than a silent
+one; that was the actual defect.
+
+That refusal is now the `resolve_mood`-absent branch rather than the only
+behaviour. Alias resolution works throughout, so "boys night" → **Boys Night
+Out** either way.
 
 **Mood matching now runs against whatever list is live.** It used to match
 against fourteen hard-coded fixtures even with the real backend connected — so
@@ -201,18 +231,43 @@ staff can extend it without a portal release.
 
 ---
 
+### 🟢 Registration is unverified — backend ready to deploy
+
+Registration issues a working token to anyone who can POST an email address, so
+the vendor list fills with junk that staff triage by hand.
+`backend/otp_and_email.py` adds email verification, password reset by code, and
+the five transactional emails (verification, welcome, venue submitted, reset,
+password changed). See **`docs/EMAIL-SETUP.md`** for the mail configuration —
+**including that I could not confirm the SendGrid account exists**; the one
+Email Account visible from here is plain SMTP.
+
+Mail transport is deliberately not decided in code. Everything goes through
+`frappe.sendmail`, so SendGrid vs the existing SMTP mailbox is a Desk setting.
+
+⚠️ **Configure and test outgoing mail BEFORE deploying that file.** With
+verification live and mail broken, every new partner is locked out with no way
+through — strictly worse than the junk accounts it prevents.
+
+---
+
 ## 3. Still needed from the backend
 
 The portal is on the real bench now, so these are no longer blockers to cutover
 — they are live gaps that partners can hit.
 
-- [ ] **Decide C1.** Either add mood suggestions, or accept that the mood step is
-      effectively select-only. Today an unmatched mood is refused at entry, which
-      is honest but means a partner whose vibe is not on the list has no route in
-      beyond asking staff.
+- [ ] **Deploy `otp_and_email.py`** — after configuring and testing outgoing
+      mail, creating the five Email Templates, creating the `Vendor OTP`
+      doctype, and adding `purge_unverified_accounts` to `scheduler_events`.
+      In that order.
+- [ ] **Deploy `mood_suggestions.py`** and build the Desk review queue, sorted
+      by `request_count`. Without a queue, suggestions accumulate unseen and the
+      venues attached to them never reach customer search — the queue is what
+      makes vendor-authored moods work, not the endpoint.
 - [ ] **Add `get_moods`**, or grant the Vendor role read on `Mood` so the
       resource-API path works. Without either, the typeahead is guessing from
       `FALLBACK_MOODS`.
+- [ ] Confirm whether a SendGrid account actually exists (see
+      `docs/EMAIL-SETUP.md` §1) or use the existing SMTP mailbox.
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.

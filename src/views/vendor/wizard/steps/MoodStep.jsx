@@ -1,33 +1,41 @@
 import { useMemo, useRef, useState } from 'react'
-import { useMoods } from '../../../../hooks/useVendor'
+import { useMoods, usePopularMoods } from '../../../../hooks/useVendor'
 import { resolveMood } from '../../../../services/vendor'
 import { Button, Input, MoodPill, UploadProgress, Toast, Alert } from '../../../../components/ui'
 
 /**
  * Wizard step 1 — moods.
  *
- * C1 was decided as "partners type their own moods, and anything new becomes a
- * suggestion for staff to merge". The live backend does not support that:
- * `create_venue` rejects any mood not already on the curated list, and there is
- * no endpoint to file a suggestion. See docs/BACKEND-INTEGRATION.md §2.
+ * A partner types whatever fits their venue. Text matching the curated list
+ * resolves onto it; anything genuinely new is filed for the Sho't Right team to
+ * review and shown as PENDING, not as a normal mood — it is attached to the
+ * venue immediately but does not reach customer search until approved, and
+ * saying otherwise would promise traffic that is not coming yet.
  *
- * So this step tells the truth AT THE POINT OF ENTRY rather than at submit.
- * A partner used to type "Masepa", carry on through four more steps, and only
- * discover on the success screen that it had been dropped. An unmatched mood is
- * now refused immediately, with the closest real alternatives offered.
+ * TWO BACKEND STATES, both handled:
  *
- * Free typing is kept — it is the fastest way in for someone who knows what
- * they want, and it is what the designs show. What changed is that it can no
- * longer produce something that looks added but is not. The full list is also
- * browsable, because a partner cannot guess at a vocabulary they have never
- * been shown.
+ *   resolve_mood deployed      new moods come back `suggested` and are added
+ *                              with the pending treatment.
+ *   resolve_mood absent        matching runs locally and new moods come back
+ *                              `unmatched`. They are REFUSED here, at the point
+ *                              of entry, with the closest real alternatives
+ *                              offered.
  *
- * When the backend gains mood suggestions, restore the `suggested` branch in
- * `add()` and the outlined `MoodPill variant="suggested"` treatment — both are
- * still supported by the components.
+ * The refusal is not a lesser version of the feature, it is the honest one for
+ * that state: `create_venue` rejects moods it does not know, so accepting one
+ * would fail the whole submission four steps later. A partner used to type
+ * "Masepa", carry on through four more steps, and only learn on the success
+ * screen that it had been dropped.
+ *
+ * SMART DEFAULT: the moods other approved venues actually chose are offered up
+ * front, before anything is typed. A partner facing an empty field has to guess
+ * at a vocabulary they have never been shown; this turns recall into
+ * recognition, and it is also what generates the usage data that makes the next
+ * partner's list better.
  */
 export default function MoodStep({ value, onChange }) {
   const { data: canonical = [] } = useMoods()
+  const { data: popularAll = [] } = usePopularMoods()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -49,6 +57,7 @@ export default function MoodStep({ value, onChange }) {
   }, [text, canonical, chosen])
 
   const available = canonical.filter((m) => !alreadyChosen(m.name))
+  const popular = popularAll.filter((m) => !alreadyChosen(m.name))
 
   const add = async (raw) => {
     const input = (raw ?? text).trim()
@@ -59,10 +68,11 @@ export default function MoodStep({ value, onChange }) {
     try {
       const result = await resolveMood(input)
 
-      if (result.status !== 'canonical') {
-        // Refuse rather than accept-and-drop. `near` is whatever the resolver
-        // thought was closest; fall back to a loose contains-search so the
-        // partner is never left at a dead end with no next move.
+      // `unmatched` only happens when the suggestion endpoint is absent — see
+      // the note at the top. Refuse rather than accept-and-drop. `near` is
+      // whatever the resolver thought was closest; fall back to a loose
+      // contains-search so the partner is never left at a dead end.
+      if (result.status === 'unmatched') {
         const q = input.toLowerCase()
         const near = [
           ...(result.near ? [result.near.label] : []),
@@ -81,7 +91,11 @@ export default function MoodStep({ value, onChange }) {
 
       onChange({ ...value, moods: [...chosen, result] })
       setText('')
-      setToast(`"${result.label}" added.`)
+      setToast(
+        result.status === 'suggested'
+          ? `"${result.label}" added and sent to the Sho't Right team to review.`
+          : `"${result.label}" added.`,
+      )
     } catch (err) {
       setError(err.message)
     } finally {
@@ -116,12 +130,17 @@ export default function MoodStep({ value, onChange }) {
 
     const collected = [...chosen]
     const unmatched = []
+    let pending = 0
     for (let i = 0; i < lines.length; i++) {
       setUpload({ fileName: file.name, percent: ((i + 1) / lines.length) * 100 })
       try {
         const result = await resolveMood(lines[i])
-        if (result.status !== 'canonical') unmatched.push(lines[i])
-        else if (!collected.some((m) => m.mood === result.mood)) collected.push(result)
+        if (result.status === 'unmatched') {
+          unmatched.push(lines[i])
+        } else if (!collected.some((m) => m.mood === result.mood)) {
+          collected.push(result)
+          if (result.status === 'suggested') pending += 1
+        }
       } catch {
         unmatched.push(lines[i])
       }
@@ -130,7 +149,10 @@ export default function MoodStep({ value, onChange }) {
     const added = collected.length - chosen.length
     onChange({ ...value, moods: collected })
     setUpload(null)
-    setToast(`${added} mood${added === 1 ? '' : 's'} added from "${file.name}".`)
+    setToast(
+      `${added} mood${added === 1 ? '' : 's'} added from "${file.name}"` +
+        (pending ? `, ${pending} awaiting review.` : '.'),
+    )
     if (unmatched.length) {
       setError(
         `${unmatched.length} mood${unmatched.length === 1 ? '' : 's'} in that file ` +
@@ -145,11 +167,44 @@ export default function MoodStep({ value, onChange }) {
     <div className="space-y-5">
       <p className="text-sm text-ink-700">
         Here is where you determine the vibe or mood your customers will search for in order to find
-        your business on our application.
+        your business on our application. Type your own if none of these fit — we&rsquo;ll review it
+        and add it to the list.
       </p>
 
-      <div className="flex flex-wrap items-start gap-4">
-        <div className="relative min-w-64 flex-1">
+      {/* Smart default, front-loaded. Shown only until the first mood is picked:
+          after that it is competing with the partner's own choices for the same
+          screen space, and the browse list below covers the same ground. */}
+      {chosen.length === 0 && popular.length > 0 && (
+        <div className="rounded-3xl bg-brand-50 p-4">
+          <p className="text-xs font-bold tracking-wide text-ink-700 uppercase">
+            Most used by venues on Sho&rsquo;t Right
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {popular.map((m) => (
+              <button
+                key={m.name}
+                type="button"
+                onClick={() => add(m.mood_name)}
+                className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-ink-900
+                           ring-1 ring-inset ring-field transition hover:bg-brand-100"
+              >
+                {m.mood_name}
+                {m.venue_count > 0 && (
+                  <span className="ml-1.5 font-normal text-ink-500">{m.venue_count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* The suggestion list is anchored to the WHOLE ROW, not to the input.
+          On a phone the row wraps, so anchoring it to the input dropped it
+          straight on top of the "Add +" button underneath — the button was
+          visible, looked enabled, and swallowed every tap. On desktop the row
+          and the input share a bottom edge, so this changes nothing there. */}
+      <div className="relative flex flex-wrap items-start gap-4">
+        <div className="min-w-64 flex-1">
           <Input
             aria-label="Mood"
             placeholder="Please add moods, vibes to your restaurant"
@@ -165,21 +220,6 @@ export default function MoodStep({ value, onChange }) {
               }
             }}
           />
-          {matches.length > 0 && (
-            <ul className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-2xl border-2 border-field bg-white py-1 shadow-lg">
-              {matches.map((m) => (
-                <li key={m.name}>
-                  <button
-                    type="button"
-                    onClick={() => add(m.mood_name)}
-                    className="block w-full px-5 py-2 text-left text-sm hover:bg-brand-50"
-                  >
-                    {m.mood_name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
 
         <Button onClick={() => add()} loading={busy} className="shrink-0">
@@ -200,6 +240,22 @@ export default function MoodStep({ value, onChange }) {
           onChange={onFile}
           className="hidden"
         />
+
+        {matches.length > 0 && (
+          <ul className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-2xl border-2 border-field bg-white py-1 shadow-lg">
+            {matches.map((m) => (
+              <li key={m.name}>
+                <button
+                  type="button"
+                  onClick={() => add(m.mood_name)}
+                  className="block w-full px-5 py-2 text-left text-sm hover:bg-brand-50"
+                >
+                  {m.mood_name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {upload && <UploadProgress fileName={upload.fileName} percent={upload.percent} />}
@@ -267,6 +323,17 @@ export default function MoodStep({ value, onChange }) {
             </MoodPill>
           ))}
         </div>
+
+        {/* Explain the pending state where it is visible, not on the success
+            screen. A partner who sees "pending" needs to know now whether their
+            venue is broken — it is not — and roughly what happens next. */}
+        {chosen.some((m) => m.status === 'suggested') && (
+          <p className="mt-3 text-xs text-ink-700">
+            Moods marked <span className="font-semibold">pending</span> are new to Sho&rsquo;t
+            Right. They stay on your venue and we&rsquo;ll review them — once approved, customers
+            searching that vibe will find you. Everything else about your venue goes live as normal.
+          </p>
+        )}
 
         {/* Partners cannot guess a vocabulary they have never been shown. */}
         {browsing && (

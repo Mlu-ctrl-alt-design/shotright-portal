@@ -16,7 +16,7 @@
  * The shapes mirror the real `shotright.api.*` responses so the two paths stay
  * interchangeable while working offline.
  */
-import { matchMood, FALLBACK_MOODS as MOODS } from './moods'
+import { matchMood, normaliseMood, FALLBACK_MOODS as MOODS } from './moods'
 
 /**
  * A fixture call in a production build is a bug, not a fallback. Throwing means
@@ -41,6 +41,8 @@ const DAYS =['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
 
 const db = {
   user: null,
+  // Partner-typed moods awaiting a Desk decision, mirroring Mood Suggestion.
+  moodSuggestions: [],
   vendorProfile: {
     name: 'VP-0001',
     vendor_name: 'Demo Vendor',
@@ -155,16 +157,50 @@ export const mockBackend = {
   },
 
   /**
-   * Resolve one partner-typed mood against the fixtures.
+   * Resolve one partner-typed mood, mirroring `shotright.api.resolve_mood`.
    *
-   * Delegates to the shared matcher so dev behaves exactly like production —
-   * only the list differs. The Mood Suggestion branch that used to live here is
-   * gone: it invented an id and reported success for something no backend can
-   * store, which is the failure mode the mock existed to avoid.
+   * An unmatched mood becomes a pending suggestion rather than a refusal —
+   * that is the deployed backend's behaviour, and dev has to be able to reach
+   * the pending-mood UI to work on it. The refusal path is what the portal
+   * falls back to when that endpoint is ABSENT, and it is exercised by
+   * `matchMood` directly.
    */
   async resolveMood(text) {
     await delay(120)
-    return matchMood(MOODS, text)
+    const local = matchMood(MOODS, text)
+    if (local.status === 'canonical') return local
+
+    const key = normaliseMood(text)
+    const existing = db.moodSuggestions.find((s) => normaliseMood(s.suggested_name) === key)
+    const suggestion =
+      existing ||
+      (() => {
+        const created = {
+          name: `MOOD-SUG-${String(db.moodSuggestions.length + 1).padStart(4, '0')}`,
+          suggested_name: String(text).trim(),
+          status: 'Pending Review',
+          request_count: 1,
+        }
+        db.moodSuggestions.push(created)
+        return created
+      })()
+
+    return {
+      status: 'suggested',
+      mood: suggestion.name,
+      label: suggestion.suggested_name,
+      near: local.near,
+    }
+  },
+
+  /** Mirrors `shotright.api.get_popular_moods`. Counts are invented. */
+  async getPopularMoods(limit = 8) {
+    await delay(80)
+    return MOODS.slice(0, limit).map((m, i) => ({
+      name: m.name,
+      mood_name: m.mood_name,
+      venue_count: Math.max(1, 24 - i * 3),
+    }))
   },
 
   async getDashboard() {

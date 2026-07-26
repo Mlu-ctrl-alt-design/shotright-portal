@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { MoodPill } from '../../../../components/ui'
+import { OperatingHoursSummary } from '../../../../components/ui/OperatingHours'
+import { expandOperatingHours } from '../../../../services/vendor'
 import { clsx } from '../../../../utils/clsx'
 
 /**
@@ -102,6 +104,23 @@ export default function ReviewStep({ moods, details, hours, menu }) {
           <Field label="Weekday" value={range(hours.weekday)} />
           <Field label="Weekend" value={range(hours.weekend)} />
           <Field label="Public Holidays" value={range(hours.publicHoliday)} />
+        </div>
+
+        {/* The three ranges above are how the hours were ENTERED. This is what
+            actually gets SAVED, day by day, after expandOperatingHours() maps
+            them onto the backend's per-day rows — including which side of the
+            weekend boundary each day landed on. A review screen that only
+            echoes its own input cannot catch a wrong weekend setting. This one
+            can, and it is the last chance to. */}
+        <div className="mt-5 border-t border-brand-200 pt-4">
+          <p className="text-xs font-bold tracking-wide text-ink-500 uppercase">How this saves</p>
+          <OperatingHoursSummary rows={expandOperatingHours(hours).rows} className="mt-1.5" />
+          {hours.publicHoliday?.start && (
+            <p className="mt-2 text-xs text-ink-500">
+              Public holiday hours aren&rsquo;t stored by the app yet, so they don&rsquo;t appear
+              here.
+            </p>
+          )}
         </div>
       </section>
 

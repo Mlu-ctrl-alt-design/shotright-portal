@@ -262,6 +262,7 @@ export function MoodPill({ children, onRemove, variant = 'canonical', className 
     canonical: 'bg-deep-500 text-ink-900',
     suggested: 'bg-white text-brand-ink ring-2 ring-inset ring-field',
   }
+  const pending = variant === 'suggested'
   return (
     <span
       className={clsx(
@@ -271,6 +272,14 @@ export function MoodPill({ children, onRemove, variant = 'canonical', className 
       )}
     >
       {children}
+      {/* WCAG 1.4.1: a pending mood must not be distinguished by colour and
+          outline alone. The word carries the state for anyone not seeing the
+          styling — including a screen reader, which announces neither. */}
+      {pending && (
+        <span className="font-semibold opacity-80">
+          <span aria-hidden="true">· </span>pending
+        </span>
+      )}
       {onRemove && (
         <button
           type="button"

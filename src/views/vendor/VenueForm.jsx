@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useVenue, useMoods, useCreateVenue, useUpdateVenue } from '../../hooks/useVendor'
 import { Button, Input, Textarea, Card, Alert, Badge } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
+import { OperatingHoursEditor } from '../../components/ui/OperatingHours'
 import { clsx } from '../../utils/clsx'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -66,14 +67,6 @@ export default function VenueForm() {
         ? f.moods.filter((m) => m !== moodName)
         : [...f.moods, moodName],
     }))
-
-  const setHours = (index, key, value) =>
-    setForm((f) => {
-      const operating_hours = f.operating_hours.map((row, i) =>
-        i === index ? { ...row, [key]: value } : row,
-      )
-      return { ...f, operating_hours }
-    })
 
   const onSubmit = async (event) => {
     event.preventDefault()
@@ -220,42 +213,15 @@ export default function VenueForm() {
         )}
       </Card>
 
+      {/* Was seven rows of four controls — twenty-eight in a flat list, roughly
+          two screens on a phone. The editor now groups consecutive days with
+          matching hours, so the usual case is two or three rows, and drops to
+          the full per-day list on request for irregular weeks. */}
       <Card title="Operating hours">
-        <div className="space-y-3">
-          {form.operating_hours.map((row, index) => (
-            <div
-              key={row.day_of_week}
-              className="grid items-center gap-3 sm:grid-cols-[8rem_1fr_1fr_auto]"
-            >
-              <span className="text-sm font-medium text-ink-700">{row.day_of_week}</span>
-              <input
-                type="time"
-                aria-label={`${row.day_of_week} opening time`}
-                value={row.open_time}
-                disabled={row.closed}
-                onChange={(e) => setHours(index, 'open_time', e.target.value)}
-                className="rounded-lg border-0 px-3 py-2 text-sm shadow-sm ring-1 ring-inset ring-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
-              />
-              <input
-                type="time"
-                aria-label={`${row.day_of_week} closing time`}
-                value={row.close_time}
-                disabled={row.closed}
-                onChange={(e) => setHours(index, 'close_time', e.target.value)}
-                className="rounded-lg border-0 px-3 py-2 text-sm shadow-sm ring-1 ring-inset ring-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
-              />
-              <label className="flex items-center gap-2 text-sm text-ink-700">
-                <input
-                  type="checkbox"
-                  checked={row.closed}
-                  onChange={(e) => setHours(index, 'closed', e.target.checked)}
-                  className="size-4 rounded border-gray-300 text-brand-ink focus:ring-brand-600"
-                />
-                Closed
-              </label>
-            </div>
-          ))}
-        </div>
+        <OperatingHoursEditor
+          rows={form.operating_hours}
+          onChange={(operating_hours) => setForm((f) => ({ ...f, operating_hours }))}
+        />
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">

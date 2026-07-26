@@ -30,6 +30,42 @@ import { VENUE_LOOKUPS } from './lookups'
 
 const pick = (real, mock) => (USE_MOCKS ? mock : real)
 
+/**
+ * Run `real`, and fall back to `whenMissing` if the method is not deployed.
+ *
+ * The backend and this portal ship separately, and neither can wait for the
+ * other. Rather than a feature flag someone has to remember to flip — which is
+ * exactly how partners ended up looking at fixture venues — the portal asks the
+ * bench what it can do and adapts.
+ *
+ * A missing whitelisted method is a 404 from Frappe. Anything else (403, 417, a
+ * network failure, a real validation error) is a genuine error and is rethrown:
+ * treating a permission failure as "feature absent" would silently downgrade
+ * the product instead of reporting a misconfiguration.
+ *
+ * The verdict is cached per method for the tab, so a missing endpoint costs one
+ * request rather than one per keystroke.
+ */
+const capabilities = new Map()
+
+export async function withFallback(method, real, whenMissing) {
+  if (capabilities.get(method) === false) return whenMissing()
+  try {
+    const result = await real()
+    capabilities.set(method, true)
+    return result
+  } catch (err) {
+    if (err?.status === 404) {
+      capabilities.set(method, false)
+      return whenMissing()
+    }
+    throw err
+  }
+}
+
+/** Test seam — lets a test reset what the portal thinks the bench supports. */
+export const __resetCapabilities = () => capabilities.clear()
+
 /* --------------------------------------------------------------------- auth */
 
 /** Exchanges credentials for a reusable api_key/api_secret pair. */
@@ -65,6 +101,19 @@ export const register = ({ email, password, business_name, first_name, last_name
         first_name,
         last_name,
       })
+
+      // CAPABILITY BRANCH. With email verification deployed, register_vendor
+      // returns `{otp_required: true}` and no token — the account exists but is
+      // disabled until a code is redeemed. Without it, register_vendor returns
+      // a token exactly as before.
+      //
+      // Branching on the response rather than on a build flag means the two
+      // sides ship in either order with no broken window, and no flag anyone
+      // has to remember to flip.
+      if (result?.otp_required) {
+        return { otpRequired: true, email: result.email || email }
+      }
+
       setAuthToken(result)
       return result
     },
@@ -77,6 +126,67 @@ export const register = ({ email, password, business_name, first_name, last_name
       })
       setAuthToken({ api_key: 'mock', api_secret: 'mock' })
       return result
+    },
+  )()
+
+/**
+ * Redeem a registration code. Returns a token on success, same as login.
+ *
+ * Only reachable when `register` reported `otpRequired`, so there is no
+ * fallback here — if this 404s the backend contract is genuinely broken and
+ * pretending otherwise would strand a half-created account.
+ */
+export const verifyOtp = (email, code) =>
+  pick(
+    async () => {
+      const result = await call('shotright.api.verify_otp', { email, code })
+      setAuthToken(result)
+      return result
+    },
+    async () => {
+      // Dev fixtures accept 000000 so the screen can be worked on offline.
+      if (String(code).trim() !== '000000') {
+        throw new Error('That code is not correct. (Dev fixtures expect 000000.)')
+      }
+      setAuthToken({ api_key: 'mock', api_secret: 'mock' })
+      return mockBackend.getLoggedUser()
+    },
+  )()
+
+export const resendOtp = (email, purpose = 'Registration') =>
+  pick(
+    () => call('shotright.api.resend_otp', { email, purpose }),
+    async () => ({ sent: true, cooldown_seconds: 60 }),
+  )()
+
+/**
+ * Start a password reset.
+ *
+ * Deliberately reports success even for an address with no account — the
+ * backend does the same. Anything else turns this form into a free tool for
+ * checking whether a given email is registered on the platform.
+ */
+export const requestPasswordReset = (email) =>
+  pick(
+    () => call('shotright.api.request_password_reset', { email }),
+    async () => ({ sent: true, cooldown_seconds: 60 }),
+  )()
+
+export const resetPassword = (email, code, new_password) =>
+  pick(
+    async () => {
+      const result = await call('shotright.api.reset_password', {
+        email,
+        code,
+        new_password,
+      })
+      setAuthToken(result)
+      return result
+    },
+    async () => {
+      if (String(code).trim() !== '000000') throw new Error('That code is not correct.')
+      setAuthToken({ api_key: 'mock', api_secret: 'mock' })
+      return mockBackend.getLoggedUser()
     },
   )()
 
@@ -172,17 +282,55 @@ export const getMoods = () => {
 }
 
 /**
- * GAP: no `resolve_mood` endpoint and no Mood Suggestion doctype, so matching
- * happens client-side. It now runs against the list `getMoods()` actually
- * returned — previously it matched against fourteen hard-coded fixtures even
- * with the real backend connected, so the portal could accept a mood the bench
- * has never heard of.
+ * Resolve one typed mood.
  *
- * An unmatched mood comes back `status: 'unmatched'` and MoodStep refuses it at
- * the point of entry. Do not "fix" that by sending it anyway: `create_venue`
- * rejects unknown moods and the entire submission fails.
+ * Server-side when `resolve_mood` is deployed: text that matches the curated
+ * list resolves onto it, and anything genuinely new is filed as a Mood
+ * Suggestion for staff to review — the original C1 decision. The result then
+ * carries `status: 'suggested'`, which the mood step renders as pending rather
+ * than as a normal mood, because it is not searchable until approved.
+ *
+ * Client-side when it is not: matching against the list `getMoods()` returned,
+ * and an unmatched mood comes back `status: 'unmatched'` and is refused at the
+ * point of entry. Refusing is the honest degradation — `create_venue` rejects
+ * moods it does not know, so accepting one would fail the whole submission four
+ * steps later.
+ *
+ * Both shapes are handled by the caller. Do NOT collapse them: the difference
+ * between "we filed this for review" and "we cannot take this" is exactly what
+ * the partner needs to know.
  */
-export const resolveMood = async (text) => matchMood(await getMoods(), text)
+export const resolveMood = (text) =>
+  pick(
+    () =>
+      withFallback(
+        'resolve_mood',
+        () => call('shotright.api.resolve_mood', { text }),
+        async () => matchMood(await getMoods(), text),
+      ),
+    () => mockBackend.resolveMood(text),
+  )()
+
+/**
+ * Moods most used by other approved venues, for onboarding smart defaults.
+ *
+ * A partner facing an empty mood field has to guess at a vocabulary they have
+ * never been shown. This turns recall into recognition.
+ *
+ * Falls back to the head of the plain list — which is alphabetical, not
+ * popular. That is a weaker hint but not a wrong one, and it keeps the
+ * onboarding step working identically before and after the endpoint lands.
+ */
+export const getPopularMoods = (limit = 8) =>
+  pick(
+    () =>
+      withFallback(
+        'get_popular_moods',
+        () => call('shotright.api.get_popular_moods', { limit }),
+        async () => (await getMoods()).slice(0, limit).map((m) => ({ ...m, venue_count: 0 })),
+      ),
+    () => mockBackend.getPopularMoods(limit),
+  )()
 
 /**
  * GAP: no lookup endpoint for dress codes or atmospheres, and no doctype to
@@ -266,14 +414,26 @@ export const createVenue = (payload) =>
     async () => {
       const warnings = []
 
-      // C1: only moods already on the curated list may be sent.
+      // Canonical moods go by label; the backend accepts a Mood docname or its
+      // mood_name. Vendor-authored ones go by their Mood Suggestion docname.
+      //
+      // A `suggested` mood can only exist if `resolve_mood` ran server-side and
+      // filed it, so it always has a real docname here. When that endpoint is
+      // absent, unmatched moods are refused at entry and never reach this
+      // payload — which is why there is no capability check on this branch.
       const canonical = (payload.moods || []).filter((m) => m.status === 'canonical')
-      const suggested = (payload.moods || []).filter((m) => m.status !== 'canonical')
+      const suggested = (payload.moods || []).filter((m) => m.status === 'suggested')
+
       if (suggested.length) {
+        // Not a failure — a state. The venue saves, the mood is attached, and
+        // it starts working the moment staff approve it. Saying "could not be
+        // saved" here (as this once did) would be wrong in the other direction.
         warnings.push(
           `${suggested.length} new mood${suggested.length === 1 ? '' : 's'} ` +
-            `(${suggested.map((m) => m.label).join(', ')}) could not be saved — ` +
-            `the app only accepts moods already on the Sho't Right list.`,
+            `(${suggested.map((m) => m.label).join(', ')}) ${suggested.length === 1 ? 'is' : 'are'} ` +
+            `with the Sho't Right team for review. Your venue is saved either way — ` +
+            `${suggested.length === 1 ? 'that mood' : 'those moods'} will start bringing ` +
+            `customers in once approved.`,
         )
       }
 
@@ -308,7 +468,7 @@ export const createVenue = (payload) =>
         longitude: payload.longitude ?? null,
         dress_code: payload.dress_code,
         atmosphere_desc: payload.atmosphere,
-        moods: canonical.map((m) => m.label),
+        moods: [...canonical.map((m) => m.label), ...suggested.map((m) => m.mood)],
         operating_hours: rows,
       })
 

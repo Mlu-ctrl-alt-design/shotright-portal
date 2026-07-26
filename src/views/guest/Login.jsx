@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
-import { USE_MOCKS } from '../../services/api'
 import { Button, Input, PasswordInput, Alert } from '../../components/ui'
 import AuthLayout from '../../components/layout/AuthLayout'
 
@@ -19,8 +18,11 @@ export default function Login() {
   const location = useLocation()
   const login = useAuthStore((s) => s.login)
 
-  const [email, setEmail] = useState(USE_MOCKS ? 'vendor@shotright.co.za' : '')
-  const [password, setPassword] = useState(USE_MOCKS ? 'password' : '')
+  // No prefill, in any environment. It used to seed fixture credentials, which
+  // was harmless while the whole app was fixtures and is not now: a real
+  // partner must never open this screen with somebody else's email in it.
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -105,11 +107,21 @@ export default function Login() {
           </Button>
         </div>
 
-        <p className="pt-1 text-center">
-          <Link to="/register" className="text-sm text-ink-700 underline hover:text-ink-900">
-            Register as a Bloop Partner
-          </Link>
-        </p>
+        <div className="space-y-2 pt-1 text-center">
+          <p>
+            <Link
+              to="/forgot-password"
+              className="text-sm text-ink-700 underline hover:text-ink-900"
+            >
+              Forgot your password?
+            </Link>
+          </p>
+          <p>
+            <Link to="/register" className="text-sm text-ink-700 underline hover:text-ink-900">
+              Register as a Bloop Partner
+            </Link>
+          </p>
+        </div>
       </form>
     </AuthLayout>
   )

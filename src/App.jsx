@@ -8,6 +8,8 @@ import Spinner from './components/ui/Spinner'
 
 import Login from './views/guest/Login'
 import Register from './views/guest/Register'
+import VerifyEmail from './views/guest/VerifyEmail'
+import ForgotPassword from './views/guest/ForgotPassword'
 import Dashboard from './views/vendor/Dashboard'
 import VenueList from './views/vendor/VenueList'
 import VenueForm from './views/vendor/VenueForm'
@@ -38,6 +40,9 @@ export default function App() {
       <Route element={<GuestRoute />}>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        {/* Only reachable when the bench reports otp_required; see Register.jsx. */}
+        <Route path="/verify" element={<VerifyEmail />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
       </Route>
 
       <Route element={<ProtectedRoute />}>

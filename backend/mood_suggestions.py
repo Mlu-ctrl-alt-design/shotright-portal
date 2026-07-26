@@ -110,6 +110,7 @@ def resolve_mood(text):
     )
     if existing:
         suggestion_name = existing
+        _record_request(existing, vendor)
     else:
         doc = frappe.get_doc(
             {
@@ -118,6 +119,8 @@ def resolve_mood(text):
                 "normalised_name": key,
                 "status": "Pending Review",
                 "vendor_profile": vendor,
+                "request_count": 1,
+                "requesters": [{"vendor_profile": vendor}] if vendor else [],
             }
         ).insert(ignore_permissions=True)
         frappe.db.commit()
@@ -129,6 +132,98 @@ def resolve_mood(text):
         "label": (text or "").strip(),
         "near": near,
     }
+
+
+def _record_request(suggestion, vendor):
+    """Count DISTINCT vendors asking for a suggestion, not raw requests.
+
+    This number is the point of the queue: it turns "somebody typed something
+    odd" into "eleven different partners independently asked for Amapiano
+    Sundays", which is a product signal worth acting on.
+
+    Counting requests rather than requesters would let one partner retyping the
+    same mood eight times outrank a genuinely popular one — ranking noise to
+    the top, which is precisely the inverse of what this is for.
+    """
+    if not vendor:
+        return
+    if frappe.db.exists(
+        "Mood Suggestion Requester", {"parent": suggestion, "vendor_profile": vendor}
+    ):
+        return
+
+    doc = frappe.get_doc("Mood Suggestion", suggestion)
+    doc.append("requesters", {"vendor_profile": vendor})
+    doc.request_count = len(doc.requesters)
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+
+
+@frappe.whitelist()
+def get_popular_moods(limit=8):
+    """The moods most used by other venues, for onboarding smart defaults.
+
+    A new partner facing an empty mood field has to guess at a vocabulary they
+    have never seen. Showing what venues like theirs actually chose turns that
+    into recognition instead of recall, which is the difference between a step
+    people complete and a step people skip.
+
+    Ranked by DISTINCT VENUES, not by row count — the same reasoning as
+    `_record_request`. Only approved venues count: pending ones have not been
+    seen by staff, so letting them influence what everyone else is shown would
+    make the list trivially game-able by bulk-submitting venues.
+
+    The caller merges this into the browse list; it is a hint, not a filter.
+    """
+    limit = min(int(limit or 8), 24)
+
+    rows = frappe.db.sql(
+        """
+        SELECT vm.mood AS name, m.mood_name, COUNT(DISTINCT v.name) AS venue_count
+        FROM `tabVenue Mood` vm
+        JOIN `tabVenue` v ON v.name = vm.parent
+        JOIN `tabMood`  m ON m.name = vm.mood
+        WHERE v.workflow_state = 'Approved'
+        GROUP BY vm.mood, m.mood_name
+        ORDER BY venue_count DESC, m.mood_name ASC
+        LIMIT %s
+        """,
+        (limit,),
+        as_dict=True,
+    )
+
+    # A brand-new platform has no usage to rank, and an empty "popular" list is
+    # a worse first run than no feature at all. Fall back to alphabetical so the
+    # onboarding hint always has something in it.
+    if not rows:
+        rows = frappe.get_all(
+            "Mood",
+            fields=["name", "mood_name"],
+            order_by="mood_name asc",
+            limit_page_length=limit,
+        )
+        for row in rows:
+            row["venue_count"] = 0
+
+    return rows
+
+
+@frappe.whitelist()
+def get_mood_demand(limit=20):
+    """Desk-facing: pending suggestions ranked by how many partners asked.
+
+    This is the queue staff should actually work from. Sorting the suggestion
+    list by creation date buries a mood eleven partners requested under fifty
+    one-offs, and the whole reason for collecting suggestions is to find the
+    former.
+    """
+    return frappe.get_all(
+        "Mood Suggestion",
+        filters={"status": "Pending Review"},
+        fields=["name", "suggested_name", "request_count", "creation"],
+        order_by="request_count desc, creation asc",
+        limit_page_length=min(int(limit or 20), 100),
+    )
 
 
 @frappe.whitelist(methods=["POST"])
@@ -160,8 +255,14 @@ def approve_mood_suggestion(suggestion, merge_into=None, mood_name=None):
         doc.merged_into = mood.name
 
     doc.save(ignore_permissions=True)
+
+    # Light up every venue that was waiting on this suggestion. Approving the
+    # word without moving the venues would leave each partner needing to come
+    # back and re-edit — which none of them will do.
+    promoted = _promote_venue_moods(doc.name, doc.merged_into)
+
     frappe.db.commit()
-    return {"mood": doc.merged_into}
+    return {"mood": doc.merged_into, "venues_updated": promoted}
 
 
 # ---------------------------------------------------------------------------
@@ -183,10 +284,90 @@ def approve_mood_suggestion(suggestion, merge_into=None, mood_name=None):
 #   merged_into     : Link → Mood             -- set on approve/merge
 #
 #   Then build the Desk list view with "Merge into…" and "Approve as new"
-#   actions calling approve_mood_suggestion() above.
+#   actions calling approve_mood_suggestion() above. Sort it by
+#   `request_count desc` — see get_mood_demand().
 #
-# Also worth doing while here: `create_venue` should accept a Mood Suggestion in
-# its `moods` array and store it on the Venue Mood child row, so a venue keeps
-# the link and starts appearing in search the moment the suggestion is approved.
-# Without that, approving a suggestion fixes the vocabulary but not the venues
-# that asked for it.
+#   request_count : Int, read-only            -- distinct vendors who asked
+#   requesters    : Table → Mood Suggestion Requester
+#
+# Mood Suggestion Requester  (child table, parent = Mood Suggestion,
+#                             fieldname `requesters`)
+#   vendor_profile : Link → Vendor Profile, reqd
+#
+# Venue Mood — add one field so a venue can hold a mood that is not canonical
+# YET:
+#   mood_suggestion : Link → Mood Suggestion, optional
+#
+#   `mood` stays required-ish but must become optional, with a validation that
+#   exactly one of (mood, mood_suggestion) is set.
+
+
+# ---------------------------------------------------------------------------
+# create_venue: accepting a not-yet-approved mood
+# ---------------------------------------------------------------------------
+#
+# This is the piece that makes vendor-authored moods worth having. Merge into
+# the existing `create_venue` where it builds the Venue Mood rows.
+#
+# Without it, approving a suggestion fixes the vocabulary but not the venues
+# that asked for it — every partner who requested the mood would have to come
+# back and re-edit their venue, which none of them will do, so the approval
+# achieves nothing user-visible.
+
+
+def _attach_moods(venue_doc, moods):
+    """Attach a mixed list of canonical Moods and Mood Suggestions to a venue.
+
+    `moods` items may be:
+      - a Mood docname or its `mood_name`   -> linked canonically
+      - a Mood Suggestion docname            -> parked on the row until approved
+
+    A parked mood is invisible to customer search until staff approve it, which
+    is correct: unreviewed vendor text must not become a search facet. But the
+    LINK is recorded now, so `approve_mood_suggestion` can light up every venue
+    waiting on it in one action.
+    """
+    venue_doc.set("moods", [])
+
+    for entry in moods or []:
+        entry = (entry or "").strip()
+        if not entry:
+            continue
+
+        mood = frappe.db.get_value("Mood", entry, "name") or frappe.db.get_value(
+            "Mood", {"mood_name": entry}, "name"
+        )
+        if mood:
+            venue_doc.append("moods", {"mood": mood})
+            continue
+
+        if frappe.db.exists("Mood Suggestion", entry):
+            venue_doc.append("moods", {"mood_suggestion": entry})
+            continue
+
+        # Neither a Mood nor a Suggestion. Refuse loudly rather than dropping it:
+        # a silently discarded mood is how a venue ends up never appearing in
+        # the search its owner expected.
+        frappe.throw(f"Unknown mood: {entry}")
+
+
+def _promote_venue_moods(suggestion, mood):
+    """Rewrite parked rows onto the real Mood once a suggestion is approved.
+
+    Call from `approve_mood_suggestion` after it sets `merged_into`. This is
+    the payoff for recording the link at submit time.
+    """
+    rows = frappe.get_all(
+        "Venue Mood", filters={"mood_suggestion": suggestion}, fields=["name", "parent"]
+    )
+    for row in rows:
+        # Skip if the venue already carries the canonical mood — merging a
+        # suggestion into an existing Mood can otherwise produce a duplicate
+        # row on a venue that had both.
+        if frappe.db.exists("Venue Mood", {"parent": row.parent, "mood": mood}):
+            frappe.delete_doc("Venue Mood", row.name, ignore_permissions=True, force=True)
+            continue
+        frappe.db.set_value("Venue Mood", row.name, {"mood": mood, "mood_suggestion": None})
+
+    frappe.db.commit()
+    return len(rows)

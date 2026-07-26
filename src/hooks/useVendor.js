@@ -12,6 +12,16 @@ export const useDashboard = () =>
 export const useMoods = () =>
   useQuery({ queryKey: ['moods'], queryFn: vendorApi.getMoods, staleTime: 5 * 60 * 1000 })
 
+// What other approved venues actually chose, for the onboarding smart default.
+// An aggregate over every venue on the platform changes slowly by nature, so it
+// is cached harder than the list it draws from.
+export const usePopularMoods = (limit = 8) =>
+  useQuery({
+    queryKey: ['moods', 'popular', limit],
+    queryFn: () => vendorApi.getPopularMoods(limit),
+    staleTime: 30 * 60 * 1000,
+  })
+
 /* ---------------------------------------------------------------- lookups */
 
 // Dress codes and atmospheres, also Desk-managed — cache just as hard.
