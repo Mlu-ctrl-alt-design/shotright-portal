@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useProfile, useUpdateProfile } from '../../hooks/useVendor'
 import { useAuthStore } from '../../store/authStore'
+import { WRITABLE_PROFILE_FIELDS } from '../../services/profile'
 import { Button, Input, PasswordInput, Card, Alert } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 
@@ -15,10 +16,9 @@ import Spinner from '../../components/ui/Spinner'
 const FIELD_LABELS = {
   vendor_name: 'your name',
   business_name: 'business name',
-  phone: 'phone',
 }
 
-/** "your name", "your name and phone", "your name, business name and phone" */
+/** "your name", or "your name and business name" */
 const LABELS_FOR = (keys) => {
   const words = keys.map((k) => FIELD_LABELS[k] || k)
   if (words.length === 1) return words[0]
@@ -30,7 +30,7 @@ export default function Profile() {
   const updateProfile = useUpdateProfile()
   const setStoreProfile = useAuthStore((s) => s.setProfile)
 
-  const [form, setForm] = useState({ vendor_name: '', business_name: '', phone: '' })
+  const [form, setForm] = useState({ vendor_name: '', business_name: '' })
   const [passwords, setPasswords] = useState({ new_password: '', confirm: '' })
   const [notice, setNotice] = useState(null)
   const [formError, setFormError] = useState(null)
@@ -51,7 +51,6 @@ export default function Profile() {
     setForm({
       vendor_name: profile.vendor_name || '',
       business_name: profile.business_name || '',
-      phone: profile.phone || '',
     })
   }, [profile])
 
@@ -82,7 +81,7 @@ export default function Profile() {
       dirty.current = false
       setStoreProfile(saved)
 
-      const missed = ['vendor_name', 'business_name', 'phone'].filter(
+      const missed = WRITABLE_PROFILE_FIELDS.filter(
         (key) => (form[key] || '').trim() && (saved?.[key] || '').trim() !== form[key].trim(),
       )
 
@@ -90,7 +89,6 @@ export default function Profile() {
         setForm({
           vendor_name: saved?.vendor_name || '',
           business_name: saved?.business_name || '',
-          phone: saved?.phone || '',
         })
         setWarning(
           `Saved, but ${LABELS_FOR(missed)} did not stick — the app couldn't store ` +
@@ -146,7 +144,19 @@ export default function Profile() {
             <Input label="Your name" name="vendor_name" required value={form.vendor_name} onChange={set('vendor_name')} />
             <Input label="Business name" name="business_name" value={form.business_name} onChange={set('business_name')} />
           </div>
-          <Input label="Phone" name="phone" type="tel" value={form.phone} onChange={set('phone')} />
+          {/* `update_vendor_profile` takes first_name, last_name, business_name
+              and new_password — there is no phone parameter, so anything typed
+              here would be discarded silently at HTTP 200. Read-only until the
+              backend has somewhere to put it: a control that accepts input and
+              throws it away is worse than one that explains itself. */}
+          <Input
+            label="Phone"
+            name="phone"
+            type="tel"
+            value={profile?.phone || ''}
+            disabled
+            hint="Not editable here yet — ask the Sho’t Right team to change it."
+          />
           <Input
             label="Email"
             name="email"

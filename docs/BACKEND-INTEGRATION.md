@@ -221,43 +221,56 @@ the Vendor role has delete permission and returns a real permission error if
 not. **Confirm the doctype name and the role permission**; the error path is
 honest either way, but a working delete is better than an honest failure.
 
-### 🔴 Profile name — `vendor_name` does not exist on the bench
+### 🟢 Profile name — fixed against the confirmed signature
 
 **Reported symptom:** Settings showed no name, and editing it did not persist.
 
 The portal was written against `backend/api_reference.py`, which I wrote before
 the real API existed and which invented a single `vendor_name` field. The real
-API has no such field — `register_vendor` takes `first_name` and `last_name`
-separately, and those are what get stored. So:
+signature is:
 
-- **Read** — `profile.vendor_name` is undefined, so "Your name" rendered empty
+```
+shotright.api.update_vendor_profile(first_name, last_name, business_name,
+                                    new_password)
+  -> {first_name, last_name, business_name}
+```
+
+No `vendor_name`, no `full_name` — and **no `phone`**.
+
+- **Read** — `profile.vendor_name` was undefined, so "Your name" rendered empty
   and the dashboard said "Welcome back, Vendor".
-- **Write** — the form posted `vendor_name` to `update_vendor_profile`. Frappe's
-  `call()` filters kwargs down to the method's declared signature, so an
-  argument the method does not accept is **dropped silently**: HTTP 200, nothing
-  saved. The UI reported "Profile updated." on the strength of that 200.
+- **Write** — the form posted `vendor_name`. Frappe's `call()` filters kwargs
+  down to the method's declared signature, so an argument the method does not
+  accept is **dropped silently**: HTTP 200, nothing saved. The UI reported
+  "Profile updated." on the strength of that 200, and the only evidence was the
+  value reverting.
 
-Bridged in `src/services/profile.js`:
+Fixed in `src/services/profile.js`:
 
-- `displayName()` derives the name from `vendor_name`, `full_name`, or
-  `first_name` + `last_name`, whichever the bench actually sends.
-- `toProfilePayload()` sends the name in **both** shapes. That is deliberate,
-  not shotgunning — Frappe drops undeclared kwargs, so the extra pair cannot
-  error, while sending one shape is a coin flip that fails silently if it lands
-  wrong.
+- `toProfilePayload()` sends **exactly** the four declared arguments, splitting
+  the typed name into `first_name`/`last_name`. An earlier version posted the
+  name in several shapes as a hedge while the signature was unknown; with it
+  confirmed, that is noise and is gone.
+- `displayName()` derives the name from `first_name` + `last_name`, tolerating
+  `vendor_name`/`full_name` in case `get_vendor_dashboard`'s `profile` payload
+  differs from the update payload — that one has not been confirmed the same
+  way, and a blank name is a bad way to find out. Applied in `getProfile` **and**
+  `getDashboard`.
 - `updateProfile()` re-reads the profile after writing and `Profile.jsx`
-  compares. A field that did not stick is now reported to the partner by name
-  instead of being covered by a success message.
+  compares, naming any field that did not stick instead of covering it with a
+  success message. Kept even though the signature is now known: a 200 is still
+  not evidence, and this is what turned an invisible bug into a visible one.
 
-**⚠️ NOT VERIFIED AGAINST THE LIVE BENCH** — no outbound route from the build
-environment. Verified against four simulated shapes (`first_name`/`last_name`,
-`full_name`, `vendor_name`, and a bench that accepts nothing).
+**Phone is now read-only on the Settings form.** `update_vendor_profile` has no
+phone parameter, so an editable field there accepts input and discards it at
+HTTP 200 — the same failure in miniature. It displays whatever the profile
+carries, with a note. **Backend: add `phone` to the signature** and the field
+can become editable again with no frontend change beyond deleting the
+`disabled`.
 
-**To close this properly:** confirm `update_vendor_profile`'s real signature and
-what `get_vendor_dashboard` puts in `profile`, then delete the losing half of
-`toProfilePayload()`. If the bench genuinely has no writable name field, that is
-a backend change — the portal cannot fix it, and the warning is the honest
-interim.
+Verified against four simulated bench shapes and a bench that accepts nothing
+and returns 200. Still **not run against the live bench** — no outbound route
+from the build environment.
 
 ### 🟡 Dress codes and atmospheres are portal-side
 
@@ -306,10 +319,12 @@ The portal is on the real bench now, so these are no longer blockers to cutover
       `FALLBACK_MOODS`.
 - [ ] Confirm whether a SendGrid account actually exists (see
       `docs/EMAIL-SETUP.md` §1) or use the existing SMTP mailbox.
-- [ ] **Confirm `update_vendor_profile`'s signature** and what
-      `get_vendor_dashboard` returns in `profile`, then delete the losing half
-      of `toProfilePayload()`. See the profile-name section above — this one is
-      a live defect partners can hit, not a future gap.
+- [ ] **Add `phone` to `update_vendor_profile`.** It is collected in the venue
+      wizard and shown on the profile, but there is no parameter to save it, so
+      the Settings field is read-only. See the profile-name section above.
+- [ ] Confirm what `get_vendor_dashboard` puts in `profile` (the update
+      signature is confirmed; the read payload is inferred from it). Once
+      known, the `vendor_name`/`full_name` fallbacks in `displayName()` can go.
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.

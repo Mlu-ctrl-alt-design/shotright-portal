@@ -6,29 +6,35 @@
  *
  * The portal was written against `backend/api_reference.py`, which I wrote
  * before the real API existed and which invented a single `vendor_name` field.
- * The real API does not have one. `register_vendor` takes `first_name` and
- * `last_name` separately, and those are what actually get stored — so:
+ * The real signature, since confirmed, is:
  *
- *   READ   the profile has no `vendor_name`, so "Your name" renders empty and
- *          the dashboard falls back to "Welcome back, Vendor".
- *   WRITE  the form posts `vendor_name` to `update_vendor_profile`. Frappe's
- *          `call()` filters kwargs down to the method's declared signature, so
- *          an argument the method does not accept is DROPPED SILENTLY — no
- *          error, HTTP 200, nothing saved. The UI then said "Profile updated."
+ *   shotright.api.update_vendor_profile(first_name, last_name, business_name,
+ *                                       new_password)
+ *     -> {first_name, last_name, business_name}
  *
- * Both directions are handled here rather than in the views, so there is one
- * place to correct when the bench's actual shape is confirmed.
+ * No `vendor_name`. No `full_name`. So:
  *
- * ⚠️ NOT VERIFIED AGAINST THE LIVE BENCH — this environment has no outbound
- * route to shotright.thedaystar.co.za. The field list below is deliberately
- * generous for that reason, and `Profile.jsx` now re-reads after saving and
- * reports honestly if the value did not stick, rather than trusting a 200.
+ *   READ   the profile has no `vendor_name`, so "Your name" rendered empty and
+ *          the dashboard said "Welcome back, Vendor".
+ *   WRITE  the form posted `vendor_name`. Frappe's `call()` filters kwargs down
+ *          to the method's declared signature, so an argument the method does
+ *          not accept is DROPPED SILENTLY — no error, HTTP 200, nothing saved.
+ *          The UI then reported "Profile updated."
+ *
+ * ⚠️ AND NO `phone`. The Settings form has a phone field with nowhere to send
+ * it — see `Profile.jsx`, where it is now read-only rather than a control that
+ * accepts input and discards it.
+ *
+ * The write below matches that signature exactly. The READ is still tolerant of
+ * other shapes because `get_vendor_dashboard`'s `profile` payload has not been
+ * confirmed the same way — it is near-certainly first/last given the above, but
+ * the fallbacks cost nothing and a blank name is a bad way to find out.
  */
 
 /**
- * Every field the bench might plausibly carry a person's name in, most specific
- * first. `full_name` is a standard Frappe User field; `vendor_name` is what the
- * portal has always assumed.
+ * Where a person's name might live, most specific first. `first_name` +
+ * `last_name` is the confirmed shape; the other two are tolerated in case the
+ * dashboard payload differs from the update payload.
  */
 export function displayName(profile) {
   if (!profile) return ''
@@ -67,24 +73,31 @@ export function normaliseProfile(profile) {
 }
 
 /**
- * Build the update payload.
+ * The exact arguments `update_vendor_profile` accepts. Anything else Frappe
+ * discards without complaint, so sending more is not harmless — it is how a
+ * field silently fails to save while the request returns 200.
+ */
+const ACCEPTED = ['first_name', 'last_name', 'business_name', 'new_password']
+
+/**
+ * Build the update payload for the confirmed signature.
  *
- * Sends the name in BOTH shapes. This is deliberate, not shotgunning: Frappe
- * drops kwargs a whitelisted method does not declare, so the extra pair costs
- * nothing and cannot error — while sending only one shape is a coin flip that
- * fails silently with a 200 if it lands wrong. When the bench's real signature
- * is confirmed, delete the losing pair.
+ * `vendor_name` from the form is split into `first_name`/`last_name`. Nothing
+ * outside `ACCEPTED` is sent: an earlier version posted both shapes as a hedge
+ * while the signature was unknown, which is no longer a hedge but noise.
  *
- * `new_password` passes through untouched; it is the one field whose name the
- * portal has never been wrong about.
+ * `phone` is dropped here deliberately and the form no longer offers it for
+ * editing — dropping it quietly while the field looked editable was the exact
+ * failure mode this whole change is about.
  */
 export function toProfilePayload(form) {
   const { vendor_name, ...rest } = form
-  if (vendor_name === undefined) return rest
+  const named = vendor_name === undefined ? rest : { ...rest, ...splitName(vendor_name) }
 
-  return {
-    ...rest,
-    vendor_name: vendor_name.trim(),
-    ...splitName(vendor_name),
-  }
+  return Object.fromEntries(
+    Object.entries(named).filter(([key, value]) => ACCEPTED.includes(key) && value !== undefined),
+  )
 }
+
+/** Fields the bench can actually store, for the post-save verification. */
+export const WRITABLE_PROFILE_FIELDS = ['vendor_name', 'business_name']
