@@ -10,3 +10,7 @@ dist-ssr
 npm-debug.log*
 .vite
 .vercel
+
+# Python bytecode from the backend reference files
+__pycache__/
+*.pyc
