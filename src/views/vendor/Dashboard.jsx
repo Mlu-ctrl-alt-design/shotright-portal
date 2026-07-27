@@ -131,6 +131,17 @@ export default function Dashboard() {
                   <Badge tone={stateTone(venue.workflow_state)}>
                     {stateLabel(venue.workflow_state)}
                   </Badge>
+                  {/* A Declined badge with only "Edit" next to it asks someone
+                      to fix something without telling them what. */}
+                  {inBucket(venue, 'declined') && (
+                    <Link
+                      to={`/venues/${venue.name}/review`}
+                      aria-label={`Why ${venue.venue_name} was declined`}
+                      className="text-sm font-bold text-red-700 hover:underline"
+                    >
+                      See why
+                    </Link>
+                  )}
                   <Link
                     to={`/venues/${venue.name}/edit`}
                     className="text-sm font-medium text-brand-600 hover:underline"

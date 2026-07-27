@@ -87,7 +87,43 @@ const db = {
         closed: false,
       })),
     },
+    // A declined venue, so the review screen is reachable in dev. Its gaps are
+    // deliberate: no coordinates, no photos, nothing on the menu — the three
+    // things `deriveGaps` should find on its own.
+    {
+      name: 'VEN-0003',
+      venue_name: 'Shisanyama on 4th',
+      vendor_profile: 'VP-0001',
+      workflow_state: 'Declined',
+      dress_code: '',
+      atmosphere_desc: '',
+      address: '4th Ave, Mamelodi',
+      latitude: undefined,
+      longitude: undefined,
+      moods: ['MOOD-TURNT'],
+      operating_hours: DAYS.map((day) => ({
+        day_of_week: day,
+        open_time: '11:00',
+        close_time: '23:00',
+        closed: false,
+      })),
+    },
   ],
+  reviews: {
+    'VEN-0003': {
+      state: 'Declined',
+      notes:
+        'Thanks for submitting. We can’t list this yet — the map pin is missing, so nobody ' +
+        'searching nearby would see it, and there are no photos. Add both and send it back to us ' +
+        'and we’ll approve it.',
+      reviewed_by_name: 'Nandi M.',
+      reviewed_on: new Date(Date.now() - 2 * 86400000).toISOString(),
+      fix_items: [
+        { name: 'FIX-1', label: 'Drop the pin on the venue', done: false },
+        { name: 'FIX-2', label: 'Add at least two photos of the venue', done: false },
+      ],
+    },
+  },
   headings: [
     { name: 'PH-0001', venue: 'VEN-0001', heading: 'Cocktails', idx: 1 },
     { name: 'PH-0002', venue: 'VEN-0001', heading: 'Small Plates', idx: 2 },
@@ -183,6 +219,18 @@ export const mockBackend = {
   async getVenuePhotos(venueId) {
     await delay(120)
     return (db.venuePhotos || {})[venueId] || []
+  },
+
+  /**
+   * A moderator's decision, mirroring `shotright.api.get_venue_review`.
+   *
+   * Returns null for a venue nobody has written a note about — which is the
+   * REAL bench's behaviour for every venue right now, and the state the review
+   * screen has to handle without inventing a reason.
+   */
+  async getVenueReview(venueId) {
+    await delay(140)
+    return db.reviews[venueId] || null
   },
 
   /**

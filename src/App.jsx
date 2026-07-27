@@ -15,6 +15,7 @@ import VenueList from './views/vendor/VenueList'
 import VenueForm from './views/vendor/VenueForm'
 import VenueWizard from './views/vendor/wizard/VenueWizard'
 import VenueMenu from './views/vendor/VenueMenu'
+import VenueReview from './views/vendor/VenueReview'
 import Profile from './views/vendor/Profile'
 
 export default function App() {
@@ -68,6 +69,10 @@ export default function App() {
           />
           <Route path="/venues/:venueId/edit" element={<VenueForm />} />
           <Route path="/venues/:venueId/menu" element={<VenueMenu />} />
+          {/* A decline is a decision made ABOUT a venue, so it lives on the
+              venue rather than in a notifications pile — it is still there in
+              a week, when the partner finally has an hour to deal with it. */}
+          <Route path="/venues/:venueId/review" element={<VenueReview />} />
           <Route path="/profile" element={<Profile />} />
         </Route>
       </Route>

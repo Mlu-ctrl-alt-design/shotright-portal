@@ -249,17 +249,57 @@ immediately so the partner sees them, then has nothing to link them to.
 
 ### 12. When a venue is declined, what does the partner get back?
 
-The designs show a decline screen with the moderator's reasons and an "edit and
-resubmit" path. That needs fields we do not have:
+> **Promoted 27 Jul — this is now blocking a shipped screen, not a design.**
+> Drop-in: **`backend/venue_review.py`**.
 
-- `review_notes` — what the moderator actually said
-- `reviewed_by`, `reviewed_on`
-- ideally a child table of fix-items with a done flag, so the partner gets a
-  checklist rather than a paragraph
+The decline screen is built and live. A partner opening it today is told, in as
+many words, that **no reason was recorded** — because a decline is a workflow
+state and nothing more, and there is no field for a moderator to write into.
 
-And a decision: does the partner **edit the Venue**, or **get a Draft back**? We
-think editing the Venue is right (the review history hangs off it), but if it is
-a draft then `save_venue_draft` needs a `venue` link field.
+That is honest, and it is a bad thing for a business owner to read about their
+own livelihood. We are not filling the gap with a generic line: "your venue
+didn't meet our guidelines" removes the awkwardness and replaces it with
+something worse, because the partner acts on it, changes the wrong thing,
+resubmits, and is declined again.
+
+```
+get_venue_review(venue_name)               -> {state, notes, reviewed_by,
+                                               reviewed_by_name, reviewed_on,
+                                               fix_items[]}
+set_review_fix_item(venue_name, item, done) -> {ok: true}
+```
+
+On **`Venue`**: `review_notes` (Small Text, **plain text**), `reviewed_by`
+(Link → User), `reviewed_on` (Datetime), `fix_items` (Table). Child table
+**`Venue Fix Item`**: `label` (Data), `done` (Check, ticked by the *partner*).
+
+`notes` is shown to the partner **verbatim**, in a quote block, attributed. It
+is not summarised or reformatted on the way through — they came to the page to
+read exactly what was said. So write it as a message to a business owner, not
+as an internal moderation note.
+
+**Two things that belong in the Desk, not in the endpoint:**
+
+1. **Make `review_notes` required on the decline transition.** A workflow that
+   permits an empty note will produce empty notes, and this whole item exists
+   to stop that.
+2. Stamp `reviewed_on` on the *transition*, not on every save — the screen
+   renders it as a date, and a save today reads as "reviewed again today".
+
+**The decision we need:** does resubmitting **edit the Venue** or **restore a
+Draft**? We think the Venue (the review history hangs off it, and the partner
+keeps one thing with one identity) and the shipped button goes to the venue's
+edit form. If you'd rather it became a draft, `save_venue_draft` needs a `venue`
+link field and that button changes. Those are different products — tell us
+before you build either.
+
+**Also, separately: we have no support address.** "Contact support" is wired to
+a `mailto:` from `VITE_SUPPORT_EMAIL`, and that variable is deliberately not
+defaulted — a guessed address doesn't bounce, it just never gets read. With it
+unset the screen shows no support button and says so. **Send us the address.**
+Better still would be a `contact_support(venue_name, message)` endpoint so the
+partner's question lands attached to the venue the reviewer already has open,
+rather than in a shared inbox with no context.
 
 ### 13. Do drafts expire?
 
@@ -313,6 +353,7 @@ const METHODS = [
   'shotright.api.start_menu_import', 'shotright.api.get_menu_import_status',
   'shotright.api.cancel_menu_import',
   'shotright.api.set_venue_photos', 'shotright.api.get_venue_photos',
+  'shotright.api.get_venue_review', 'shotright.api.set_review_fix_item',
   'shotright.api.get_popular_venue_options',
   'shotright.api.send_otp', 'shotright.api.verify_otp',
 ]
@@ -343,3 +384,4 @@ detection cannot rescue us from.
 | 7 | Type a mood nobody has used. It is accepted as pending and appears in the Desk queue. |
 | 8 | Register. The code arrives. An unverified account is purged on schedule. |
 | 14 | Add four photos in the wizard, drag the third to the front, submit. The warning about photos not reaching customers is **gone**, and reopening the venue shows the same four in the same order with the right cover. |
+| 12 | Decline a venue in the Desk with a note. The partner's Declined tab shows a **Why?** link, and the screen behind it quotes your note back, attributed to you and dated — instead of "no reason was recorded". |
