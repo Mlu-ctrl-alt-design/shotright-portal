@@ -20,10 +20,21 @@
  *   C3  the backend stores operating hours as per-day rows. The wizard collects
  *       three ranges, so `expandOperatingHours()` below converts.
  *   C4  `add_product_item` takes no image, so menu photos have nowhere to go.
+ *   C5  nothing on the Venue holds the venue's own PHOTOGRAPHS — not on
+ *       `create_venue`, not as an endpoint. The portal uploads them anyway and
+ *       says plainly that they are not reaching customers yet; see the venue
+ *       photos section below.
  *
  * Methods live in a flat `shotright.api.*` namespace — not `.vendor.*`.
  */
-import api, { call, callGet, USE_MOCKS, setAuthToken, hasAuthToken } from './api'
+import api, {
+  call,
+  callGet,
+  USE_MOCKS,
+  setAuthToken,
+  hasAuthToken,
+  isMethodMissing,
+} from './api'
 import { mockBackend } from './mockBackend'
 import { matchMood, FALLBACK_MOODS } from './moods'
 import { VENUE_LOOKUPS } from './lookups'
@@ -65,7 +76,10 @@ export async function withFallback(method, real, whenMissing) {
 }
 
 /** Test seam — lets a test reset what the portal thinks the bench supports. */
-export const __resetCapabilities = () => capabilities.clear()
+export const __resetCapabilities = () => {
+  capabilities.clear()
+  photoSupport = null
+}
 
 /* --------------------------------------------------------------------- auth */
 
@@ -532,6 +546,22 @@ export const createVenue = (payload) =>
         }
       }
 
+      // Photos, like the menu, are their own call — and unlike the menu they
+      // have nowhere to land yet (C5). Attempted regardless, because the day
+      // the endpoint appears this starts working with no release.
+      if (payload.photos?.length) {
+        const count = payload.photos.length
+        const result = await saveVenuePhotos(venue.name ?? venue.venue_name, payload.photos)
+        if (!result?.saved) {
+          warnings.push(
+            `Your ${count === 1 ? 'photo was' : `${count} photos were`} uploaded and ` +
+              `${result?.attached ? 'attached to this venue for our reviewers' : 'stored safely'}, ` +
+              `but they won’t appear to customers yet — the app has no field for a venue’s ` +
+              `pictures. Nothing has been lost, and they’ll show up as soon as that lands.`,
+          )
+        }
+      }
+
       return { venue, warnings }
     },
     async () => ({ venue: await mockBackend.createVenue(payload), warnings: [] }),
@@ -545,11 +575,39 @@ export const updateVenue = (venueId, payload) =>
 
 /* --------------------------------------------------------------------- menu */
 
-export const getMenu = (venueId) =>
-  pick(
-    () => callGet('shotright.api.get_venue_products', { venue_name: venueId }),
-    () => mockBackend.getMenu(venueId),
-  )()
+/**
+ * REPORTED: opening a venue's menu returned "Not found".
+ *
+ * A 404 here has two completely different causes and they were being shown to
+ * the partner identically, as a red error where their menu should be:
+ *
+ *   THE ENDPOINT IS NOT DEPLOYED. `get_venue_products` is one of the method
+ *   names that predate the real API — the same class of mistake that produced
+ *   the `vendor_name` and `Rejected` bugs. Nothing is wrong with the partner's
+ *   venue; the portal is asking for something that is not there.
+ *
+ *   THE VENUE IS NOT THEIRS, or does not exist. That is a real error and must
+ *   still be reported as one.
+ *
+ * So this returns `{ headings, unavailable }` rather than throwing on the first
+ * case. The page then renders — the partner can still add headings and items by
+ * hand — with a banner that says which endpoint is missing, instead of a dead
+ * end that reads as "we lost your menu".
+ */
+export const MENU_READ_METHOD = 'shotright.api.get_venue_products'
+
+export const getMenu = async (venueId) => {
+  if (USE_MOCKS) return { headings: await mockBackend.getMenu(venueId), unavailable: false }
+  try {
+    const headings = await callGet(MENU_READ_METHOD, { venue_name: venueId })
+    return { headings: headings || [], unavailable: false }
+  } catch (err) {
+    if (isMethodMissing(err, MENU_READ_METHOD)) {
+      return { headings: [], unavailable: MENU_READ_METHOD }
+    }
+    throw err
+  }
+}
 
 export const createHeading = (venueId, heading) =>
   pick(
@@ -634,6 +692,220 @@ export const uploadMenuImage = (file) =>
     },
     () => mockBackend.uploadMenuImage(file),
   )()
+
+/* ----------------------------------------------------------- venue photos */
+
+/**
+ * A venue's own photographs — the room, the bar, the plate on the table.
+ *
+ * These are not a nice-to-have. Sho't Right sells a *mood*, and a listing with
+ * no picture is asking someone to pick a Friday night on the strength of a name
+ * and a dress code. Until this existed the portal had nowhere to put one at
+ * all: a partner could describe their venue in three paragraphs and still have
+ * nothing for a customer to look at.
+ *
+ * ⚠️ THE BACKEND HAS NO HOME FOR THESE YET. `create_venue` takes no photos and
+ * there is no endpoint to set them, which is the same gap as menu item images
+ * (C4) — and it was missing from the backend request, so it is now written up as
+ * item 14 in `docs/BACKEND-ASKS.md` with a drop-in `backend/venue_photos.py`.
+ *
+ * What we do in the meantime is deliberate, and is NOT "pretend it worked":
+ *
+ *   1. The upload itself is real. Frappe's stock `upload_file` creates the File
+ *      on the bench, and when the venue already exists we pass `doctype` and
+ *      `docname` so the photo lands as an attachment ON that Venue. A moderator
+ *      reviewing the venue in Desk can see it. That is genuine value today.
+ *   2. Ordering and the cover photo need a field to live in, and there isn't
+ *      one. `saveVenuePhotos` asks for the endpoint, and when it is absent says
+ *      so — to the caller, which passes it to the partner.
+ *
+ * The distinction the partner is entitled to: their photos are UPLOADED and not
+ * lost, but are not yet SHOWN to customers. Saying "saved!" over that would be
+ * the menu-delete bug again — a silent no-op dressed as a success.
+ */
+export const PHOTOS_SAVE_METHOD = 'shotright.api.set_venue_photos'
+export const PHOTOS_READ_METHOD = 'shotright.api.get_venue_photos'
+
+/** Max photos per venue. A listing, not an album. */
+export const MAX_VENUE_PHOTOS = 10
+
+/**
+ * Upload one photo.
+ *
+ * `venueId` is optional because the wizard has no venue yet — step 2 runs long
+ * before `create_venue`. Uploading anyway (rather than holding the bytes until
+ * submit) is what lets the partner SEE their photo while they are still
+ * choosing, and what lets a resumed draft come back with its pictures: a draft
+ * carries `file_url` strings, and could never carry a File object.
+ */
+export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
+  pick(
+    async () => {
+      const form = new FormData()
+      form.append('file', file, file.name)
+      form.append('is_private', '0') // customers have to be able to see it
+      form.append('folder', 'Home/Attachments')
+      if (venueId) {
+        form.append('doctype', 'Venue')
+        form.append('docname', venueId)
+      }
+      const { data } = await api.post('/api/method/upload_file', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => onProgress?.(e.total ? e.loaded / e.total : 0),
+      })
+      const uploaded = data.message || {}
+      return {
+        name: uploaded.name,
+        file_url: uploaded.file_url,
+        file_name: uploaded.file_name || file.name,
+        attached: Boolean(venueId),
+      }
+    },
+    () => mockBackend.uploadVenuePhoto(file, venueId),
+  )()
+
+const photoRow = (photo, index) => ({
+  file_url: photo.file_url,
+  file_name: photo.file_name,
+  file: photo.name, // the File docname, so the backend can link rather than copy
+  idx: index + 1,
+  is_cover: index === 0,
+})
+
+/**
+ * Persist the set and its ORDER.
+ *
+ * Order is the whole reason this is a call and not just a series of uploads:
+ * photo one is the picture on the listing card, and a partner who drags their
+ * best shot to the front has made a real editorial decision that must survive.
+ *
+ * Returns `{ saved }`. `saved: false` is not a failure to report as an error —
+ * it means the endpoint is not deployed, and carries `method` so the caller can
+ * name it. Anything genuinely wrong still throws.
+ */
+export const saveVenuePhotos = (venueId, photos) =>
+  pick(
+    () =>
+      withFallback(
+        PHOTOS_SAVE_METHOD,
+        async () => {
+          await call(PHOTOS_SAVE_METHOD, {
+            venue_name: venueId,
+            photos: photos.map(photoRow),
+          })
+          return { saved: true }
+        },
+        async () => ({
+          saved: false,
+          method: PHOTOS_SAVE_METHOD,
+          // Best effort so the work is not stranded: attach whatever went up
+          // before the venue existed, so a moderator at least has the pictures
+          // in front of them. Failure here is silent by design — it is a
+          // consolation prize, and reporting it as an error would bury the
+          // thing that actually matters, which is the missing endpoint.
+          attached: await attachOrphans(venueId, photos),
+        }),
+      ),
+    async () => mockBackend.saveVenuePhotos(venueId, photos),
+  )()
+
+/** Link Files uploaded before the venue existed. Returns how many stuck. */
+async function attachOrphans(venueId, photos) {
+  let linked = 0
+  for (const photo of photos) {
+    if (!photo.name || photo.attached) continue
+    try {
+      await call('frappe.client.set_value', {
+        doctype: 'File',
+        name: photo.name,
+        fieldname: { attached_to_doctype: 'Venue', attached_to_name: venueId },
+      })
+      linked += 1
+    } catch {
+      // No write permission on File for the Vendor role, most likely. The
+      // photo is still uploaded; it is just not on the Venue doc.
+    }
+  }
+  return linked
+}
+
+/**
+ * Read a venue's photos back.
+ *
+ * Falls back to listing the Venue's File attachments, which is what the upload
+ * path above actually produces today. Attachments have no order and no cover
+ * flag, so they come back in upload order — honest, and the reason the
+ * uploader tells the partner that ordering is not saved yet.
+ */
+export const getVenuePhotos = (venueId) =>
+  pick(
+    () =>
+      withFallback(
+        PHOTOS_READ_METHOD,
+        async () => {
+          const rows = (await callGet(PHOTOS_READ_METHOD, { venue_name: venueId })) || []
+          return { photos: rows.map(normalisePhoto), ordered: true }
+        },
+        async () => {
+          try {
+            const files = await callGet('frappe.client.get_list', {
+              doctype: 'File',
+              filters: JSON.stringify({
+                attached_to_doctype: 'Venue',
+                attached_to_name: venueId,
+                is_folder: 0,
+              }),
+              fields: JSON.stringify(['name', 'file_url', 'file_name']),
+              order_by: 'creation asc',
+              limit_page_length: MAX_VENUE_PHOTOS,
+            })
+            return {
+              photos: (files || [])
+                .filter((f) => /\.(jpe?g|png|webp|avif)$/i.test(f.file_url || ''))
+                .map(normalisePhoto),
+              ordered: false,
+            }
+          } catch {
+            // Reading someone's attachments is not worth failing a page over.
+            return { photos: [], ordered: false }
+          }
+        },
+      ),
+    async () => ({ photos: await mockBackend.getVenuePhotos(venueId), ordered: true }),
+  )()
+
+/**
+ * Can this bench hold a venue's photos at all?
+ *
+ * Asked BEFORE the partner starts, not after they finish. The wizard has no
+ * venue id, so there is nothing to read and nothing to save — and finding out
+ * at submit that eight carefully-ordered photographs are not going anywhere is
+ * the kind of thing that makes someone stop trusting the whole form.
+ *
+ * `withFallback` cannot answer this, and that is the point: it caches a 404 as
+ * "method missing" whatever caused it, so probing with a venue name that does
+ * not exist would poison the cache for a method that is perfectly fine.
+ * `isMethodMissing` reads the exception text instead, so a missing DOCUMENT (or
+ * a permission error, or anything else) counts as proof the endpoint is there.
+ */
+let photoSupport = null
+
+export const venuePhotosSupported = () => {
+  if (USE_MOCKS) return Promise.resolve(true)
+  if (!photoSupport) {
+    photoSupport = callGet(PHOTOS_READ_METHOD, { venue_name: '__shotright_capability_probe__' })
+      .then(() => true)
+      .catch((err) => !isMethodMissing(err, PHOTOS_READ_METHOD))
+  }
+  return photoSupport
+}
+
+const normalisePhoto = (row) => ({
+  name: row.file || row.name,
+  file_url: row.file_url,
+  file_name: row.file_name || row.file_url?.split('/').pop() || 'photo',
+  attached: true,
+})
 
 /* ------------------------------------------------------------------ profile */
 

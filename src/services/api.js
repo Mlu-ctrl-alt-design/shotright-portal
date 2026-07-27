@@ -111,8 +111,34 @@ export function normalizeError(error) {
   if (!message) message = 'Something went wrong. Please try again.'
   const normalized = new Error(message)
   normalized.status = error.response?.status
+  // Kept because a 404 is ambiguous on Frappe: a MISSING METHOD and a MISSING
+  // DOCUMENT both come back as DoesNotExistError with the same status, and the
+  // two need completely different things said to a partner. Only the raw body
+  // can tell them apart — see `isMethodMissing`.
+  normalized.excType = data?.exc_type || null
+  normalized.detail = [data?.exception, data?.message, data?.exc].filter(Boolean).join(' ')
   normalized.original = error
   return normalized
+}
+
+/**
+ * Did the bench 404 because the ENDPOINT is not there, rather than because the
+ * thing we asked for is not there?
+ *
+ * Worth distinguishing. Every wrong-endpoint bug on this project has reached a
+ * partner as some flavour of "not found", which reads as "your data is gone" —
+ * the most alarming possible way to report a deployment gap. Frappe names the
+ * method it could not resolve in the exception text, so when it does, we can say
+ * "this part of the portal is not on your server yet" instead of frightening
+ * someone about their own menu.
+ */
+export function isMethodMissing(error, method) {
+  if (error?.status !== 404) return false
+  const detail = `${error.detail || ''} ${error.message || ''}`
+  return (
+    /Method Not Found|ModuleNotFoundError|AttributeError|not whitelisted/i.test(detail) ||
+    (Boolean(method) && detail.includes(method))
+  )
 }
 
 function safeFirstServerMessage(raw) {

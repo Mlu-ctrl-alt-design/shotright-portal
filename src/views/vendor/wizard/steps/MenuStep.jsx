@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
-import { parseMenuFile, MENU_TEMPLATE_HEADERS } from '../../../../utils/menuImport'
-import { Button, Input, Alert, Toast, UploadProgress } from '../../../../components/ui'
+import { parseMenuFile, MENU_TEMPLATE_HEADERS, buildTemplateCsv } from '../../../../utils/menuImport'
+import { Button, Input, Alert, Toast } from '../../../../components/ui'
+import MenuImportStatus from '../../../../components/ui/MenuImportStatus'
 import MenuItemForm from './MenuItemForm'
 
 /**
@@ -69,10 +70,14 @@ export default function MenuStep({ value, onChange }) {
   const [categoryName, setCategoryName] = useState('')
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
-  const [upload, setUpload] = useState(null)
+  // The reading state, driven by the parser's own stage callbacks — see
+  // `runImport`. Shape matches what `MenuImportStatus` reads off a server job,
+  // so both engines render through one component.
+  const [reading, setReading] = useState(null)
   // { categoryId, item|null } — null item means "adding".
   const [editing, setEditing] = useState(null)
   const importRefs = useRef({})
+  const firstCategoryRef = useRef(null)
 
   const categories = value.categories
 
@@ -127,10 +132,32 @@ export default function MenuStep({ value, onChange }) {
     const file = event.target.files?.[0]
     if (!file) return
     setError(null)
+
+    /* The venue does not exist yet at this point in the wizard, so there is no
+       server-side job to queue against it — the file is read here, in the
+       browser. That has one consequence the copy must respect: leaving the page
+       does NOT keep this going, so `canLeave` is false and the "we'll email you
+       when it's ready" offer is simply not made. The venue Menu page, where the
+       venue does exist, gets the background job and does make the offer. Same
+       component, same checklist, different promise, because the promise differs
+       in fact. */
+    let facts = {
+      stage: 'uploaded',
+      file_name: file.name,
+      file_size: file.size,
+      category_id: category.id,
+    }
+    setReading(facts)
+
     try {
-      setUpload({ fileName: file.name, percent: 35 })
-      const rows = await parseMenuFile(file)
-      setUpload({ fileName: file.name, percent: 80 })
+      const rows = await parseMenuFile(file, (stage, update) => {
+        facts = { ...facts, ...update, stage }
+        setReading(facts)
+        // Let the browser paint each stage. Without this the whole parse runs
+        // inside one task and the partner sees nothing until it is over — the
+        // checklist would be truthful and invisible, which helps no one.
+        return new Promise((r) => setTimeout(r, 0))
+      })
 
       const next = categories.map((c) => ({ ...c, items: [...c.items] }))
       const findOrAdd = (name) => {
@@ -154,24 +181,33 @@ export default function MenuStep({ value, onChange }) {
       })
 
       setCategories(next)
-      setUpload(null)
+      setReading({ ...facts, stage: 'done', created_count: rows.length, skipped_count: 0 })
       setToast(`${rows.length} item${rows.length === 1 ? '' : 's'} imported from "${file.name}".`)
     } catch (err) {
-      setUpload(null)
+      setReading(null)
       setError(err.message)
     } finally {
       event.target.value = ''
     }
   }
 
+  /**
+   * "Add your items by hand instead" — available from the first second of the
+   * read, not held back until the wait has already gone wrong.
+   *
+   * It stops the CHECKLIST, not the parse: the rows are still on their way in
+   * and throwing them away because someone got impatient would discard work they
+   * asked for. Focus lands on the category field, because a link that offers a
+   * manual path and then leaves you to find the form is not a way out.
+   */
+  const addManually = () => {
+    setReading(null)
+    firstCategoryRef.current?.focus()
+  }
+
   /** The template the designs offer for download, so uploads match what we parse. */
   const downloadTemplate = () => {
-    const csv = [
-      MENU_TEMPLATE_HEADERS.join(','),
-      'STARTERS,Prawn Cocktail,80.00,"Tomatoes, creamy burrata and a great summer starter."',
-      'MAINS,Chicken Cordon Bleu Casserole,140.60,"Chicken wrapped around cheese, breaded and baked."',
-    ].join('\n')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const url = URL.createObjectURL(new Blob([buildTemplateCsv()], { type: 'text/csv;charset=utf-8' }))
     const a = document.createElement('a')
     a.href = url
     a.download = 'shot-right-menu-template.csv'
@@ -183,6 +219,7 @@ export default function MenuStep({ value, onChange }) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start gap-4">
         <Input
+          ref={firstCategoryRef}
           className="min-w-64 flex-1"
           aria-label="Menu category"
           placeholder="Please enter menu category"
@@ -207,7 +244,26 @@ export default function MenuStep({ value, onChange }) {
         </button>
       </div>
 
-      {upload && <UploadProgress fileName={upload.fileName} percent={upload.percent} />}
+      {reading && (
+        <MenuImportStatus
+          phase={reading.stage === 'done' ? 'done' : 'reading'}
+          job={reading}
+          estimate={20}
+          elapsed={0}
+          // False, and deliberately: this parse lives in the tab. See `importInto`.
+          canLeave={false}
+          fileName={reading.file_name}
+          fileSize={reading.file_size}
+          stepLabel="Step 4 of 5"
+          onAddManually={addManually}
+          onCancel={() => setReading(null)}
+          onDismiss={() => setReading(null)}
+          onReplaceFile={() => {
+            setReading(null)
+            importRefs.current[reading.category_id]?.click()
+          }}
+        />
+      )}
       {error && <Alert variant="danger">{error}</Alert>}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 

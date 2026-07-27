@@ -157,6 +157,35 @@ export const mockBackend = {
   },
 
   /**
+   * Venue photos (C5). The fixture is the OPTIMISTIC world — the endpoints
+   * exist, and the order the partner chose sticks — so the uploader's happy
+   * path is reachable in dev. The pessimistic world is what the real bench does
+   * today, and is exercised through `withFallback` against a 404.
+   */
+  async uploadVenuePhoto(file, venueId) {
+    await delay(350)
+    if (!file.type.startsWith('image/')) throw new Error('That file is not an image.')
+    return {
+      name: `mock-file-${Math.random().toString(36).slice(2, 9)}`,
+      file_url: URL.createObjectURL(file),
+      file_name: file.name,
+      attached: Boolean(venueId),
+    }
+  },
+
+  async saveVenuePhotos(venueId, photos) {
+    await delay(200)
+    db.venuePhotos = db.venuePhotos || {}
+    db.venuePhotos[venueId] = photos.map((p) => ({ ...p, attached: true }))
+    return { saved: true }
+  },
+
+  async getVenuePhotos(venueId) {
+    await delay(120)
+    return (db.venuePhotos || {})[venueId] || []
+  },
+
+  /**
    * Resolve one partner-typed mood, mirroring `shotright.api.resolve_mood`.
    *
    * An unmatched mood becomes a pending suggestion rather than a refusal —

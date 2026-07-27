@@ -176,6 +176,32 @@ They are dropped, with a warning.
 upload succeeds (the File is created) but nothing links it to the item, so it
 will never appear in the customer app. Dropped, with a warning.
 
+### 🟠 C5 — a venue's own photographs have nowhere to live
+
+Nothing on `create_venue`, and no endpoint anywhere, holds pictures of the venue
+itself. This was not a broken feature, it was an **absent** one: the portal had
+no place to upload a venue photo at all, so a partner could describe their room
+in three paragraphs, photograph every dish on their menu, and still leave a
+customer with nothing to look at on the listing.
+
+The portal now has the whole uploader — multi-select and drag, browser-side
+downscaling (a 5 MB phone photo goes up as ~300 KB), reorder, cover photo,
+remove — in the wizard's details step and on an existing venue.
+
+**Half of it works today.** The upload posts to stock `upload_file` with
+`doctype=Venue`/`docname=<venue>`, so a photo lands as an attachment on the
+Venue and a moderator sees it in Desk. Missing is a field for the customer app
+to read, and an order to read it in.
+
+So the portal capability-probes `get_venue_photos` **before the partner starts**
+— `venuePhotosSupported()`, a bespoke probe rather than `withFallback`, because
+the latter would cache a missing *venue* as a missing *method* — and when it is
+absent says so above the uploader instead of after submit. Eight photographs put
+in a deliberate order is real work; finding out at the end that none of it went
+anywhere is how a form loses somebody for good.
+
+Drop-in: `backend/venue_photos.py`. Ask: **§14 of `docs/BACKEND-ASKS.md`**.
+
 ### 🟡 Venue fields with no home
 
 `create_venue` accepts `venue_name`, `latitude`, `longitude`, `dress_code`,
@@ -333,6 +359,38 @@ Mail transport is deliberately not decided in code. Everything goes through
 verification live and mail broken, every new partner is locked out with no way
 through — strictly worse than the junk accounts it prevents.
 
+### 🔴 REPORTED — opening a venue's menu returns "Not found"
+
+**We need the real method names for the menu endpoints. A partner is hitting
+this now.**
+
+The five menu calls were written from `backend/api_reference.py`, the file that
+predates the real API — the same source as the `vendor_name` and `Rejected`
+bugs. They have never been confirmed against the Postman collection:
+
+| Portal calls | Purpose | Confirmed? |
+|---|---|---|
+| `shotright.api.get_venue_products` | read a venue's menu | ❌ **404 in production** |
+| `shotright.api.add_product_heading` | create a heading | ❌ unverified |
+| `shotright.api.add_product_item` | create an item | ❌ unverified |
+| `shotright.api.bulk_import_products` | bulk rows | ❌ unverified |
+| `shotright.api.import_products_from_excel` | file upload | ❌ unverified |
+
+This could not be probed from the build environment — the network policy has no
+outbound route to `shotright.thedaystar.co.za`. The names above are what the
+portal sends, and at least the first one is wrong.
+
+**What changed in the meantime.** A 404 on the read no longer dead-ends the page.
+`normalizeError` now keeps `exc_type` and the raw exception text, and
+`isMethodMissing()` uses them to tell a MISSING ENDPOINT apart from a MISSING
+DOCUMENT — both of which Frappe returns as a 404 `DoesNotExistError`. When the
+endpoint is what is missing, the menu page still renders and says so, naming the
+method. It no longer tells a restaurant owner their menu was not found, which is
+what it was doing and which reads as "your data is gone".
+
+That is damage control, not a fix. **Please send the correct method names and
+their parameters** — it is a one-line change per call at this end.
+
 ---
 
 ## 3. Still needed from the backend
@@ -366,7 +424,12 @@ The portal is on the real bench now, so these are no longer blockers to cutover
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.
+- [ ] 🔴 **Send the five real menu method names** (see the reported 404 above).
+      `get_venue_products` 404s in production and the other four are unverified.
 - [ ] Confirm the `Product Item` doctype name and delete permission.
+- [ ] **Deploy `venue_drafts.py`** so setup survives being put down —
+      spec in `docs/RESUME-SETUP.md`. Until then drafts are browser-local and
+      the portal shows the smaller, true promise instead of the designed one.
 - [ ] Re-run the wizard end to end against the real bench, with a real partner
       account. **This has not been done from CI** — the build environment has no
       outbound route to `shotright.thedaystar.co.za`, so the integration was
