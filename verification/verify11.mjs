@@ -25,7 +25,8 @@ const PIXEL = Buffer.from(
  * are not on the bench, so the portal must warn BEFORE the partner arranges
  * anything and must still upload. `true` simulates them deployed.
  */
-async function open({ photoEndpoints = false, existingPhotos = [] } = {}) {
+async function open({ photoEndpoints = false, existingPhotos = [], deaf = false } = {}) {
+  let stored = existingPhotos
   const context = await browser.newContext({ viewport: { width: 1280, height: 1200 } })
   const page = await context.newPage()
   page.on('pageerror', (e) => console.log('   PAGEERROR', e.message))
@@ -81,12 +82,17 @@ async function open({ photoEndpoints = false, existingPhotos = [] } = {}) {
 
     if (p.includes('get_venue_photos')) {
       if (!photoEndpoints) return r.fulfill(missing('shotright.api.get_venue_photos'))
-      return r.fulfill({ json: { message: existingPhotos } })
+      return r.fulfill({ json: { message: stored } })
     }
     if (p.includes('set_venue_photos')) {
       if (!photoEndpoints) return r.fulfill(missing('shotright.api.set_venue_photos'))
-      saves.push(JSON.parse(r.request().postData() || '{}'))
-      return r.fulfill({ json: { message: [] } })
+      const body = JSON.parse(r.request().postData() || '{}')
+      saves.push(body)
+      // `deaf` is the endpoint EXISTING but not UNDERSTANDING US — a parameter
+      // spelt differently server-side, which Frappe drops at HTTP 200. It is
+      // the failure the read-back exists to catch.
+      if (!deaf) stored = body.photos || []
+      return r.fulfill({ json: { message: stored } })
     }
 
     if (p.includes('create_venue'))
@@ -477,6 +483,46 @@ async function setLocation(page) {
     /order below isn’t saved/i.test(body),
     'and is specific about which part does not stick',
   )
+
+  await context.close()
+}
+
+/* ============================================================================
+   9. DEPLOYED BUT DEAF — the endpoint answers 200 and keeps nothing
+   ========================================================================= */
+{
+  /* The failure that became possible the moment the photo backend went live.
+     `withFallback` only asks "does the method exist?". If `photos` is spelt
+     differently server-side Frappe drops the argument, saves nothing, and
+     returns 200 — and the probe has already told the uploader it is safe to
+     promise these reach customers. That is worse than the missing endpoint we
+     started with, because nobody is looking for it. */
+  const { page, context, saves } = await open({ photoEndpoints: true, deaf: true })
+  await toDetailsStep(page)
+  await page.getByLabel(/venue name/i).fill('Corner Kitchen & Bar')
+  await setLocation(page)
+  await addPhoto(page, { name: 'one.png' })
+  await settled(page, 'one.png')
+  await addPhoto(page, { name: 'two.png' })
+  await settled(page, 'two.png')
+
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Submit' }).click()
+  await page.getByText(/Chisa|submitted|review/i).first().waitFor({ timeout: 8000 })
+
+  check(saves.length === 1, 'the save was attempted and answered 200')
+  const success = await page.locator('main').evaluate((n) => n.textContent)
+  check(
+    /only kept 0 of 2/i.test(success),
+    'the portal reads back after writing and catches that nothing was stored',
+  )
+  check(
+    !/no field for a venue’s pictures/i.test(success),
+    'and does not blame a missing field — the endpoint is there, it just did not keep them',
+  )
+  check(/Nothing has been lost/i.test(success), 'the partner is still told their photos are safe')
 
   await context.close()
 }

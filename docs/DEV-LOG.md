@@ -17,6 +17,69 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
+## 27 Jul 2026 (late) — a rename that never happened, and a photo backend going live
+
+**Reported:** *"when editing a venue the name does not persist."*
+
+**Half of it was ours.** `updateVenue` sent
+`{ venue_name: venueId, ...payload }`. `venue_name` is the **identifier** on
+every endpoint in this API — `get_venue_detail` is called with the docname under
+exactly that key — but `payload` comes off the edit form carrying the partner's
+**new** name under the same key, and it spread second. Every rename said "update
+the venue called *the name that doesn't exist yet*" and never mentioned the
+venue being edited. One key doing two jobs, colliding at precisely the moment
+the two values differ.
+
+**Fixed**
+
+- The identifier is built separately and assigned last, so nothing can reach it.
+  A new name travels under `new_name` (what `frappe.rename_doc` calls it) and
+  `new_venue_name`; Frappe drops the one it doesn't declare.
+- Only an explicit list of writable fields is sent. The form was spreading the
+  whole loaded venue — including **`workflow_state`**, a client setting its own
+  approval state, which the create path is careful never to do.
+- **The write is verified.** The venue is re-read and the name compared. If it
+  didn't change the page stays put and says so, with the field reset to what the
+  server actually holds. Navigating on after a partial save is how a silent
+  failure becomes a belief.
+
+**A defect in my own fix, caught by the test.** The first version compared the
+typed name against `venueId`. A Venue's docname may be `VEN-0001` while its
+`venue_name` is "Corner Kitchen & Bar", so *every* ordinary save — a dress code,
+a map pin — looked like a rename and came back warning that the name hadn't
+saved. A false alarm on every edit is worse than the bug it guards against,
+because people learn to click through warnings. `useUpdateVenue` now takes the
+server's current name alongside the id.
+
+**Still theirs:** is `update_venue` even deployed, what does it take a new name
+under, and is `Venue` autonamed from `venue_name` (in which case a rename needs
+`frappe.rename_doc`, whatever the parameter is called). Ask **§1b**.
+
+---
+
+**Also: the photo backend was reported ready.**
+
+Nothing here assumes it landed — the probe decides per tab, and unconfirmed
+names fall back to the pre-deployment behaviour. But going live opened a failure
+that `withFallback` alone cannot see: **the endpoint existing and the endpoint
+understanding us are different things.** A `photos` argument spelt differently
+server-side is dropped by Frappe at HTTP 200 — and by then the probe has already
+told the uploader it's safe to promise these reach customers. The partner would
+be told their gallery is live over an empty child table, which is worse than the
+missing endpoint we started with, because nobody is looking for it.
+
+So `saveVenuePhotos` now **reads the gallery back after writing it** and reports
+a short count instead of claiming a save. One extra request on a rare action.
+The read-back is only trusted when the real read endpoint answered — the
+attachment fallback legitimately returns zero for photos uploaded before the
+venue existed, and treating that as a mismatch would raise an alarm about a save
+that was fine.
+
+**Verified** — `verify13.mjs` (22 checks) for the rename; `verify11.mjs` gained
+a deployed-but-deaf case. All fourteen suites green.
+
+---
+
 ## 27 Jul 2026 (afternoon) — declined venues get an explanation
 
 **Shipped**

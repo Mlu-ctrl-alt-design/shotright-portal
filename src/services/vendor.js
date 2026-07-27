@@ -553,11 +553,19 @@ export const createVenue = (payload) =>
         const count = payload.photos.length
         const result = await saveVenuePhotos(venue.name ?? venue.venue_name, payload.photos)
         if (!result?.saved) {
+          const uploaded = `Your ${count === 1 ? 'photo was' : `${count} photos were`} uploaded`
           warnings.push(
-            `Your ${count === 1 ? 'photo was' : `${count} photos were`} uploaded and ` +
-              `${result?.attached ? 'attached to this venue for our reviewers' : 'stored safely'}, ` +
-              `but they won’t appear to customers yet — the app has no field for a venue’s ` +
-              `pictures. Nothing has been lost, and they’ll show up as soon as that lands.`,
+            result?.mismatch
+              ? // The endpoint answered and kept fewer than we sent. A different
+                // failure from "not deployed", and it needs different words —
+                // this one is a live mismatch somebody has to look at today.
+                `${uploaded}, but the app only kept ${result.mismatch.stored} of ` +
+                  `${result.mismatch.sent}. Nothing has been lost from your device or ours — ` +
+                  `we’ve reported it and we’ll get the rest attached.`
+              : `${uploaded} and ` +
+                  `${result?.attached ? 'attached to this venue for our reviewers' : 'stored safely'}, ` +
+                  `but they won’t appear to customers yet — the app has no field for a venue’s ` +
+                  `pictures. Nothing has been lost, and they’ll show up as soon as that lands.`,
           )
         }
       }
@@ -567,11 +575,121 @@ export const createVenue = (payload) =>
     async () => ({ venue: await mockBackend.createVenue(payload), warnings: [] }),
   )()
 
-export const updateVenue = (venueId, payload) =>
-  pick(
-    () => call('shotright.api.update_venue', { venue_name: venueId, ...payload }),
-    () => mockBackend.updateVenue(venueId, payload),
-  )()
+/**
+ * REPORTED: editing a venue's name doesn't stick.
+ *
+ * THE BUG, and it is ours. This used to be:
+ *
+ *     call('shotright.api.update_venue', { venue_name: venueId, ...payload })
+ *
+ * `venue_name` is the IDENTIFIER on every endpoint in this API — `get_venue_detail`
+ * is called with the docname under exactly that key. But `payload` comes
+ * straight off the edit form and carries the partner's NEW name under the same
+ * key, and it spreads second, so it wins. Every rename therefore said "update
+ * the venue called <the name that doesn't exist yet>" and never mentioned the
+ * venue being edited at all.
+ *
+ * One key was doing two jobs — naming the venue and identifying it — and the
+ * moment those two values differ, which is precisely when someone is renaming,
+ * they collide.
+ *
+ * So the identifier is now built separately and cannot be overwritten, and a new
+ * name travels under its own key. `new_name` is what `frappe.rename_doc` calls
+ * it; `new_venue_name` is the other plausible spelling. Frappe silently drops
+ * kwargs a method does not declare, so sending both costs nothing and whichever
+ * the bench declares wins — the same alias technique the workflow states use.
+ *
+ * ⚠️ `update_venue` is ANOTHER name out of `backend/api_reference.py`, the file
+ * that predates the real API. It has never been confirmed, and if a Venue is
+ * autonamed from `venue_name` then renaming needs `frappe.rename_doc` and not a
+ * field write at all. We cannot check from here. So this VERIFIES rather than
+ * assumes — see below.
+ */
+const VENUE_WRITE_FIELDS = [
+  'address',
+  'latitude',
+  'longitude',
+  'dress_code',
+  'atmosphere_desc',
+  'moods',
+  'operating_hours',
+]
+
+export const UPDATE_VENUE_METHOD = 'shotright.api.update_venue'
+
+export const updateVenue = async (venueId, payload, currentName) => {
+  if (USE_MOCKS) {
+    const venue = await mockBackend.updateVenue(venueId, payload)
+    return { venue, renamed: null, warnings: [] }
+  }
+
+  /**
+   * `currentName` is the venue's name as the SERVER holds it, and it is not the
+   * same thing as `venueId`.
+   *
+   * A Venue's docname may be `VEN-0001` while its `venue_name` is "Corner
+   * Kitchen & Bar". Comparing what the partner typed against the docname would
+   * make every ordinary save — changing a dress code, moving the pin — look
+   * like a rename, and every one of those would then come back with "the name
+   * didn't save". A false alarm on every edit is worse than the bug it is
+   * guarding against, because people learn to click through warnings.
+   *
+   * Falls back to `venueId`, which is correct on a bench that autonames the
+   * Venue from `venue_name`.
+   */
+  const known = String(currentName || venueId).trim()
+  const wanted = String(payload.venue_name || '').trim()
+  const renaming = Boolean(wanted) && wanted !== known
+
+  // An explicit list, not `...payload`. The edit form spreads the whole venue
+  // it loaded, which means `workflow_state` was going back up on every save —
+  // the one field the create path is careful never to let a client set.
+  const body = {}
+  for (const field of VENUE_WRITE_FIELDS) {
+    if (payload[field] !== undefined) body[field] = payload[field]
+  }
+  if (renaming) {
+    body.new_name = wanted
+    body.new_venue_name = wanted
+  }
+  // Last, so nothing above can reach it.
+  body.venue_name = venueId
+
+  await call(UPDATE_VENUE_METHOD, body)
+
+  if (!renaming) return { venue: await getVenue(venueId), renamed: null, warnings: [] }
+
+  /**
+   * Did the rename actually happen?
+   *
+   * A 200 from Frappe does not mean it saved what you sent — an undeclared
+   * kwarg is discarded silently, so a rename the method has no parameter for
+   * succeeds and does nothing. The only way to know is to look, and a partner
+   * who is told their venue is now called something else, and it isn't, will
+   * not find out until a customer can't find them.
+   *
+   * The venue may be reachable under EITHER id afterwards, so both are tried.
+   */
+  const [underNew, underOld] = await Promise.all([
+    getVenue(wanted).catch(() => null),
+    getVenue(venueId).catch(() => null),
+  ])
+
+  const venue = underNew || underOld
+  const renamed = String(venue?.venue_name || '').trim() === wanted
+
+  return {
+    venue,
+    renamed,
+    warnings: renamed
+      ? []
+      : [
+          `The venue is still called “${venue?.venue_name || venueId}”. Everything else you ` +
+            `changed was saved — but this app can’t rename a venue yet, so that part didn’t ` +
+            `take. We’ve reported it.`,
+        ],
+  }
+}
 
 /* --------------------------------------------------------------------- menu */
 
@@ -704,12 +822,15 @@ export const uploadMenuImage = (file) =>
  * all: a partner could describe their venue in three paragraphs and still have
  * nothing for a customer to look at.
  *
- * ⚠️ THE BACKEND HAS NO HOME FOR THESE YET. `create_venue` takes no photos and
- * there is no endpoint to set them, which is the same gap as menu item images
- * (C4) — and it was missing from the backend request, so it is now written up as
- * item 14 in `docs/BACKEND-ASKS.md` with a drop-in `backend/venue_photos.py`.
+ * ⚠️ THE ENDPOINTS WERE REPORTED READY ON 27 JUL and could not be verified from
+ * the build environment, which has no route to the bench. Nothing here assumes
+ * they landed: the probe decides, per tab, and the fallbacks below stay exactly
+ * as they were. If the names or parameters differ from the spec in
+ * `docs/BACKEND-ASKS.md` §14, this degrades to the pre-deployment behaviour
+ * rather than to a lie — see `saveVenuePhotos` for the one case where that took
+ * an extra round trip to guarantee.
  *
- * What we do in the meantime is deliberate, and is NOT "pretend it worked":
+ * What we do when they are ABSENT is deliberate, and is NOT "pretend it worked":
  *
  *   1. The upload itself is real. Frappe's stock `upload_file` creates the File
  *      on the bench, and when the venue already exists we pass `doctype` and
@@ -793,6 +914,34 @@ export const saveVenuePhotos = (venueId, photos) =>
             venue_name: venueId,
             photos: photos.map(photoRow),
           })
+
+          /**
+           * A 200 is not proof, and this is the one place where believing it
+           * would be worst.
+           *
+           * The endpoint EXISTING and the endpoint UNDERSTANDING US are
+           * different things. If `photos` is spelt differently server-side,
+           * Frappe drops the argument, saves nothing, and returns 200 — and the
+           * probe has already told the uploader it is safe to promise these
+           * reach customers. The partner is then told their gallery is live
+           * over an empty child table, which is a worse outcome than the
+           * missing endpoint we started with, because nobody is looking for it.
+           *
+           * So: read it back. One extra request on a rare action, in exchange
+           * for never claiming a save that did not happen.
+           */
+          const check = await getVenuePhotos(venueId).catch(() => null)
+          // Only the real read endpoint can answer this. `ordered: false` means
+          // it fell back to listing File attachments, which legitimately shows
+          // zero for a venue whose photos went up before it existed — treating
+          // that as a mismatch would raise an alarm about a save that was fine.
+          if (check?.ordered && check.photos.length < photos.length) {
+            return {
+              saved: false,
+              method: PHOTOS_SAVE_METHOD,
+              mismatch: { sent: photos.length, stored: check.photos.length },
+            }
+          }
           return { saved: true }
         },
         async () => ({

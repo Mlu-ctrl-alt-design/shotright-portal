@@ -70,10 +70,15 @@ export const useCreateVenue = () => {
   })
 }
 
-export const useUpdateVenue = (venueId) => {
+/**
+ * `currentName` is the venue's name as the server holds it — NOT `venueId`,
+ * which is its docname and may be `VEN-0001`. The service needs both to tell a
+ * rename apart from an ordinary save; see `updateVenue`.
+ */
+export const useUpdateVenue = (venueId, currentName) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload) => vendorApi.updateVenue(venueId, payload),
+    mutationFn: (payload) => vendorApi.updateVenue(venueId, payload, currentName),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['venues'] })
       qc.invalidateQueries({ queryKey: ['venue', venueId] })
