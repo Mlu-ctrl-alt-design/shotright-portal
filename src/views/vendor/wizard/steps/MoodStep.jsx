@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useMoods, usePopularMoods } from '../../../../hooks/useVendor'
 import { resolveMood } from '../../../../services/vendor'
 import { Button, Input, MoodPill, UploadProgress, Toast, Alert } from '../../../../components/ui'
+import { clsx } from '../../../../utils/clsx'
 
 /**
  * Wizard step 1 — moods.
@@ -33,7 +34,7 @@ import { Button, Input, MoodPill, UploadProgress, Toast, Alert } from '../../../
  * recognition, and it is also what generates the usage data that makes the next
  * partner's list better.
  */
-export default function MoodStep({ value, onChange }) {
+export default function MoodStep({ value, onChange, errors = {} }) {
   const { data: canonical = [] } = useMoods()
   const { data: popularAll = [] } = usePopularMoods()
   const [text, setText] = useState('')
@@ -301,7 +302,20 @@ export default function MoodStep({ value, onChange }) {
         </Alert>
       )}
 
-      <div className="min-h-64 rounded-3xl border-2 border-field p-5">
+      {/* The requirement, stated where the moods are, not on the submit
+          screen. `data-field` so the wizard can scroll to it. */}
+      {errors.moods && (
+        <div data-field="moods" tabIndex={-1}>
+          <Alert variant="danger">{errors.moods}</Alert>
+        </div>
+      )}
+
+      <div
+        className={clsx(
+          'min-h-64 rounded-3xl border-2 p-5',
+          errors.moods ? 'border-red-700' : 'border-field',
+        )}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-ink-700">
             If you&rsquo;re unhappy with a mood, just select and delete it.

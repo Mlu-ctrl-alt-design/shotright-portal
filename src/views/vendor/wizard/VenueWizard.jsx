@@ -1,7 +1,12 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCreateVenue } from '../../../hooks/useVendor'
 import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
+import {
+  FIELD_STEP,
+  firstInvalid,
+  validateStep,
+} from '../../../services/venueValidation'
 import WizardLayout from '../../../components/wizard/WizardLayout'
 import { Alert } from '../../../components/ui'
 import MoodStep from './steps/MoodStep'
@@ -67,7 +72,27 @@ export default function VenueWizard() {
    */
   const defaults = useSmartDefaults({ values: details, onChange: setDetails })
   const [gateError, setGateError] = useState(null)
-  const detailsRef = useRef(null)
+  const stepRef = useRef(null)
+
+  /**
+   * Which fields the partner has finished with, per step.
+   *
+   * Validation reports only on touched fields while they are still filling the
+   * form — arriving on a step and immediately seeing every empty field in red
+   * is an accusation, not help. Pressing Next marks the whole step touched, so
+   * from that point everything outstanding is visible at once.
+   */
+  const [touched, setTouched] = useState({})
+  const touchedFor = (key) => touched[key] || new Set()
+  const touchField = (stepKey, field) =>
+    setTouched((prev) => ({
+      ...prev,
+      [stepKey]: new Set(prev[stepKey] || []).add(field),
+    }))
+
+  const stateFor = (key) =>
+    ({ mood: moods, details, hours, menu, review: null })[key]
+
 
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
@@ -76,6 +101,25 @@ export default function VenueWizard() {
 
   const step = STEPS[currentIndex]
   const isLast = currentIndex === STEPS.length - 1
+
+  /** Live errors for the step being shown, limited to what has been touched. */
+  const visibleErrors = validateStep(step.key, stateFor(step.key), touchedFor(step.key))
+
+  /**
+   * Drop the banner as soon as the thing it complains about is fixed.
+   *
+   * A blocking message that outlives the block is worse than no message: the
+   * partner corrects the field, the warning stays put, and they cannot tell
+   * whether they are still stuck. Keyed on the actual outstanding problems
+   * rather than on any single interaction, so it clears however they fixed it.
+   */
+  const outstanding =
+    Object.keys(validateStep(step.key, stateFor(step.key))).length +
+    (step.key === 'details' ? defaults.unconfirmed.length : 0)
+
+  useEffect(() => {
+    if (outstanding === 0) setGateError(null)
+  }, [outstanding])
 
   const markComplete = (index) =>
     setCompleted((prev) => (prev.includes(index) ? prev : [...prev, index]))
@@ -114,10 +158,22 @@ export default function VenueWizard() {
   })
 
   const handleSubmit = async () => {
-    if (!details.venue_name.trim()) {
-      setSubmitError('Your venue needs a name — add one on “Your venue’s details”.')
+    // A safety net that should never fire: every step was validated before it
+    // could be left. If it does fire, it names the step AND jumps to it rather
+    // than telling the partner where to go and leaving them to walk.
+    for (const s of STEPS) {
+      const errors = validateStep(s.key, stateFor(s.key))
+      const field = firstInvalid(errors)
+      if (!field) continue
+      setCurrentIndex(STEPS.findIndex((x) => x.key === (FIELD_STEP[field] || s.key)))
+      setTouched((prev) => ({
+        ...prev,
+        [s.key]: new Set([...(prev[s.key] || []), ...Object.keys(errors)]),
+      }))
+      setSubmitError(errors[field])
       return
     }
+
     setSubmitting(true)
     setSubmitError(null)
     try {
@@ -135,37 +191,65 @@ export default function VenueWizard() {
   }
 
   /**
-   * Tier B gate (§3, §8).
+   * Everything that must be true before this step can be left.
    *
-   * A default that is probably right but harmful when wrong must not be able to
-   * ride through on inattention — that is the whole distinction between Tier A
-   * and Tier B. Blocking here rather than at submit means the partner is stopped
-   * on the screen that holds the field, not four steps later.
+   * ONE gate, not two. Required-field validation and the smart-defaults Tier B
+   * confirmation both stop forward movement, so they resolve here together and
+   * report through the same banner — two competing mechanisms would let a
+   * partner clear one and be stopped again by the other with different styling,
+   * which reads as the form moving the goalposts.
+   *
+   * Validation runs first: an unconfirmed guess matters less than a missing
+   * required value, and fixing the required value often clears the guess too.
    *
    * Returns true when it is safe to proceed.
    */
-  const passesTierBGate = () => {
-    if (step.key !== 'details' || !defaults.unconfirmed.length) return true
+  const passesGate = () => {
+    const errors = validateStep(step.key, stateFor(step.key))
+    const field = firstInvalid(errors)
 
-    const COPY = {
-      contact_number: 'Please confirm this is the right number for customers to call.',
-      map_pin:
-        'Please confirm the pin is on your venue — it is currently a rough guess from your device.',
+    if (field) {
+      // Reveal everything outstanding at once. Fixing one field only to be
+      // stopped by the next is the slowest possible way through a form.
+      setTouched((prev) => ({
+        ...prev,
+        [step.key]: new Set([...(prev[step.key] || []), ...Object.keys(errors)]),
+      }))
+      setGateError(errors[field])
+      focusField(field)
+      return false
     }
-    setGateError(COPY[defaults.unconfirmed[0]] || 'Please confirm the highlighted field.')
 
-    // Scroll to the field rather than leaving them to find it. `center` because
-    // the chip carrying the Confirm control sits below the input.
-    const node = detailsRef.current?.querySelector(
-      `[data-field="${defaults.unconfirmed[0]}"]`,
-    )
+    if (step.key === 'details' && defaults.unconfirmed.length) {
+      const COPY = {
+        contact_number: 'Please confirm this is the right number for customers to call.',
+        map_pin:
+          'Please confirm the pin is on your venue — it is currently a rough guess from your device.',
+      }
+      const pending = defaults.unconfirmed[0]
+      setGateError(COPY[pending] || 'Please confirm the highlighted field.')
+      focusField(pending)
+      return false
+    }
+
+    return true
+  }
+
+  /**
+   * Take the partner to the problem rather than describing where it is.
+   *
+   * `center` because a field's error message and any chip sit BELOW it — scroll
+   * to `start` and the reason is off-screen under the fold. `preventScroll` on
+   * focus so the browser does not immediately re-scroll and undo that.
+   */
+  const focusField = (field) => {
+    const node = stepRef.current?.querySelector(`[data-field="${field}"]`)
     node?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     node?.focus?.({ preventScroll: true })
-    return false
   }
 
   const handleNext = () => {
-    if (!passesTierBGate()) return
+    if (!passesGate()) return
     setGateError(null)
     markComplete(currentIndex)
     if (isLast) return handleSubmit()
@@ -221,14 +305,18 @@ export default function VenueWizard() {
   const renderStep = () => {
     switch (step.key) {
       case 'hours':
-        return <OperatingHoursStep value={hours} onChange={setHours} />
+        return <OperatingHoursStep value={hours} onChange={setHours} errors={visibleErrors} />
       case 'mood':
-        return <MoodStep value={moods} onChange={setMoods} />
+        return <MoodStep value={moods} onChange={setMoods} errors={visibleErrors} />
       case 'details':
         return (
-          <div ref={detailsRef}>
-            <VenueDetailsStep value={details} onChange={setDetails} defaults={defaults} />
-          </div>
+          <VenueDetailsStep
+            value={details}
+            onChange={setDetails}
+            defaults={defaults}
+            errors={visibleErrors}
+            onBlurField={(field) => touchField('details', field)}
+          />
         )
       case 'menu':
         return <MenuStep value={menu} onChange={setMenu} />
@@ -246,7 +334,15 @@ export default function VenueWizard() {
       steps={STEPS}
       currentIndex={currentIndex}
       completed={completed}
-      onStepClick={setCurrentIndex}
+      onStepClick={(index) => {
+        // Backwards is always free — someone going back to fix something must
+        // never be stopped by the thing they are going back to fix. Forwards
+        // takes the same gate as Next.
+        if (index <= currentIndex || passesGate()) {
+          setGateError(null)
+          setCurrentIndex(index)
+        }
+      }}
       onCancel={handleCancel}
       onPrevious={handlePrevious}
       onNext={handleNext}
@@ -262,12 +358,12 @@ export default function VenueWizard() {
           appears — someone who pressed Next and did not move needs telling
           why, and the field it scrolled to is off-screen for a keyboard user
           who has not followed the scroll. */}
-      {gateError && step.key === 'details' && (
+      {gateError && (
         <div className="mb-5">
           <Alert variant="warning">{gateError}</Alert>
         </div>
       )}
-      {renderStep()}
+      <div ref={stepRef}>{renderStep()}</div>
     </WizardLayout>
   )
 }

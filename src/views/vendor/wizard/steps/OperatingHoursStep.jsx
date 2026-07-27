@@ -1,4 +1,5 @@
 import { DayChip, Toggle, Input } from '../../../../components/ui'
+import { clsx } from '../../../../utils/clsx'
 
 /**
  * Wizard step 3 — operating hours.
@@ -28,7 +29,7 @@ function ClockIcon() {
   )
 }
 
-function HourRange({ heading, hint, value, onChange }) {
+function HourRange({ heading, hint, value, onChange, error, field }) {
   return (
     <section>
       <h2 className="text-lg font-bold text-ink-900">{heading}</h2>
@@ -47,13 +48,15 @@ function HourRange({ heading, hint, value, onChange }) {
           value={value.end}
           onChange={(e) => onChange({ ...value, end: e.target.value })}
           trailing={<ClockIcon />}
+          error={error}
+          data-field={field}
         />
       </div>
     </section>
   )
 }
 
-export default function OperatingHoursStep({ value, onChange }) {
+export default function OperatingHoursStep({ value, onChange, errors = {} }) {
   const toggleDay = (key) => {
     const days = value.days.includes(key)
       ? value.days.filter((d) => d !== key)
@@ -65,7 +68,17 @@ export default function OperatingHoursStep({ value, onChange }) {
     <div className="space-y-9">
       <section>
         <p className="text-sm text-ink-700">Select days of operation</p>
-        <div className="mt-4 flex flex-wrap gap-3">
+        <div
+          data-field="days"
+          tabIndex={-1}
+          className={clsx(
+            'mt-4 flex flex-wrap gap-3 rounded-3xl',
+            // Ringed rather than bordered: the chips already have their own
+            // outlines and a second border directly around them reads as a
+            // nested control instead of an error state.
+            errors.days && 'p-3 ring-2 ring-red-700',
+          )}
+        >
           {DAYS.map((day) => (
             <DayChip
               key={day.key}
@@ -75,6 +88,12 @@ export default function OperatingHoursStep({ value, onChange }) {
             />
           ))}
         </div>
+        {errors.days && (
+          <p className="mt-2 px-1 text-xs font-medium text-red-700" role="alert">
+            {errors.days}
+          </p>
+        )}
+
         <div className="mt-5">
           <Toggle
             label="Weekend starts FRIDAY"
@@ -89,18 +108,24 @@ export default function OperatingHoursStep({ value, onChange }) {
         hint="Please set start and end time for the week."
         value={value.weekday}
         onChange={(weekday) => onChange({ ...value, weekday })}
+        error={errors.weekday}
+        field="weekday"
       />
       <HourRange
         heading="Weekend hours"
         hint="Please set start and end time for the weekend."
         value={value.weekend}
         onChange={(weekend) => onChange({ ...value, weekend })}
+        error={errors.weekend}
+        field="weekend"
       />
       <HourRange
         heading="Public holiday hours"
         hint="Please set start and end time."
         value={value.publicHoliday}
         onChange={(publicHoliday) => onChange({ ...value, publicHoliday })}
+        error={errors.publicHoliday}
+        field="publicHoliday"
       />
     </div>
   )

@@ -27,7 +27,13 @@ const MapPicker = lazy(() => import('../../../../components/ui/MapPicker'))
  * Autofocus lands on the venue name (§11): it is the only field we could not
  * fill, and per the spec that focus IS the user-facing payoff of the feature.
  */
-export default function VenueDetailsStep({ value, onChange, defaults }) {
+export default function VenueDetailsStep({
+  value,
+  onChange,
+  defaults,
+  errors = {},
+  onBlurField = () => {},
+}) {
   const { data: lookups, isLoading } = useVenueLookups()
   const nameRef = useRef(null)
   const chipIds = useId()
@@ -116,6 +122,16 @@ export default function VenueDetailsStep({ value, onChange, defaults }) {
     value: value[field],
     onChange: set(field),
     onFocus: onFocusDefaulted(field),
+    // Validate on BLUR, not on keystroke. Telling someone their phone number is
+    // wrong while they are typing the third digit is hostile; telling them when
+    // they leave the field is help. Once a field is touched it re-validates on
+    // every change, so the error clears the moment it is fixed.
+    onBlur: () => onBlurField(field),
+    error: errors[field],
+    // Reserve the message line so revealing an error on blur reflows nothing —
+    // see the note in `Input`. Without it, blurring a field while clicking Next
+    // moves the button between mousedown and mouseup and swallows the click.
+    reserveMessage: true,
     prefilled: defaults.isDefaulted(field),
     // §11 — the chip text is the field's description, so a screen reader
     // announces where the value came from instead of presenting a mysteriously
@@ -141,6 +157,9 @@ export default function VenueDetailsStep({ value, onChange, defaults }) {
           required
           value={value.venue_name}
           onChange={set('venue_name')}
+          onBlur={() => onBlurField('venue_name')}
+          error={errors.venue_name}
+          reserveMessage
           data-field="venue_name"
         />
         {/* Tier D — never defaulted, but the row still reserves its height so
@@ -236,6 +255,7 @@ export default function VenueDetailsStep({ value, onChange, defaults }) {
           longitude={value.longitude}
           address={value.address}
           provisional={defaults.pinIsProvisional}
+          error={errors.latitude || errors.longitude}
           onChange={({ latitude, longitude, provisional }) => {
             defaults.onPinMoved?.(provisional)
             onChange({ ...value, latitude, longitude })

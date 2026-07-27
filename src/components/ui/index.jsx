@@ -75,12 +75,36 @@ export function Button({
  * warm background, brand-edge border. Both clear the instant it goes dirty,
  * with a 250ms colour fade so the change is noticed rather than blinked past.
  */
-export function Input({ label, error, hint, className, id, trailing, prefilled, ...props }) {
+export function Input({
+  label,
+  error,
+  hint,
+  className,
+  id,
+  trailing,
+  prefilled,
+  // Keep a line's worth of space under the field whether or not there is a
+  // message. See the note on `messageRow` below — this is not cosmetic.
+  reserveMessage,
+  ...props
+}) {
   // Generated rather than derived from `name`: the same form renders once per
   // menu heading, so a name-based id would collide across instances and point
   // every label at the first input on the page.
   const generatedId = useId()
   const inputId = id || generatedId
+  const msgId = `${inputId}-msg`
+
+  // The error used to render as a bare sibling <p>: visible, and completely
+  // silent to a screen reader, which is the population least able to spot a red
+  // line they were not told about. `aria-invalid` marks the state and
+  // `aria-describedby` reads the reason.
+  //
+  // The caller's own describedby is PRESERVED, not replaced — a smart-defaulted
+  // field points at its chip, and both need announcing.
+  const describedBy =
+    [props['aria-describedby'], error || hint ? msgId : null].filter(Boolean).join(' ') || undefined
+
   return (
     <div className={className}>
       {label && (
@@ -91,6 +115,9 @@ export function Input({ label, error, hint, className, id, trailing, prefilled, 
       <div className="relative">
         <input
           id={inputId}
+          aria-invalid={error ? true : undefined}
+          {...props}
+          aria-describedby={describedBy}
           className={clsx(
             'block w-full rounded-full border-2 px-5 py-2.5 text-sm text-ink-900',
             'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
@@ -102,7 +129,6 @@ export function Input({ label, error, hint, className, id, trailing, prefilled, 
                 ? 'border-brand-edge bg-prefill'
                 : 'border-field bg-white',
           )}
-          {...props}
         />
         {trailing && (
           <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-ink-500">
@@ -110,8 +136,32 @@ export function Input({ label, error, hint, className, id, trailing, prefilled, 
           </span>
         )}
       </div>
-      {error && <p className="mt-1.5 px-2 text-xs text-red-700">{error}</p>}
-      {hint && !error && <p className="mt-1.5 px-2 text-xs text-ink-500">{hint}</p>}
+      {/* RESERVED MESSAGE ROW — this fixes a real, reproducible bug.
+          Validation errors appear on blur. Blur happens on MOUSEDOWN. So
+          clicking a button below the form used to insert an error message
+          between mousedown and mouseup, shifting the button out from under the
+          pointer — and a click event needs both on the same element. The button
+          simply did not fire, and the partner had to click Next twice with
+          nothing on screen explaining why.
+          Reserving the space means revealing a message reflows nothing.
+          Messages on reserved fields must stay to ONE LINE at the narrowest
+          column they render in, or the shift comes back. */}
+      {/* The 6px gap lives on the CONTAINER, not on the message, so the
+          reserved height is exact arithmetic rather than a guess that has to
+          account for margin collapsing: 6px padding + 16px line = 22px, whether
+          or not a message is present. Measured at zero shift. */}
+      <div className={clsx('pt-1.5', reserveMessage && 'min-h-[1.375rem]')}>
+        {error && (
+          <p id={msgId} className="px-2 text-xs font-medium text-red-700">
+            {error}
+          </p>
+        )}
+        {hint && !error && (
+          <p id={msgId} className="px-2 text-xs text-ink-500">
+            {hint}
+          </p>
+        )}
+      </div>
     </div>
   )
 }
@@ -196,9 +246,12 @@ export function PasswordInput({ label, error, hint, className, id, ...props }) {
 
 /* ---------------------------------------------------------------- Select */
 // UNTITLED UI: https://www.untitledui.com/react/components/select
-export function Select({ label, error, className, id, children, prefilled, ...props }) {
+export function Select({ label, error, className, id, children, prefilled, reserveMessage, ...props }) {
   const generatedId = useId()
   const inputId = id || generatedId
+  const msgId = `${inputId}-msg`
+  const describedBy =
+    [props['aria-describedby'], error ? msgId : null].filter(Boolean).join(' ') || undefined
   return (
     <div className={className}>
       {label && (
@@ -211,6 +264,9 @@ export function Select({ label, error, className, id, children, prefilled, ...pr
       <div className="relative">
         <select
           id={inputId}
+          aria-invalid={error ? true : undefined}
+          {...props}
+          aria-describedby={describedBy}
           className={clsx(
             'block w-full appearance-none rounded-full border-2 py-2.5 pr-11 pl-5 text-sm text-ink-900',
             'focus:border-brand-edge focus:outline-none',
@@ -222,7 +278,6 @@ export function Select({ label, error, className, id, children, prefilled, ...pr
                 ? 'border-brand-edge bg-prefill'
                 : 'border-field bg-white',
           )}
-          {...props}
         >
           {children}
         </select>
@@ -232,7 +287,14 @@ export function Select({ label, error, className, id, children, prefilled, ...pr
           </svg>
         </span>
       </div>
-      {error && <p className="mt-1.5 px-2 text-xs text-red-700">{error}</p>}
+      {/* Same reserved row as Input — see the note there. */}
+      <div className={clsx('pt-1.5', reserveMessage && 'min-h-[1.375rem]')}>
+        {error && (
+          <p id={msgId} className="px-2 text-xs font-medium text-red-700">
+            {error}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

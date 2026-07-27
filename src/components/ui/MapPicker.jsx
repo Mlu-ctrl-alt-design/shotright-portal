@@ -55,7 +55,7 @@ const DEFAULT_CENTER = [-26.2041, 28.0473]
  */
 const NUDGE_DEG = 10 / 111_320
 
-export default function MapPicker({ latitude, longitude, onChange, provisional = false }) {
+export default function MapPicker({ latitude, longitude, onChange, provisional = false, error }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
@@ -94,9 +94,17 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
 
     mapRef.current = map
     // Leaflet mis-measures if its container was hidden or resized during mount.
-    setTimeout(() => map.invalidateSize(), 0)
+    //
+    // The handle is kept and cleared below. Unmounting inside that tick — which
+    // is what navigating straight off this wizard step does — otherwise leaves
+    // the callback to call invalidateSize() on a map that has been removed,
+    // where Leaflet reads `_leaflet_pos` off a destroyed node and throws an
+    // uncaught TypeError. Harmless to the partner, and exactly the kind of
+    // console noise that hides a real error later.
+    const measure = setTimeout(() => map.invalidateSize(), 0)
 
     return () => {
+      clearTimeout(measure)
       map.remove()
       mapRef.current = null
       markerRef.current = null
@@ -135,7 +143,12 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
       })
       markerRef.current = marker
     }
-    map.panTo(latlng)
+    // `animate: false` deliberately. An animated pan schedules work on a
+    // requestAnimationFrame; if the step unmounts mid-animation (navigating away
+    // from the wizard is the common case) Leaflet's callback reaches for
+    // `_leaflet_pos` on a node it has already destroyed and throws. The pan is
+    // a few hundred milliseconds of polish against an uncaught error.
+    map.panTo(latlng, { animate: false })
   }, [latitude, longitude, hasPoint])
 
   const useMyLocation = () => {
@@ -281,12 +294,18 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        {/* `data-field` so the wizard's "take me to the problem" can find these
+            — they are the only editable surface for a required value whose
+            primary control is a map. */}
         <Input
           label="Latitude"
           inputMode="decimal"
           placeholder="-26.204100"
           value={latitude ?? ''}
           onChange={setCoord('latitude')}
+          error={error}
+          reserveMessage
+          data-field="latitude"
         />
         <Input
           label="Longitude"
@@ -294,6 +313,8 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
           placeholder="28.047300"
           value={longitude ?? ''}
           onChange={setCoord('longitude')}
+          reserveMessage
+          data-field="longitude"
         />
       </div>
 
