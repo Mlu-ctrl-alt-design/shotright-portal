@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useDashboard } from '../../hooks/useVendor'
 import { Badge, Button, Card, MetricCard, EmptyState, Alert } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
-import { stateLabel } from './VenueList'
+import { inBucket, stateLabel, stateTone } from '../../services/workflowState'
 
 /**
  * Issue #18 — Vendor Portal Dashboard.
@@ -25,12 +25,17 @@ export default function Dashboard() {
   // rendered as zero, so the tiles always agree with the list underneath them.
   const profile = data?.profile
   const venues = data?.venues ?? []
-  const countBy = (state) => venues.filter((v) => v.workflow_state === state).length
-  const stats = data?.stats ?? {
-    total: venues.length,
-    approved: countBy('Approved'),
-    pending: countBy('Pending'),
-    rejected: countBy('Rejected'),
+
+  // Counted from the venue list rather than trusting `data.stats`, so the tiles
+  // can never disagree with the list they link to. A tile reading "1 declined"
+  // that opens an empty tab is worse than either number alone — and the tiles
+  // and tabs must classify states the same way, which means one shared matcher.
+  const countBy = (bucket) => venues.filter((v) => inBucket(v, bucket)).length
+  const stats = {
+    total: venues.length ?? data?.stats?.total ?? 0,
+    approved: countBy('approved'),
+    pending: countBy('pending'),
+    rejected: countBy('declined'),
   }
 
   return (
@@ -101,7 +106,9 @@ export default function Dashboard() {
                   <p className="truncate text-xs text-ink-500">{venue.address}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <Badge tone={venue.workflow_state}>{stateLabel(venue.workflow_state)}</Badge>
+                  <Badge tone={stateTone(venue.workflow_state)}>
+                    {stateLabel(venue.workflow_state)}
+                  </Badge>
                   <Link
                     to={`/venues/${venue.name}/edit`}
                     className="text-sm font-medium text-brand-600 hover:underline"

@@ -1,8 +1,9 @@
 import { Link, useSearchParams } from 'react-router-dom'
-import { useVenues } from '../../hooks/useVendor'
+import { useDashboard } from '../../hooks/useVendor'
 import { Badge, Button, EmptyState, Alert } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { clsx } from '../../utils/clsx'
+import { inBucket, stateLabel, stateTone, unrecognisedStates } from '../../services/workflowState'
 
 /**
  * The vendor's venues, filtered by approval state.
@@ -29,29 +30,16 @@ import { clsx } from '../../utils/clsx'
  */
 
 /**
- * `value` is the backend's `workflow_state`; `label` is what partners are shown.
- * The designs say "Declined" and the workflow says "Rejected" — the mapping
- * lives here rather than being papered over in either direction.
+ * `bucket` is a FAMILY of backend states, not one literal — see
+ * `services/workflowState.js`. Matching on a single exact string is what made
+ * a declined venue vanish from this tab entirely.
  */
 const TABS = [
-  { key: '', label: 'All', value: null },
-  { key: 'approved', label: 'Approved', value: 'Approved' },
-  { key: 'pending', label: 'Pending', value: 'Pending' },
-  { key: 'declined', label: 'Declined', value: 'Rejected' },
+  { key: '', label: 'All', bucket: null },
+  { key: 'approved', label: 'Approved', bucket: 'approved' },
+  { key: 'pending', label: 'Pending', bucket: 'pending' },
+  { key: 'declined', label: 'Declined', bucket: 'declined' },
 ]
-
-/**
- * The workflow says "Rejected"; the designs say "Declined". Partners should see
- * one word for one state — a "Declined" tab listing rows badged "Rejected"
- * invites the reasonable question of whether they are different things.
- *
- * Translating here, at the last possible moment, keeps the backend value intact
- * everywhere else. Unknown states pass through rather than being swallowed: if
- * the workflow grows a state, showing its raw name is far better than showing
- * nothing.
- */
-const STATE_LABELS = { Rejected: 'Declined' }
-export const stateLabel = (state) => STATE_LABELS[state] || state
 
 const EMPTY = {
   approved: {
@@ -76,7 +64,12 @@ const EMPTY = {
 
 export default function VenueList() {
   const [params] = useSearchParams()
-  const { data = [], isLoading, error } = useVenues()
+  // The dashboard payload, not `useVenues` — it carries the venue list AND the
+  // backend's own counts, which lets the mismatch check below exist. It is also
+  // the same endpoint, so this removes a duplicate request rather than adding
+  // one.
+  const { data: dash, isLoading, error } = useDashboard()
+  const data = dash?.venues ?? []
 
   // Unknown values fall back to All rather than showing an empty list under a
   // tab that is not highlighted — which would read as "you have no venues".
@@ -90,10 +83,28 @@ export default function VenueList() {
   // every venue, so per-tab counts cost nothing and cannot disagree with what
   // the tab actually shows.
   const countFor = (tab) =>
-    tab.value ? data.filter((v) => v.workflow_state === tab.value).length : data.length
+    tab.bucket ? data.filter((v) => inBucket(v, tab.bucket)).length : data.length
 
-  const venues = active.value ? data.filter((v) => v.workflow_state === active.value) : data
+  const venues = active.bucket ? data.filter((v) => inBucket(v, active.bucket)) : data
   const empty = EMPTY[active.key]
+
+  // States no tab claims. An empty tab is ambiguous — "nothing declined" and
+  // "we did not recognise the word your bench uses" look identical — so when
+  // both are true, say which.
+  const unknown = unrecognisedStates(data)
+
+  /**
+   * The backend says there are declined venues but sent none.
+   *
+   * This separates two failures that look identical from the outside: the
+   * portal not recognising the bench's word for "declined" (handled by
+   * `unknown` above), and `get_vendor_dashboard` counting venues it does not
+   * return. The second is a backend bug no amount of client-side matching can
+   * fix, and without this it presents as an empty tab with nothing to report.
+   */
+  const backendCount = Number(dash?.stats?.rejected)
+  const missingDeclined =
+    Number.isFinite(backendCount) && backendCount > 0 && countFor(TABS[3]) === 0
 
   return (
     <div className="space-y-6">
@@ -146,6 +157,27 @@ export default function VenueList() {
         </ul>
       </nav>
 
+      {missingDeclined && (
+        <Alert variant="danger">
+          The app reports {backendCount} declined venue{backendCount === 1 ? '' : 's'}, but did
+          not send {backendCount === 1 ? 'it' : 'them'} with your list, so
+          {backendCount === 1 ? ' it cannot' : ' they cannot'} be shown here. Please let the
+          Sho&rsquo;t Right team know — this is a fault on our side, not something you can fix.
+        </Alert>
+      )}
+
+      {/* Never let an unrecognised status be invisible. The venue is still under
+          All with its real status on it, but a partner looking at an empty
+          Declined tab has no way to know that without being told. */}
+      {unknown.length > 0 && (
+        <Alert variant="warning">
+          {unknown.length === 1 ? 'One venue has a status' : `${unknown.length} venues have statuses`}{' '}
+          this portal doesn&rsquo;t recognise yet ({unknown.map((s) => `“${s}”`).join(', ')}), so
+          {unknown.length === 1 ? ' it is' : ' they are'} only under <strong>All</strong>. Please
+          let the Sho&rsquo;t Right team know.
+        </Alert>
+      )}
+
       {venues.length === 0 ? (
         <EmptyState
           title={empty.title}
@@ -184,7 +216,9 @@ export default function VenueList() {
                     <p className="text-xs text-ink-500">{venue.address}</p>
                   </td>
                   <td className="px-5 py-4">
-                    <Badge tone={venue.workflow_state}>{stateLabel(venue.workflow_state)}</Badge>
+                    <Badge tone={stateTone(venue.workflow_state)}>
+                      {stateLabel(venue.workflow_state)}
+                    </Badge>
                   </td>
                   <td className="px-5 py-4 text-ink-700">{venue.dress_code || '—'}</td>
                   <td className="px-5 py-4">

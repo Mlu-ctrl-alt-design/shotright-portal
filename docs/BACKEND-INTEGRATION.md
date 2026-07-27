@@ -272,6 +272,40 @@ Verified against four simulated bench shapes and a bench that accepts nothing
 and returns 200. Still **not run against the live bench** — no outbound route
 from the build environment.
 
+### 🟢 Workflow states — matched by family, not by one literal
+
+**Reported symptom:** a venue was declined in the Desk and the portal's Declined
+tab stayed empty.
+
+The portal filtered on `workflow_state === 'Rejected'` — another exact string
+invented in `backend/api_reference.py` before the real backend existed, in three
+places (the tab filter, the dashboard counts, the badge palette). The bench uses
+its own vocabulary; one word out and the venue is filtered into nothing, with no
+error anywhere, because from the code's point of view nothing went wrong.
+
+`src/services/workflowState.js` replaces the literal with alias families —
+case-, punctuation- and spacing-insensitive — so "Rejected", "Declined",
+"Denied" and "Not Approved" all land in the same bucket. Same for
+approved (`Active`, `Live`, `Published`) and pending (`Draft`, `Submitted`,
+`Pending Review`, …).
+
+Aliases are a **safety net, not a substitute for knowing**. Two things make the
+next unanticipated word visible rather than silent:
+
+- **An unrecognised state is never dropped.** The venue still appears under
+  **All** with its real status on the badge, and the list warns by name — "One
+  venue has a status this portal doesn't recognise yet ("On Hold")".
+- **A count that disagrees with the list is reported separately.** If
+  `get_vendor_dashboard` says `stats.rejected: 1` but returns no declined venue,
+  that is a backend bug no client-side matching can fix, and it now says so
+  rather than presenting as an empty tab.
+
+Dashboard tiles are also counted from the venue list through the same matcher
+rather than from `stats`, so a tile can never report a number that opens an
+empty tab.
+
+**Backend: confirm the real state names** and add them to the alias lists.
+
 ### 🟡 Dress codes and atmospheres are portal-side
 
 No lookup endpoint and no doctype to read generically — `atmosphere_desc` is
@@ -325,6 +359,10 @@ The portal is on the real bench now, so these are no longer blockers to cutover
 - [ ] Confirm what `get_vendor_dashboard` puts in `profile` (the update
       signature is confirmed; the read payload is inferred from it). Once
       known, the `vendor_name`/`full_name` fallbacks in `displayName()` can go.
+- [ ] **Confirm the Venue workflow's real state names** and add them to
+      `src/services/workflowState.js`. The alias families cover the likely
+      words, but a name nobody guessed still lands a venue under All only —
+      visibly, with a warning, but not under its proper tab.
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.
