@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCreateVenue } from '../../../hooks/useVendor'
+import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
 import WizardLayout from '../../../components/wizard/WizardLayout'
 import { Alert } from '../../../components/ui'
 import MoodStep from './steps/MoodStep'
@@ -55,6 +56,19 @@ export default function VenueWizard() {
   const [hours, setHours] = useState(INITIAL_HOURS)
   const [menu, setMenu] = useState({ categories: [] })
 
+  /**
+   * Smart defaults live HERE, not in the step.
+   *
+   * Steps unmount when you navigate between them, so dirty flags held inside
+   * VenueDetailsStep would reset on every visit and the defaults would re-apply
+   * over the partner's edits. Spec §6 requires a touched field to stay excluded
+   * for the whole session, and §9 calls re-entry after a validation failure the
+   * most common bug in this pattern — both are the same requirement.
+   */
+  const defaults = useSmartDefaults({ values: details, onChange: setDetails })
+  const [gateError, setGateError] = useState(null)
+  const detailsRef = useRef(null)
+
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const [created, setCreated] = useState(null)
@@ -108,6 +122,9 @@ export default function VenueWizard() {
     setSubmitError(null)
     try {
       const { venue, warnings } = await createVenue.mutateAsync(buildPayload())
+      // Acceptance rate is the health metric for each default (§12) — measured
+      // at submit, since that is when "submitted unmodified" becomes true.
+      defaults.reportAccepted()
       markComplete(currentIndex)
       setCreated({ venue, warnings })
     } catch (err) {
@@ -117,7 +134,39 @@ export default function VenueWizard() {
     }
   }
 
+  /**
+   * Tier B gate (§3, §8).
+   *
+   * A default that is probably right but harmful when wrong must not be able to
+   * ride through on inattention — that is the whole distinction between Tier A
+   * and Tier B. Blocking here rather than at submit means the partner is stopped
+   * on the screen that holds the field, not four steps later.
+   *
+   * Returns true when it is safe to proceed.
+   */
+  const passesTierBGate = () => {
+    if (step.key !== 'details' || !defaults.unconfirmed.length) return true
+
+    const COPY = {
+      contact_number: 'Please confirm this is the right number for customers to call.',
+      map_pin:
+        'Please confirm the pin is on your venue — it is currently a rough guess from your device.',
+    }
+    setGateError(COPY[defaults.unconfirmed[0]] || 'Please confirm the highlighted field.')
+
+    // Scroll to the field rather than leaving them to find it. `center` because
+    // the chip carrying the Confirm control sits below the input.
+    const node = detailsRef.current?.querySelector(
+      `[data-field="${defaults.unconfirmed[0]}"]`,
+    )
+    node?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    node?.focus?.({ preventScroll: true })
+    return false
+  }
+
   const handleNext = () => {
+    if (!passesTierBGate()) return
+    setGateError(null)
     markComplete(currentIndex)
     if (isLast) return handleSubmit()
     setCurrentIndex((i) => i + 1)
@@ -176,7 +225,11 @@ export default function VenueWizard() {
       case 'mood':
         return <MoodStep value={moods} onChange={setMoods} />
       case 'details':
-        return <VenueDetailsStep value={details} onChange={setDetails} />
+        return (
+          <div ref={detailsRef}>
+            <VenueDetailsStep value={details} onChange={setDetails} defaults={defaults} />
+          </div>
+        )
       case 'menu':
         return <MenuStep value={menu} onChange={setMenu} />
       case 'review':
@@ -203,6 +256,15 @@ export default function VenueWizard() {
       {submitError && (
         <div className="mb-5">
           <Alert variant="danger">{submitError}</Alert>
+        </div>
+      )}
+      {/* The Tier B block. `role="alert"` so it is announced the moment it
+          appears — someone who pressed Next and did not move needs telling
+          why, and the field it scrolled to is off-screen for a keyboard user
+          who has not followed the scroll. */}
+      {gateError && step.key === 'details' && (
+        <div className="mb-5">
+          <Alert variant="warning">{gateError}</Alert>
         </div>
       )}
       {renderStep()}

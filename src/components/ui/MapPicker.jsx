@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Button, Input, Alert } from './index'
+import { clsx } from '../../utils/clsx'
 
 /**
  * Pick a venue's coordinates.
@@ -45,12 +46,23 @@ const PIN = L.divIcon({
 // Johannesburg — a sensible opening view for a South African product.
 const DEFAULT_CENTER = [-26.2041, 28.0473]
 
-export default function MapPicker({ latitude, longitude, onChange }) {
+/**
+ * ~10 metres in degrees of latitude. Longitude is scaled by cos(lat) at the
+ * call site so a nudge covers the same ground east–west as north–south — at
+ * Johannesburg's latitude an unscaled step would move ~11m north but only ~9m
+ * east, which is exactly the kind of small wrongness nobody reports and
+ * everybody feels.
+ */
+const NUDGE_DEG = 10 / 111_320
+
+export default function MapPicker({ latitude, longitude, onChange, provisional = false }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
   const [status, setStatus] = useState(null)
   const [busy, setBusy] = useState(false)
+  // idle | adjusting | adjusted — drives the badge copy (spec §8).
+  const [pinState, setPinState] = useState('idle')
 
   const hasPoint = Number.isFinite(latitude) && Number.isFinite(longitude)
 
@@ -111,11 +123,14 @@ export default function MapPicker({ latitude, longitude, onChange }) {
       markerRef.current.setLatLng(latlng)
     } else {
       const marker = L.marker(latlng, { icon: PIN, draggable: true, keyboard: false }).addTo(map)
+      marker.on('dragstart', () => setPinState('adjusting'))
       marker.on('dragend', () => {
         const p = marker.getLatLng()
+        setPinState('adjusted')
         onChangeRef.current({
           latitude: Number(p.lat.toFixed(6)),
           longitude: Number(p.lng.toFixed(6)),
+          provisional: false,
         })
       })
       markerRef.current = marker
@@ -148,10 +163,52 @@ export default function MapPicker({ latitude, longitude, onChange }) {
 
   const setCoord = (key) => (e) => {
     const raw = e.target.value
-    if (raw === '') return onChange({ latitude, longitude, [key]: undefined })
+    setPinState('adjusted')
+    if (raw === '') return onChange({ latitude, longitude, [key]: undefined, provisional: false })
     const n = Number(raw)
-    if (Number.isFinite(n)) onChange({ latitude, longitude, [key]: n })
+    if (Number.isFinite(n)) onChange({ latitude, longitude, [key]: n, provisional: false })
   }
+
+  /**
+   * Keyboard path to the same outcome as dragging (§11).
+   *
+   * The spec calls a drag-only affordance "a hard accessibility failure on a
+   * field that determines whether the business is discoverable at all", and it
+   * is right: without this, a keyboard user cannot place their venue on the map
+   * at all, and an unplaced venue never appears in radius search.
+   *
+   * Arrow keys nudge in ~10m steps. The numeric inputs below remain the precise
+   * route; this is the direct-manipulation equivalent.
+   */
+  const onPinKeyDown = (event) => {
+    const moves = {
+      ArrowUp: [NUDGE_DEG, 0],
+      ArrowDown: [-NUDGE_DEG, 0],
+      ArrowLeft: [0, -NUDGE_DEG],
+      ArrowRight: [0, NUDGE_DEG],
+    }
+    const move = moves[event.key]
+    if (!move || !hasPoint) return
+
+    event.preventDefault()
+    const [dLat, dLng] = move
+    // Scale the east–west step so it covers the same distance on the ground.
+    const scale = Math.max(0.2, Math.cos((latitude * Math.PI) / 180))
+    setPinState('adjusted')
+    onChange({
+      latitude: Number((latitude + dLat).toFixed(6)),
+      longitude: Number((longitude + dLng / scale).toFixed(6)),
+      provisional: false,
+    })
+  }
+
+  const badge = provisional
+    ? 'Rough spot from your device — drag it onto your venue'
+    : pinState === 'adjusting'
+      ? 'Adjusting…'
+      : pinState === 'adjusted'
+        ? 'Pin adjusted by you'
+        : 'Pin set from your address'
 
   return (
     <section className="space-y-4">
@@ -171,12 +228,57 @@ export default function MapPicker({ latitude, longitude, onChange }) {
 
       {status && <Alert variant={status.tone}>{status.text}</Alert>}
 
-      <div
-        ref={containerRef}
-        role="application"
-        aria-label="Venue location map. Click to place the pin, or use the latitude and longitude fields below."
-        className="h-80 w-full overflow-hidden rounded-3xl border-2 border-field bg-canvas"
-      />
+      <div className="relative">
+        <div
+          ref={containerRef}
+          role="application"
+          aria-label="Venue location map. Click to place the pin, or use the latitude and longitude fields below."
+          className="h-80 w-full overflow-hidden rounded-3xl border-2 border-field bg-canvas"
+        />
+
+        {/* Badge (§8). It states what the pin currently means — guessed from the
+            device, set from the address, or moved by hand — because those three
+            deserve very different amounts of trust and look identical. */}
+        {hasPoint && (
+          <p
+            className={clsx(
+              // Top-RIGHT: Leaflet parks its zoom control at top-left and would
+              // sit on top of this. Bottom-right is taken by the attribution,
+              // which must stay legible (OSM licence terms).
+              'pointer-events-none absolute top-3 right-3 z-[400] max-w-[min(20rem,calc(100%-5rem))] rounded-full px-3 py-1.5 text-center text-xs font-semibold shadow-sm',
+              provisional ? 'bg-[#fdf5df] text-[#8a6400]' : 'bg-[#e9f7ef] text-[#1c7a45]',
+            )}
+            role="status"
+          >
+            {badge}
+          </p>
+        )}
+
+        {/* Keyboard equivalent of dragging. A real button rather than a
+            tabindex on the Leaflet marker: Leaflet owns that node and replaces
+            it on re-render, so focus and handlers attached to it disappear
+            without warning. */}
+        {hasPoint && (
+          <button
+            type="button"
+            onKeyDown={onPinKeyDown}
+            aria-label="Move the venue pin. Use the arrow keys to nudge it in ten-metre steps."
+            className="absolute bottom-3 left-3 z-[400] rounded-full bg-white/95 px-3 py-2 text-xs font-semibold text-ink-900 shadow-sm ring-1 ring-field hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            Nudge pin ↑↓←→
+          </button>
+        )}
+
+        {/* §8 — no signal at all. Says what to do rather than showing an empty
+            grey rectangle that looks broken. */}
+        {!hasPoint && (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-3xl bg-canvas/80 p-6">
+            <p className="max-w-sm text-center text-sm font-medium text-ink-700">
+              Pick an address above (or allow location) and the pin drops here automatically.
+            </p>
+          </div>
+        )}
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Input
@@ -199,6 +301,16 @@ export default function MapPicker({ latitude, longitude, onChange }) {
         <Alert variant="warning">
           No location set yet. Without it your venue will not show up when customers search near
           them.
+        </Alert>
+      )}
+
+      {/* A device-derived pin is a starting point, not an address. Saying so
+          next to it is what keeps this a Tier B suggestion rather than a
+          silently load-bearing default (§1). */}
+      {provisional && hasPoint && (
+        <Alert variant="warning">
+          This pin is roughly where you are now, not your venue. Pick your address above or drag
+          the pin onto the right spot before you continue.
         </Alert>
       )}
     </section>

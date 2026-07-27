@@ -70,7 +70,12 @@ export function Button({
 
 /* ----------------------------------------------------------------- Input */
 // UNTITLED UI: https://www.untitledui.com/react/components/inputs
-export function Input({ label, error, hint, className, id, trailing, ...props }) {
+/**
+ * `prefilled` marks a field holding an unmodified smart default (spec §7):
+ * warm background, brand-edge border. Both clear the instant it goes dirty,
+ * with a 250ms colour fade so the change is noticed rather than blinked past.
+ */
+export function Input({ label, error, hint, className, id, trailing, prefilled, ...props }) {
   // Generated rather than derived from `name`: the same form renders once per
   // menu heading, so a name-based id would collide across instances and point
   // every label at the first input on the page.
@@ -87,10 +92,15 @@ export function Input({ label, error, hint, className, id, trailing, ...props })
         <input
           id={inputId}
           className={clsx(
-            'block w-full rounded-full border-2 bg-white px-5 py-2.5 text-sm text-ink-900',
+            'block w-full rounded-full border-2 px-5 py-2.5 text-sm text-ink-900',
             'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
+            'transition-colors duration-250',
             trailing && 'pr-11',
-            error ? 'border-red-700' : 'border-field',
+            error
+              ? 'border-red-700 bg-white'
+              : prefilled
+                ? 'border-brand-edge bg-prefill'
+                : 'border-field bg-white',
           )}
           {...props}
         />
@@ -186,7 +196,7 @@ export function PasswordInput({ label, error, hint, className, id, ...props }) {
 
 /* ---------------------------------------------------------------- Select */
 // UNTITLED UI: https://www.untitledui.com/react/components/select
-export function Select({ label, error, className, id, children, ...props }) {
+export function Select({ label, error, className, id, children, prefilled, ...props }) {
   const generatedId = useId()
   const inputId = id || generatedId
   return (
@@ -202,10 +212,15 @@ export function Select({ label, error, className, id, children, ...props }) {
         <select
           id={inputId}
           className={clsx(
-            'block w-full appearance-none rounded-full border-2 bg-white py-2.5 pr-11 pl-5 text-sm text-ink-900',
+            'block w-full appearance-none rounded-full border-2 py-2.5 pr-11 pl-5 text-sm text-ink-900',
             'focus:border-brand-edge focus:outline-none',
+            'transition-colors duration-250',
             'disabled:cursor-not-allowed disabled:opacity-60',
-            error ? 'border-red-700' : 'border-field',
+            error
+              ? 'border-red-700 bg-white'
+              : prefilled
+                ? 'border-brand-edge bg-prefill'
+                : 'border-field bg-white',
           )}
           {...props}
         >

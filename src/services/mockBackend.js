@@ -193,6 +193,19 @@ export const mockBackend = {
     }
   },
 
+  /**
+   * Mirrors `shotright.api.get_popular_venue_options`. Shares are invented, and
+   * that is only tolerable because this module cannot run in a production
+   * build — see the guard at the top of this file.
+   */
+  async getPopularVenueOptions() {
+    await delay(80)
+    return {
+      dress_code: { value: 'Smart Casual', share: 62 },
+      atmosphere: { value: 'Family friendly', share: 48 },
+    }
+  },
+
   /** Mirrors `shotright.api.get_popular_moods`. Counts are invented. */
   async getPopularMoods(limit = 8) {
     await delay(80)

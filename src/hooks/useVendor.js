@@ -24,6 +24,21 @@ export const usePopularMoods = (limit = 8) =>
 
 /* ---------------------------------------------------------------- lookups */
 
+/**
+ * Aggregate popularity for the venue dropdowns (smart defaults, Tier C).
+ *
+ * Refreshed nightly server-side, so a long stale time is right — and the query
+ * must never gate form render, per spec §9: "Never block form render on the
+ * popularity call."
+ */
+export const usePopularVenueOptions = () =>
+  useQuery({
+    queryKey: ['venue-options', 'popular'],
+    queryFn: vendorApi.getPopularVenueOptions,
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  })
+
 // Dress codes and atmospheres, also Desk-managed — cache just as hard.
 export const useVenueLookups = () =>
   useQuery({

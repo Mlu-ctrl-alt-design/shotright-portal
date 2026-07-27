@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { clsx } from '../../utils/clsx'
+import DefaultChip, { ChipRow } from './DefaultChip'
+import { CHIP_COPY, SOURCE } from '../../services/smartDefaults'
 
 /**
  * Address field with map-backed suggestions.
@@ -27,7 +29,13 @@ import { clsx } from '../../utils/clsx'
  */
 const DEBOUNCE_MS = 500
 
-export default function AddressAutocomplete({ value, onChange, error }) {
+/**
+ * How far around the device position to bias results. ~25km covers a
+ * metropolitan area without excluding a venue on the other side of it.
+ */
+const BIAS_DEGREES = 0.25
+
+export default function AddressAutocomplete({ value, onChange, error, near }) {
   const [query, setQuery] = useState(value || '')
   const [options, setOptions] = useState([])
   const [open, setOpen] = useState(false)
@@ -35,7 +43,11 @@ export default function AddressAutocomplete({ value, onChange, error }) {
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
 
+  const [confirmed, setConfirmed] = useState(false)
+  const [noticeDismissed, setNoticeDismissed] = useState(false)
+
   const listId = useId()
+  const chipId = useId()
   const boxRef = useRef(null)
   const skipNextLookup = useRef(false)
 
@@ -64,9 +76,22 @@ export default function AddressAutocomplete({ value, onChange, error }) {
       setLoading(true)
       setFailed(false)
       try {
+        // LOCATION BIAS (spec §4). `viewbox` + `bounded=0` prefers results in
+        // the box without excluding everything outside it — a partner listing a
+        // venue in another city must still find it. Applied only while
+        // `near.prompt` is true: once they are reading the list, a late fix
+        // must not reorder it under them (§5).
+        const box =
+          near?.coords && near.prompt
+            ? `&viewbox=${near.coords.longitude - BIAS_DEGREES},${near.coords.latitude + BIAS_DEGREES},` +
+              `${near.coords.longitude + BIAS_DEGREES},${near.coords.latitude - BIAS_DEGREES}&bounded=0`
+            : ''
+
         const url =
           'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5' +
-          '&countrycodes=za&q=' +
+          '&countrycodes=za' +
+          box +
+          '&q=' +
           encodeURIComponent(q)
         const results = await fetch(url, {
           signal: controller.signal,
@@ -109,6 +134,8 @@ export default function AddressAutocomplete({ value, onChange, error }) {
     setQuery(option.display_name)
     setOpen(false)
     setActive(-1)
+    setConfirmed(true)
+    setNoticeDismissed(false)
     onChange({
       address: option.display_name,
       latitude: Number(Number(option.lat).toFixed(6)),
@@ -153,11 +180,17 @@ export default function AddressAutocomplete({ value, onChange, error }) {
         value={query}
         onChange={(e) => {
           setQuery(e.target.value)
+          setConfirmed(false)
+          near?.markInteracted?.()
           // Keep the typed text on the venue even if no suggestion is picked.
           onChange({ address: e.target.value })
         }}
         onKeyDown={onKeyDown}
-        onFocus={() => options.length && setOpen(true)}
+        onFocus={() => {
+          near?.markInteracted?.()
+          if (options.length) setOpen(true)
+        }}
+        aria-describedby={confirmed && !noticeDismissed ? chipId : undefined}
         className={clsx(
           'block w-full rounded-full border-2 bg-white py-2.5 pr-11 pl-5 text-sm text-ink-900',
           'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
@@ -186,6 +219,16 @@ export default function AddressAutocomplete({ value, onChange, error }) {
           aria-label="Address suggestions"
           className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-2xl border-2 border-field bg-white py-1 shadow-lg"
         >
+          {/* §8 — say WHY these results and not others. Without it, a list
+              silently sorted by the partner's location is just a list that
+              looks oddly local. `aria-hidden` because it is context for the
+              options, not an option itself; a listbox child with no option role
+              confuses the count a screen reader announces. */}
+          {near?.coords && near.prompt && (
+            <li aria-hidden="true" className="px-5 py-1.5 text-xs font-semibold text-[#1c7a45]">
+              Showing places near you first
+            </li>
+          )}
           {options.map((o, i) => (
             <li
               key={o.place_id ?? `${o.lat},${o.lon}`}
@@ -219,6 +262,28 @@ export default function AddressAutocomplete({ value, onChange, error }) {
           map below.
         </p>
       )}
+
+      {/* CONFIRMATION, NOT A DEFAULT (spec §6). The partner chose this address
+          themselves, so this chip reports what happened as a consequence — the
+          pin moved — rather than offering a value we guessed.
+
+          Dismissing it therefore removes THE NOTICE ONLY. The address text and
+          the pin both stay exactly where they are. Clearing work the partner
+          just did would be an obvious betrayal of the control the ✕ appears to
+          offer, and is the one place in this feature where ✕ must not mean
+          "undo". */}
+      <ChipRow>
+        {confirmed && !noticeDismissed && (
+          <DefaultChip
+            id={chipId}
+            tone="location"
+            onDismiss={() => setNoticeDismissed(true)}
+            dismissLabel="Hide the pin notice"
+          >
+            {CHIP_COPY[SOURCE.LOCATION]}
+          </DefaultChip>
+        )}
+      </ChipRow>
     </div>
   )
 }

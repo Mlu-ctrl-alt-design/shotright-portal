@@ -1,113 +1,232 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useId, useRef } from 'react'
 import { useVenueLookups } from '../../../../hooks/useVendor'
 import { Input, Select } from '../../../../components/ui'
 import Spinner from '../../../../components/ui/Spinner'
 import AddressAutocomplete from '../../../../components/ui/AddressAutocomplete'
+import DefaultChip, { ChipRow } from '../../../../components/ui/DefaultChip'
+import { CHIP_COPY, SOURCE, TIER } from '../../../../services/smartDefaults'
 
-/**
- * TipTap pulls in ProseMirror, which roughly doubles the bundle. Loading it
- * lazily keeps that weight off the login and dashboard screens — it only
- * arrives when a partner actually reaches this step. That matters for an
- * audience likely to be on mobile data.
- */
 const RichTextEditor = lazy(() => import('../../../../components/ui/RichTextEditor'))
-
-/**
- * Leaflet plus its CSS is another ~150kB. Same treatment as the editor: it only
- * loads when a partner actually reaches this step.
- */
 const MapPicker = lazy(() => import('../../../../components/ui/MapPicker'))
 
 /**
- * Wizard step 2 — venue details.
+ * Wizard step 2 — venue details, with smart defaults.
  *
  * Field order and grouping follow `venue details filled.png`: the venue name on
  * its own, then manager name / surname, then cellphone / address, then the two
  * dropdowns, then the long-form description.
  *
  * Note the two selects are *different* fields — dress code and atmosphere. The
- * review screen in the designs labels both of them "Dress code", which is a
- * design bug rather than a spec (see the PRD appendix); the second value there,
- * "Out door laid back", is plainly an atmosphere.
+ * review screen in the designs labels both "Dress code", which is a design bug
+ * rather than a spec (see the PRD appendix).
  *
- * Inputs carry no visible labels, matching the designs — the placeholder is the
- * prompt. Each one keeps an aria-label so the form is still navigable by screen
- * reader, where a placeholder alone would not be announced reliably.
+ * SMART DEFAULTS (handoff spec, 27 Jul 2026). This step renders them; it does
+ * not own them — `useSmartDefaults` is called in `VenueWizard` so dirty flags
+ * survive stepping away and back. See that hook for why.
+ *
+ * Autofocus lands on the venue name (§11): it is the only field we could not
+ * fill, and per the spec that focus IS the user-facing payoff of the feature.
  */
-export default function VenueDetailsStep({ value, onChange }) {
+export default function VenueDetailsStep({ value, onChange, defaults }) {
   const { data: lookups, isLoading } = useVenueLookups()
-  const set = (key) => (e) => onChange({ ...value, [key]: e.target.value })
+  const nameRef = useRef(null)
+  const chipIds = useId()
+
+  useEffect(() => {
+    nameRef.current?.focus()
+  }, [])
+
+  /**
+   * Every change marks the field dirty BEFORE the value lands, so a default can
+   * never be re-applied over an edit that is still in flight.
+   */
+  const set = (key) => (e) => {
+    defaults.markDirty(key)
+    onChange({ ...value, [key]: e.target.value })
+  }
+
+  const chipIdFor = (field) => `${chipIds}-${field}`
+
+  /**
+   * On first focus of a defaulted field, select the whole value so typing
+   * replaces rather than appends (§8). Only on the first focus — stealing the
+   * selection every time would fight anyone trying to edit one character.
+   */
+  /**
+   * Field nodes, so dismissing a chip can hand focus back (§6: "returns focus
+   * to the now-empty input so they can type immediately").
+   *
+   * Without this the ✕ clears the value and drops focus to the document, so the
+   * partner has to go and find the field they just emptied — which makes
+   * removing a guess cost MORE than typing over it would have, inverting the
+   * spec's second principle.
+   */
+  const nodes = useRef({})
+  const captureNode = (field) => (node) => {
+    if (node) nodes.current[field] = node
+    else delete nodes.current[field]
+  }
+
+  const dismissAndFocus = (field) => {
+    defaults.dismiss(field)
+    // After the re-render that clears the value, not before.
+    requestAnimationFrame(() => nodes.current[field]?.focus())
+  }
+
+  const selectedOnce = useRef(new Set())
+  const onFocusDefaulted = (field) => (e) => {
+    if (!defaults.isDefaulted(field) || selectedOnce.current.has(field)) return
+    selectedOnce.current.add(field)
+    e.target.select()
+  }
+
+  /** The chip beneath a defaulted field, or nothing — the row keeps its height. */
+  const chipFor = (field, fieldLabel) => {
+    const entry = defaults.applied[field]
+    if (!entry) return <ChipRow />
+
+    const tone = entry.source === SOURCE.POPULAR ? 'popular' : 'profile'
+    const copy =
+      entry.source === SOURCE.POPULAR
+        ? CHIP_COPY.popular(entry.share)
+        : CHIP_COPY[SOURCE.PROFILE]
+
+    return (
+      <ChipRow>
+        <DefaultChip
+          id={chipIdFor(field)}
+          tone={tone}
+          onDismiss={() => dismissAndFocus(field)}
+          dismissLabel={`Clear default ${fieldLabel}`}
+          // Tier B carries its acknowledgement in the chip, next to the value
+          // it is about, rather than as a separate checkbox further down.
+          needsConfirm={entry.tier === TIER.CONFIRM && !defaults.confirmed.has(field)}
+          onConfirm={() => defaults.confirm(field)}
+          confirmLabel="Yes, use this"
+        >
+          {copy}
+        </DefaultChip>
+      </ChipRow>
+    )
+  }
+
+  /** Props shared by every field that participates in defaulting. */
+  const fieldProps = (field) => ({
+    ref: captureNode(field),
+    value: value[field],
+    onChange: set(field),
+    onFocus: onFocusDefaulted(field),
+    prefilled: defaults.isDefaulted(field),
+    // §11 — the chip text is the field's description, so a screen reader
+    // announces where the value came from instead of presenting a mysteriously
+    // populated field.
+    'aria-describedby': defaults.isDefaulted(field) ? chipIdFor(field) : undefined,
+    'data-default-source': defaults.applied[field]?.source,
+    'data-field': field,
+  })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* One polite announcement for the whole batch (§11). Announcing each
+          field separately teaches people to tune the region out. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {defaults.announcement}
+      </p>
+
       <div className="sm:w-1/2 sm:pr-3">
         <Input
+          ref={nameRef}
           aria-label="Venue name"
           placeholder="Please type in your venue name"
           required
           value={value.venue_name}
           onChange={set('venue_name')}
+          data-field="venue_name"
         />
+        {/* Tier D — never defaulted, but the row still reserves its height so
+            this field's neighbours do not sit at a different rhythm. */}
+        <ChipRow />
       </div>
 
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Input
-          aria-label="Manager name"
-          placeholder="Please type in manager name"
-          value={value.manager_name}
-          onChange={set('manager_name')}
-        />
-        <Input
-          aria-label="Manager surname"
-          placeholder="Please type in manager surname"
-          value={value.manager_surname}
-          onChange={set('manager_surname')}
-        />
+      <div className="grid gap-x-6 sm:grid-cols-2">
+        <div>
+          <Input
+            aria-label="Manager name"
+            placeholder="Please type in manager name"
+            {...fieldProps('manager_name')}
+          />
+          {chipFor('manager_name', 'manager name')}
+        </div>
 
-        <Input
-          type="tel"
-          inputMode="tel"
-          aria-label="Contact number"
-          placeholder="Please type in contact number"
-          value={value.contact_number}
-          onChange={set('contact_number')}
-        />
-        <AddressAutocomplete
-          value={value.address}
-          onChange={(patch) => onChange({ ...value, ...patch })}
-        />
+        <div>
+          <Input
+            aria-label="Manager surname"
+            placeholder="Please type in manager surname"
+            {...fieldProps('manager_surname')}
+          />
+          {chipFor('manager_surname', 'manager surname')}
+        </div>
 
-        <Select
-          aria-label="Dress code"
-          value={value.dress_code}
-          onChange={set('dress_code')}
-          disabled={isLoading}
-        >
-          <option value="">Select a dress code</option>
-          {(lookups?.dress_codes ?? []).map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </Select>
-        <Select
-          aria-label="Atmosphere"
-          value={value.atmosphere}
-          onChange={set('atmosphere')}
-          disabled={isLoading}
-        >
-          <option value="">Select an atmosphere</option>
-          {(lookups?.atmospheres ?? []).map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </Select>
+        <div>
+          <Input
+            type="tel"
+            inputMode="tel"
+            aria-label="Contact number"
+            placeholder="Please type in contact number"
+            {...fieldProps('contact_number')}
+          />
+          {chipFor('contact_number', 'contact number')}
+        </div>
+
+        <div>
+          <AddressAutocomplete
+            value={value.address}
+            onChange={(patch) => {
+              // Choosing an address supersedes the device guess: the pin is now
+              // derived from a real place rather than from where the phone is.
+              if (Number.isFinite(patch.latitude)) defaults.onPinMoved?.()
+              onChange({ ...value, ...patch })
+            }}
+            near={defaults.location}
+          />
+        </div>
+
+        <div>
+          <Select
+            aria-label="Dress code"
+            disabled={isLoading}
+            {...fieldProps('dress_code')}
+          >
+            <option value="">Select a dress code</option>
+            {(lookups?.dress_codes ?? []).map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </Select>
+          {chipFor('dress_code', 'dress code')}
+        </div>
+
+        <div>
+          <Select
+            aria-label="Atmosphere"
+            disabled={isLoading}
+            {...fieldProps('atmosphere')}
+          >
+            <option value="">Select an atmosphere</option>
+            {(lookups?.atmospheres ?? []).map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </Select>
+          {chipFor('atmosphere', 'atmosphere')}
+        </div>
       </div>
 
       <Suspense
         fallback={
-          <div className="grid min-h-80 place-items-center rounded-3xl border-2 border-brand-edge">
+          <div className="grid min-h-80 place-items-center rounded-3xl border-2 border-field">
             <Spinner label="Loading map…" />
           </div>
         }
@@ -116,13 +235,17 @@ export default function VenueDetailsStep({ value, onChange }) {
           latitude={value.latitude}
           longitude={value.longitude}
           address={value.address}
-          onChange={({ latitude, longitude }) => onChange({ ...value, latitude, longitude })}
+          provisional={defaults.pinIsProvisional}
+          onChange={({ latitude, longitude, provisional }) => {
+            defaults.onPinMoved?.(provisional)
+            onChange({ ...value, latitude, longitude })
+          }}
         />
       </Suspense>
 
       <Suspense
         fallback={
-          <div className="grid min-h-56 place-items-center rounded-3xl border-2 border-brand-edge">
+          <div className="grid min-h-56 place-items-center rounded-3xl border-2 border-field">
             <Spinner label="Loading editor…" />
           </div>
         }

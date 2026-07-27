@@ -343,6 +343,34 @@ export const getPopularMoods = (limit = 8) =>
  */
 export const getVenueLookups = async () => VENUE_LOOKUPS
 
+/**
+ * Aggregate popularity for the two dropdowns — the Tier C signal.
+ *
+ * Shape: `{dress_code: {value, share}, atmosphere: {value, share}}` where
+ * `share` is a whole-number percentage shown to the partner as justification
+ * ("Most venues pick this (62%)").
+ *
+ * NO ENDPOINT YET, so this resolves to `null` and the dropdowns render with no
+ * default and no chip — which the spec (§9) already names as acceptable.
+ *
+ * It must NOT fall back to a plausible-looking guess. The share is displayed as
+ * a reason to trust the suggestion, so an invented one is a fabricated
+ * statistic put in front of partners. The spec's own §12 warns about the
+ * feedback loop here: a pre-selected dropdown nobody reads poisons the
+ * popularity figure it was derived from. Seeding that loop with a number we
+ * made up would be worse still.
+ */
+export const getPopularVenueOptions = () =>
+  pick(
+    () =>
+      withFallback(
+        'get_popular_venue_options',
+        () => call('shotright.api.get_popular_venue_options'),
+        async () => null,
+      ),
+    async () => mockBackend.getPopularVenueOptions(),
+  )()
+
 /* ---------------------------------------------------------------- dashboard */
 
 export const getDashboard = () =>

@@ -55,6 +55,21 @@
      switches to brand-ink, which now reads far more clearly against grey. */
   --color-field: #8a8a8f;
 
+  /* Smart defaults (handoff spec §7). A field holding an unmodified default
+     gets this background and a brand-edge border; both clear the moment it
+     goes dirty.
+
+     The spec's `color-prefill-border: #d9b23a` is NOT used. It measures 2.02:1
+     on white, and the border is what identifies the field's state, so WCAG
+     1.4.11 wants 3:1. It also fails the spec's own first principle — a default
+     must be VISIBLE, and a 2:1 border is not. `--color-brand-edge` is the same
+     hue family, already in the system, and measures 3.50 / 3.43 / 3.27 on
+     white, prefill and canvas.
+
+     `color-accent: #f5b301` is likewise not adopted for focus rings: 1.85:1,
+     against 3.50:1 for the brand-edge treatment already in use. */
+  --color-prefill: #fffdf4;
+
   /* Neutrals. */
   --color-canvas: #f7f7f7;
   --color-tint: #fff3e0;
@@ -119,6 +134,19 @@ body {
   select,
   textarea {
     font-size: 16px;
+  }
+}
+
+/* Smart-default chip (spec §10: fade + 3px rise, 250ms). `motion-safe:` so it
+   appears without travelling for anyone who has asked for less motion. */
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
