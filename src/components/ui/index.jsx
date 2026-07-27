@@ -24,6 +24,11 @@ export function Button({
   // sentence-case rounded rectangle. Both shapes come from the designs.
   caps = true,
   shape = 'pill',
+  // `as="a"` for actions that are genuinely navigations — a mailto, a download.
+  // Those must be real anchors: right-clickable, showing their destination on
+  // hover, and openable in a new tab. Wrapping a <button> in an <a> is invalid
+  // HTML and loses all three.
+  as: Component = 'button',
   className,
   disabled,
   loading,
@@ -46,8 +51,12 @@ export function Button({
   }
 
   return (
-    <button
-      disabled={disabled || loading}
+    <Component
+      // An anchor has no `disabled`; `aria-disabled` is what carries the state
+      // there, and the caller drops `href` to actually stop it navigating.
+      {...(Component === 'button'
+        ? { disabled: disabled || loading }
+        : { 'aria-disabled': disabled || loading || undefined })}
       className={clsx(
         'inline-flex items-center justify-center gap-2 font-semibold transition',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
@@ -64,7 +73,7 @@ export function Button({
         <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
       )}
       {children}
-    </button>
+    </Component>
   )
 }
 

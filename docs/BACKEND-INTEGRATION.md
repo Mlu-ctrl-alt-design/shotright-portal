@@ -176,6 +176,32 @@ They are dropped, with a warning.
 upload succeeds (the File is created) but nothing links it to the item, so it
 will never appear in the customer app. Dropped, with a warning.
 
+### 🟠 C6 — a decline carries no reason
+
+A venue's rejection is a workflow state and nothing more. There is no field for
+a moderator to write into, so there is nothing to show a partner beyond the word
+"Declined".
+
+The review screen (`/venues/:id/review`) is built and reachable from both the
+dashboard and the Declined tab. Without the backend fields it tells the partner
+plainly that **no reason was recorded**, treats that as our failing rather than
+theirs, and makes asking a human the primary action instead of "edit and
+resubmit" — because editing with no reason to act on is an invitation to guess.
+
+What it can still offer on its own: gaps it derives from the venue itself — no
+map pin, no moods, no photos, nothing on the menu, no description. Those are the
+common decline reasons and they are checkable client-side. They render under
+their own heading with an explicit disclaimer, because the one thing that
+section must never do is get mistaken for the reviewer's reasons: a partner who
+fixes our five observations when the reviewer declined them over something else
+has been sent on an errand by their own software.
+
+Drop-in: `backend/venue_review.py`. Ask: **§12 of `docs/BACKEND-ASKS.md`**.
+
+**Related gap: there is no support address.** `VITE_SUPPORT_EMAIL` is
+deliberately undefaulted — a guessed address does not bounce, it just never gets
+read — so with it unset the screen shows no support button and says so.
+
 ### 🟠 C5 — a venue's own photographs have nowhere to live
 
 Nothing on `create_venue`, and no endpoint anywhere, holds pictures of the venue

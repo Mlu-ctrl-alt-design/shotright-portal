@@ -223,6 +223,19 @@ export default function VenueList() {
                   <td className="px-5 py-4 text-ink-700">{venue.dress_code || '—'}</td>
                   <td className="px-5 py-4">
                     <div className="flex justify-end gap-4">
+                      {/* A declined venue's first question is "why?", not
+                          "what's on the menu?". The answer leads the row, and
+                          is emphasised, because a partner scanning this table
+                          has no other route to the reviewer's reasons. */}
+                      {inBucket(venue, 'declined') && (
+                        <Link
+                          to={`/venues/${venue.name}/review`}
+                          aria-label={`Why ${venue.venue_name} was declined`}
+                          className="font-bold text-red-700 hover:underline"
+                        >
+                          Why?
+                        </Link>
+                      )}
                       {/* Names the venue for assistive tech: a column of
                           identical "Edit" links is unusable out of context. */}
                       <Link
