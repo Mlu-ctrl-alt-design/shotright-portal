@@ -82,6 +82,40 @@ export const useUpdateVenue = (venueId) => {
   })
 }
 
+/* ----------------------------------------------------------- venue photos */
+
+/**
+ * Whether the bench can hold venue photos at all.
+ *
+ * One probe per tab, cached forever — deploying an endpoint mid-session is not
+ * a case worth refetching for, and the answer decides what the uploader
+ * PROMISES. Getting it wrong in the optimistic direction means telling a
+ * partner their photos are live when they are sitting in a File table.
+ */
+export const useVenuePhotoSupport = () =>
+  useQuery({
+    queryKey: ['venue-photos', 'supported'],
+    queryFn: vendorApi.venuePhotosSupported,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  })
+
+export const useVenuePhotos = (venueId) =>
+  useQuery({
+    queryKey: ['venue-photos', venueId],
+    queryFn: () => vendorApi.getVenuePhotos(venueId),
+    enabled: !!venueId,
+  })
+
+export const useSaveVenuePhotos = (venueId) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (photos) => vendorApi.saveVenuePhotos(venueId, photos),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['venue-photos', venueId] }),
+  })
+}
+
 /* ------------------------------------------------------------------- menu */
 
 export const useMenu = (venueId) =>

@@ -1,9 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { useVenue, useMoods, useCreateVenue, useUpdateVenue } from '../../hooks/useVendor'
+import {
+  useVenue,
+  useMoods,
+  useCreateVenue,
+  useUpdateVenue,
+  useVenuePhotos,
+  useSaveVenuePhotos,
+} from '../../hooks/useVendor'
 import { Button, Input, Textarea, Card, Alert, Badge } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { OperatingHoursEditor } from '../../components/ui/OperatingHours'
+import PhotoUploader from '../../components/ui/PhotoUploader'
+import { MAX_VENUE_PHOTOS, uploadVenuePhoto } from '../../services/vendor'
 import { clsx } from '../../utils/clsx'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -46,6 +55,27 @@ export default function VenueForm() {
 
   const [form, setForm] = useState(EMPTY)
   const [error, setError] = useState(null)
+
+  /**
+   * Photos are kept out of `form` on purpose.
+   *
+   * They are not edits waiting for Save — each one is already on the bench the
+   * moment it finishes uploading, and for an existing venue it is attached to
+   * that venue as it goes. What Save does here is persist the ORDER, which is
+   * the only part of a gallery that is a pending change.
+   */
+  const { data: photoData } = useVenuePhotos(venueId)
+  const savePhotos = useSaveVenuePhotos(venueId)
+  const [photos, setPhotos] = useState([])
+  const seeded = useRef(false)
+
+  useEffect(() => {
+    // Once. A refetch landing mid-edit must not throw away a photo the partner
+    // has just added or an order they have just rearranged.
+    if (seeded.current || !photoData) return
+    seeded.current = true
+    setPhotos(photoData.photos || [])
+  }, [photoData])
 
   useEffect(() => {
     if (existing) {
@@ -97,6 +127,17 @@ export default function VenueForm() {
       const saved = isEdit
         ? await updateVenue.mutateAsync(payload)
         : await createVenue.mutateAsync(payload)
+      // After the venue, because a photo order is meaningless without the venue
+      // it orders. A failure here must not read as "your venue didn't save" —
+      // it didn't fail, and the photos are on the bench either way.
+      if (photos.length) {
+        try {
+          await savePhotos.mutateAsync(photos)
+        } catch {
+          // Deliberately swallowed: see the notice on the Photos card, which
+          // has already told the partner the order isn't kept yet.
+        }
+      }
       navigate(`/venues/${saved.name}/menu`)
     } catch (err) {
       setError(err.message)
@@ -175,6 +216,35 @@ export default function VenueForm() {
             onChange={set('atmosphere_desc')}
           />
         </div>
+      </Card>
+
+      {/* The portal had nowhere to put a venue's own photographs at all — a
+          partner could write three paragraphs about their room and still leave
+          a customer nothing to look at. */}
+      <Card title="Photos">
+        <PhotoUploader
+          photos={photos}
+          onChange={setPhotos}
+          venueId={venueId}
+          upload={uploadVenuePhoto}
+          max={MAX_VENUE_PHOTOS}
+          label="Photos of this venue"
+          notice={
+            // Known BEFORE they start, from the read: `ordered: false` means the
+            // photos came back as bare file attachments because the endpoint
+            // that would order them isn't deployed.
+            photoData && photoData.ordered === false ? (
+              <Alert variant="warning">
+                <p className="font-bold">These don’t reach customers yet</p>
+                <p className="mt-1">
+                  Photos you add here upload properly and attach to this venue, so our reviewers
+                  see them. The app has no place to show a venue’s pictures yet, so they won’t
+                  appear in search, and the order below isn’t saved. We’ve asked for it.
+                </p>
+              </Alert>
+            ) : null
+          }
+        />
       </Card>
 
       <Card

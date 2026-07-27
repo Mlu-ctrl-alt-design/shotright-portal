@@ -175,6 +175,55 @@ order**:
 mail locks every new partner out with no way through — strictly worse than the
 junk accounts it prevents.
 
+### 14. Venue photos — `backend/venue_photos.py`
+
+> **Added 27 Jul. This was missing from the first version of this page** — §11
+> below covers *menu item* photos only. A venue's own photographs were not
+> asked for, because the portal had nowhere to upload one. It does now.
+
+Sho't Right sells a **mood**. A customer picks a feeling on a Friday night and
+gets a list of places. A listing with no picture asks them to choose where to
+spend their evening on the strength of a name and a dress code.
+
+The portal now has the whole thing — drag or choose several at once, downscaled
+in the browser (a 5 MB phone photo goes up as ~300 KB), reorder, cover photo,
+remove — in the setup wizard and on an existing venue. What it has nowhere to
+put is the result.
+
+```
+set_venue_photos(venue_name, photos)   -> the saved list
+get_venue_photos(venue_name)           -> [{file, file_url, file_name, idx, is_cover}]
+delete_venue_photo(venue_name, file)   -> {ok: true}
+```
+
+`photos` is a JSON array of `{file, file_url, file_name, idx, is_cover}`, where
+`file` is the **File docname the portal already created** — link to it, don't
+re-upload or re-encode. `idx` is 1-based.
+
+Doctype **`Venue Photo`** (child table): `file` (Link → File), `image` (Attach
+Image), `file_name` (Data), `is_cover` (Check). On **`Venue`**: `photos` (Table)
+and `cover_image` (Attach Image, read-only) — the cover denormalised so a search
+result card is one row rather than a child-table load per result.
+
+**`find_venues` should return `cover_image` on each result.**
+
+**Order is data, not decoration.** Photo 1 is the image on the search card. A
+partner who drags their best shot to the front has made an editorial decision
+about how their business is presented; an unordered set silently discards it.
+
+*What works today without you:* the upload half. The portal posts to stock
+`upload_file` with `doctype=Venue`, so photos land as attachments on the Venue
+and a moderator sees them in Desk. That is why the portal uploads regardless —
+and why it currently tells the partner, **before** they start arranging
+anything, that the pictures won't reach customers yet and the order isn't kept.
+That copy disappears on its own the moment `get_venue_photos` answers.
+
+**One decision for you:** does changing photos send a venue back for review? We
+suggest adding or replacing one does, and *reordering an already-approved set*
+does not — a partner nudging two approved photos shouldn't drop out of search
+for a day. Tell us which, because "Save" and "Save and resubmit for review" are
+not the same promise and the button has to say the right one.
+
 ### 9. Popularity signal — `backend/venue_option_popularity.py`
 
 `get_popular_venue_options()` → the most-chosen dress codes and atmospheres, so
@@ -244,6 +293,45 @@ the thing that would send that email exists.
 
 ---
 
+## Fastest way to tell us what landed
+
+We cannot reach the bench from the build environment, so we cannot check this
+ourselves — which is why five method names on this page are still marked
+"unverified" rather than "wrong" or "fine".
+
+Sign in to the portal, open the browser console, and paste this. It sends only
+GETs, so nothing is created, changed or deleted. It prints one line per method.
+
+```js
+const METHODS = [
+  'shotright.api.get_venue_products', 'shotright.api.add_product_heading',
+  'shotright.api.add_product_item', 'shotright.api.bulk_import_products',
+  'shotright.api.import_products_from_excel', 'shotright.api.delete_product_item',
+  'shotright.api.get_moods', 'shotright.api.resolve_mood', 'shotright.api.get_popular_moods',
+  'shotright.api.save_venue_draft', 'shotright.api.list_venue_drafts',
+  'shotright.api.get_venue_draft', 'shotright.api.discard_venue_draft',
+  'shotright.api.start_menu_import', 'shotright.api.get_menu_import_status',
+  'shotright.api.cancel_menu_import',
+  'shotright.api.set_venue_photos', 'shotright.api.get_venue_photos',
+  'shotright.api.get_popular_venue_options',
+  'shotright.api.send_otp', 'shotright.api.verify_otp',
+]
+for (const m of METHODS) {
+  const r = await fetch(`/api/method/${m}`, { headers: { Accept: 'application/json' } })
+  const body = await r.text()
+  // A 404 naming the method means it is NOT DEPLOYED. Any other status —
+  // including 403, 405 and 417 — means the method exists and simply objected
+  // to being called with no arguments over GET, which is what we want to see.
+  const missing = r.status === 404 && /Method Not Found|ModuleNotFound|AttributeError|not whitelisted/i.test(body)
+  console.log(missing ? '❌ MISSING ' : '✅ present ', m, `(${r.status})`)
+}
+```
+
+Send us the output and we will delete every "unverified" on this page. If a
+method is named differently at your end it shows as MISSING here — that is the
+answer we need most, because a wrong name is the one failure capability
+detection cannot rescue us from.
+
 ## Verification, once each lands
 
 | # | Check |
@@ -254,3 +342,4 @@ the thing that would send that email exists.
 | 6 | Upload a 500-row menu, close the tab, come back. Progress is still there and the counts are real. The completion email arrives. |
 | 7 | Type a mood nobody has used. It is accepted as pending and appears in the Desk queue. |
 | 8 | Register. The code arrives. An unverified account is purged on schedule. |
+| 14 | Add four photos in the wizard, drag the third to the front, submit. The warning about photos not reaching customers is **gone**, and reopening the venue shows the same four in the same order with the right cover. |

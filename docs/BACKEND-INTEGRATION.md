@@ -176,6 +176,32 @@ They are dropped, with a warning.
 upload succeeds (the File is created) but nothing links it to the item, so it
 will never appear in the customer app. Dropped, with a warning.
 
+### 🟠 C5 — a venue's own photographs have nowhere to live
+
+Nothing on `create_venue`, and no endpoint anywhere, holds pictures of the venue
+itself. This was not a broken feature, it was an **absent** one: the portal had
+no place to upload a venue photo at all, so a partner could describe their room
+in three paragraphs, photograph every dish on their menu, and still leave a
+customer with nothing to look at on the listing.
+
+The portal now has the whole uploader — multi-select and drag, browser-side
+downscaling (a 5 MB phone photo goes up as ~300 KB), reorder, cover photo,
+remove — in the wizard's details step and on an existing venue.
+
+**Half of it works today.** The upload posts to stock `upload_file` with
+`doctype=Venue`/`docname=<venue>`, so a photo lands as an attachment on the
+Venue and a moderator sees it in Desk. Missing is a field for the customer app
+to read, and an order to read it in.
+
+So the portal capability-probes `get_venue_photos` **before the partner starts**
+— `venuePhotosSupported()`, a bespoke probe rather than `withFallback`, because
+the latter would cache a missing *venue* as a missing *method* — and when it is
+absent says so above the uploader instead of after submit. Eight photographs put
+in a deliberate order is real work; finding out at the end that none of it went
+anywhere is how a form loses somebody for good.
+
+Drop-in: `backend/venue_photos.py`. Ask: **§14 of `docs/BACKEND-ASKS.md`**.
+
 ### 🟡 Venue fields with no home
 
 `create_venue` accepts `venue_name`, `latitude`, `longitude`, `dress_code`,

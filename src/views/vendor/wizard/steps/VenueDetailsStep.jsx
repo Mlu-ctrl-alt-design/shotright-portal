@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useId, useRef } from 'react'
-import { useVenueLookups } from '../../../../hooks/useVendor'
-import { Input, Select } from '../../../../components/ui'
+import { useVenueLookups, useVenuePhotoSupport } from '../../../../hooks/useVendor'
+import { Alert, Input, Select } from '../../../../components/ui'
 import Spinner from '../../../../components/ui/Spinner'
 import AddressAutocomplete from '../../../../components/ui/AddressAutocomplete'
 import DefaultChip, { ChipRow } from '../../../../components/ui/DefaultChip'
+import PhotoUploader from '../../../../components/ui/PhotoUploader'
 import { CHIP_COPY, SOURCE, TIER } from '../../../../services/smartDefaults'
+import { MAX_VENUE_PHOTOS, uploadVenuePhoto } from '../../../../services/vendor'
 
 const RichTextEditor = lazy(() => import('../../../../components/ui/RichTextEditor'))
 const MapPicker = lazy(() => import('../../../../components/ui/MapPicker'))
@@ -33,8 +35,11 @@ export default function VenueDetailsStep({
   defaults,
   errors = {},
   onBlurField = () => {},
+  photos = [],
+  onPhotosChange = () => {},
 }) {
   const { data: lookups, isLoading } = useVenueLookups()
+  const { data: photosSupported } = useVenuePhotoSupport()
   const nameRef = useRef(null)
   const chipIds = useId()
 
@@ -277,6 +282,37 @@ export default function VenueDetailsStep({
           placeholder="Tell customers about your venue — its story, what you are known for, and what makes a night there worth it."
         />
       </Suspense>
+
+      {/* Photographs, last — after the partner has described the place in
+          words, which is the point at which "now show me" reads as the natural
+          next thing rather than as another form field.
+
+          Uploaded as they are chosen, not held for submit: the venue does not
+          exist yet, so the File goes up unattached and is linked on create.
+          That is also what lets a RESUMED draft come back with its pictures —
+          a draft can carry a `file_url`, and could never carry a File object. */}
+      <PhotoUploader
+        photos={photos}
+        onChange={onPhotosChange}
+        upload={uploadVenuePhoto}
+        max={MAX_VENUE_PHOTOS}
+        notice={
+          // Said before they start arranging, not after they submit. Eight
+          // photographs put in a deliberate order is real work, and finding out
+          // at the end that none of it went anywhere is how a form loses
+          // someone's trust for good.
+          photosSupported === false ? (
+            <Alert variant="warning">
+              <p className="font-bold">Photos aren’t reaching customers yet</p>
+              <p className="mt-1">
+                Add them anyway — they upload properly and our reviewers will see them with your
+                venue. The app just has no place to show a venue’s pictures yet, so they won’t
+                appear in search, and the order you put them in isn’t saved. We’ve asked for it.
+              </p>
+            </Alert>
+          ) : null
+        }
+      />
     </div>
   )
 }

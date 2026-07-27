@@ -92,6 +92,10 @@ function Wizard({ resumeId, draft, draftError }) {
   const [details, setDetails] = useState(() => ({ ...INITIAL_DETAILS, ...(saved.details || {}) }))
   const [hours, setHours] = useState(() => ({ ...INITIAL_HOURS, ...(saved.hours || {}) }))
   const [menu, setMenu] = useState(() => ({ categories: [], ...(saved.menu || {}) }))
+  // Photos are already on the bench by the time they reach this state — what is
+  // held here is a list of `file_url`s, which is exactly why a draft can carry
+  // them across a device and a File object never could.
+  const [photos, setPhotos] = useState(() => saved.photos || [])
 
   /**
    * Smart defaults live HERE, not in the step.
@@ -147,7 +151,7 @@ function Wizard({ resumeId, draft, draftError }) {
     step: step.key,
     completed: completed.map((i) => STEPS[i]?.key).filter(Boolean),
     venueName: details.venue_name,
-    payload: { moods, details, hours, menu },
+    payload: { moods, details, hours, menu, photos },
     enabled: !created,
   })
 
@@ -191,6 +195,9 @@ function Wizard({ resumeId, draft, draftError }) {
     dress_code: details.dress_code,
     atmosphere: details.atmosphere,
     summary: details.summary,
+    // Order is data, not decoration: photo one is what a customer sees when
+    // this venue comes back from a mood search.
+    photos: photos.map((p, index) => ({ ...p, idx: index + 1 })),
     moods: moods.moods.map((m) => ({ mood: m.mood, status: m.status, label: m.label })),
     // Passed raw: the service layer converts these three ranges into the
     // per-day rows the backend stores (C3), and reports what it had to drop.
@@ -320,6 +327,7 @@ function Wizard({ resumeId, draft, draftError }) {
     setDetails(INITIAL_DETAILS)
     setHours(INITIAL_HOURS)
     setMenu({ categories: [] })
+    setPhotos([])
   }
 
   if (created) {
@@ -369,12 +377,16 @@ function Wizard({ resumeId, draft, draftError }) {
             defaults={defaults}
             errors={visibleErrors}
             onBlurField={(field) => touchField('details', field)}
+            photos={photos}
+            onPhotosChange={setPhotos}
           />
         )
       case 'menu':
         return <MenuStep value={menu} onChange={setMenu} />
       case 'review':
-        return <ReviewStep moods={moods} details={details} hours={hours} menu={menu} />
+        return (
+          <ReviewStep moods={moods} details={details} hours={hours} menu={menu} photos={photos} />
+        )
       default:
         return null
     }

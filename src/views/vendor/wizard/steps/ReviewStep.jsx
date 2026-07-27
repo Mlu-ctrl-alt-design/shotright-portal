@@ -38,7 +38,7 @@ function Chevron({ open }) {
   )
 }
 
-export default function ReviewStep({ moods, details, hours, menu }) {
+export default function ReviewStep({ moods, details, hours, menu, photos = [] }) {
   const [showAll, setShowAll] = useState(false)
   const [open, setOpen] = useState({})
 
@@ -58,6 +58,37 @@ export default function ReviewStep({ moods, details, hours, menu }) {
           ))}
         </div>
       </section>
+
+      {/* Photos come BEFORE the details panel, in the order they will be used,
+          with the cover called out. This is the last screen before submit and
+          the only place the partner sees the running order as a whole — a
+          gallery is the one thing on this form you cannot check by re-reading
+          the field you typed it into. */}
+      {photos.length > 0 && (
+        <section>
+          <p className="text-sm text-ink-700">
+            {photos.length === 1
+              ? 'Your photo. This is what customers will see.'
+              : `Your ${photos.length} photos, in order. The first one is what customers see.`}
+          </p>
+          <ul className="mt-3 flex gap-3 overflow-x-auto pb-1">
+            {photos.map((photo, index) => (
+              <li key={photo.file_url || photo.name} className="relative shrink-0">
+                <img
+                  src={photo.file_url}
+                  alt={photo.file_name}
+                  className="h-24 w-32 rounded-2xl object-cover ring-1 ring-brand-200"
+                />
+                {index === 0 && (
+                  <span className="absolute top-1.5 left-1.5 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-bold tracking-wide text-ink-900 uppercase">
+                    Cover
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="rounded-2xl bg-tint p-6">
         <h2 className="text-2xl font-bold text-ink-900">
