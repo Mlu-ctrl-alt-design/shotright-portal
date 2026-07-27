@@ -333,6 +333,38 @@ Mail transport is deliberately not decided in code. Everything goes through
 verification live and mail broken, every new partner is locked out with no way
 through — strictly worse than the junk accounts it prevents.
 
+### 🔴 REPORTED — opening a venue's menu returns "Not found"
+
+**We need the real method names for the menu endpoints. A partner is hitting
+this now.**
+
+The five menu calls were written from `backend/api_reference.py`, the file that
+predates the real API — the same source as the `vendor_name` and `Rejected`
+bugs. They have never been confirmed against the Postman collection:
+
+| Portal calls | Purpose | Confirmed? |
+|---|---|---|
+| `shotright.api.get_venue_products` | read a venue's menu | ❌ **404 in production** |
+| `shotright.api.add_product_heading` | create a heading | ❌ unverified |
+| `shotright.api.add_product_item` | create an item | ❌ unverified |
+| `shotright.api.bulk_import_products` | bulk rows | ❌ unverified |
+| `shotright.api.import_products_from_excel` | file upload | ❌ unverified |
+
+This could not be probed from the build environment — the network policy has no
+outbound route to `shotright.thedaystar.co.za`. The names above are what the
+portal sends, and at least the first one is wrong.
+
+**What changed in the meantime.** A 404 on the read no longer dead-ends the page.
+`normalizeError` now keeps `exc_type` and the raw exception text, and
+`isMethodMissing()` uses them to tell a MISSING ENDPOINT apart from a MISSING
+DOCUMENT — both of which Frappe returns as a 404 `DoesNotExistError`. When the
+endpoint is what is missing, the menu page still renders and says so, naming the
+method. It no longer tells a restaurant owner their menu was not found, which is
+what it was doing and which reads as "your data is gone".
+
+That is damage control, not a fix. **Please send the correct method names and
+their parameters** — it is a one-line change per call at this end.
+
 ---
 
 ## 3. Still needed from the backend
@@ -366,7 +398,12 @@ The portal is on the real bench now, so these are no longer blockers to cutover
 - [ ] Decide whether the dropped venue fields (manager, contact, description)
       should be added to `create_venue` — the designs collect them, so presumably
       yes.
+- [ ] 🔴 **Send the five real menu method names** (see the reported 404 above).
+      `get_venue_products` 404s in production and the other four are unverified.
 - [ ] Confirm the `Product Item` doctype name and delete permission.
+- [ ] **Deploy `venue_drafts.py`** so setup survives being put down —
+      spec in `docs/RESUME-SETUP.md`. Until then drafts are browser-local and
+      the portal shows the smaller, true promise instead of the designed one.
 - [ ] Re-run the wizard end to end against the real bench, with a real partner
       account. **This has not been done from CI** — the build environment has no
       outbound route to `shotright.thedaystar.co.za`, so the integration was

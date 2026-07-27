@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useCreateVenue } from '../../../hooks/useVendor'
 import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
+import { useDraft, useSetupDraft } from '../../../hooks/useSetupDraft'
+import { WIZARD_STEPS, stepIndex } from '../../../services/wizardSteps'
 import {
   FIELD_STEP,
   firstInvalid,
@@ -9,6 +11,7 @@ import {
 } from '../../../services/venueValidation'
 import WizardLayout from '../../../components/wizard/WizardLayout'
 import { Alert } from '../../../components/ui'
+import Spinner from '../../../components/ui/Spinner'
 import MoodStep from './steps/MoodStep'
 import VenueDetailsStep from './steps/VenueDetailsStep'
 import MenuStep from './steps/MenuStep'
@@ -23,13 +26,7 @@ import OperatingHoursStep from './steps/OperatingHoursStep'
  * designs. All five steps are built; SUBMIT on the last one creates the Venue,
  * which always enters review rather than going live (#15).
  */
-const STEPS = [
-  { key: 'mood', label: 'Setup Mood' },
-  { key: 'details', label: "Your venue's details" },
-  { key: 'hours', label: 'Your operating hours' },
-  { key: 'menu', label: 'Your menu options' },
-  { key: 'review', label: 'Almost done' },
-]
+const STEPS = WIZARD_STEPS
 
 const INITIAL_DETAILS = {
   venue_name: '',
@@ -52,14 +49,49 @@ const INITIAL_HOURS = {
   publicHoliday: { start: '10:00', end: '19:00' },
 }
 
+/**
+ * The loader half.
+ *
+ * A draft is resolved BEFORE the wizard mounts, and handed in as initial state.
+ * The obvious alternative — mount empty, then patch the draft in from an effect
+ * — does not work here, and failed exactly as you would expect: smart defaults
+ * also write into `details` on mount, from a snapshot taken before the patch,
+ * so a restored venue name was silently wiped a tick after it appeared. There is
+ * no ordering of those two effects that is safe, so the draft is not an effect.
+ *
+ * `key` on the inner component means changing drafts remounts rather than trying
+ * to reconcile one partner's half-finished venue into another's.
+ */
 export default function VenueWizard() {
+  const [params] = useSearchParams()
+  const resumeId = params.get('draft')
+  const { data: draft, isLoading, error } = useDraft(resumeId)
+
+  if (resumeId && isLoading) return <Spinner label="Picking up where you left off…" />
+
+  return (
+    <Wizard
+      key={resumeId || 'new'}
+      resumeId={resumeId}
+      draft={draft || null}
+      draftError={resumeId && !isLoading && !draft ? error || new Error('missing') : null}
+    />
+  )
+}
+
+function Wizard({ resumeId, draft, draftError }) {
   const navigate = useNavigate()
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [completed, setCompleted] = useState([])
-  const [moods, setMoods] = useState({ moods: [] })
-  const [details, setDetails] = useState(INITIAL_DETAILS)
-  const [hours, setHours] = useState(INITIAL_HOURS)
-  const [menu, setMenu] = useState({ categories: [] })
+  const saved = draft?.payload || {}
+
+  // Spread over the initial shapes rather than replacing them, so a draft
+  // written before a field existed still opens instead of putting an undefined
+  // into a controlled input.
+  const [currentIndex, setCurrentIndex] = useState(draft?.stepIndex ?? 0)
+  const [completed, setCompleted] = useState(() => (draft?.completed || []).map(stepIndex))
+  const [moods, setMoods] = useState(() => ({ moods: [], ...(saved.moods || {}) }))
+  const [details, setDetails] = useState(() => ({ ...INITIAL_DETAILS, ...(saved.details || {}) }))
+  const [hours, setHours] = useState(() => ({ ...INITIAL_HOURS, ...(saved.hours || {}) }))
+  const [menu, setMenu] = useState(() => ({ categories: [], ...(saved.menu || {}) }))
 
   /**
    * Smart defaults live HERE, not in the step.
@@ -101,6 +133,23 @@ export default function VenueWizard() {
 
   const step = STEPS[currentIndex]
   const isLast = currentIndex === STEPS.length - 1
+
+  /**
+   * Autosave, so walking away is not the same as starting over.
+   *
+   * Held off until a resume has finished loading — otherwise the first debounce
+   * fires against the EMPTY initial state and overwrites the very draft we are
+   * in the middle of restoring. Completed steps are stored as keys, not indices,
+   * because indices stop meaning anything the moment a step is inserted.
+   */
+  const draftState = useSetupDraft({
+    draftId: resumeId,
+    step: step.key,
+    completed: completed.map((i) => STEPS[i]?.key).filter(Boolean),
+    venueName: details.venue_name,
+    payload: { moods, details, hours, menu },
+    enabled: !created,
+  })
 
   /** Live errors for the step being shown, limited to what has been touched. */
   const visibleErrors = validateStep(step.key, stateFor(step.key), touchedFor(step.key))
@@ -183,6 +232,10 @@ export default function VenueWizard() {
       defaults.reportAccepted()
       markComplete(currentIndex)
       setCreated({ venue, warnings })
+      // The draft has become a Venue. Leaving it behind would put "continue
+      // setup" on the dashboard next to the venue it already created, and the
+      // partner would reasonably do both.
+      draftState.discard()
     } catch (err) {
       setSubmitError(err.message)
     } finally {
@@ -349,6 +402,32 @@ export default function VenueWizard() {
       nextLabel={isLast ? 'Submit' : 'Next'}
       nextLoading={submitting}
     >
+      {/* A draft id that no longer resolves. Said plainly, because the partner
+          arrived here from a link that promised their work back and is entitled
+          to know it is not coming — rather than being dropped on a blank form
+          and left to conclude they imagined it. */}
+      {draftError && (
+        <div className="mb-5">
+          <Alert variant="warning">
+            We couldn’t find that saved setup. Nothing has been lost from any venue you already
+            submitted — but this draft is gone, so you’ll need to fill it in again.
+          </Alert>
+        </div>
+      )}
+
+      {/* Autosave, reported honestly. "Saved" only ever appears after a write
+          actually succeeded; a failure says so and says what to do about it,
+          because a partner who believes their work is safe is the one who
+          closes the tab. */}
+      {draftState.status === 'error' && (
+        <div className="mb-5">
+          <Alert variant="warning">
+            We couldn’t save your progress: {draftState.error} Don’t close this tab — press Next to
+            try again, or finish and submit.
+          </Alert>
+        </div>
+      )}
+
       {submitError && (
         <div className="mb-5">
           <Alert variant="danger">{submitError}</Alert>

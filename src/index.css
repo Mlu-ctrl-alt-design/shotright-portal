@@ -137,6 +137,20 @@ body {
   }
 }
 
+/* Indeterminate progress — used while a menu import is running but the server
+   has not yet reported a row count. Deliberately a travelling segment rather
+   than a filling bar: a bar that fills without knowing the total is inventing
+   a number, and once someone learns the number is fiction they stop believing
+   the real one. */
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
 /* Smart-default chip (spec §10: fade + 3px rise, 250ms). `motion-safe:` so it
    appears without travelling for anyone who has asked for less motion. */
 @keyframes chip-in {

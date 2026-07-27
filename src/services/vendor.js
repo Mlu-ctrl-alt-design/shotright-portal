@@ -23,7 +23,14 @@
  *
  * Methods live in a flat `shotright.api.*` namespace — not `.vendor.*`.
  */
-import api, { call, callGet, USE_MOCKS, setAuthToken, hasAuthToken } from './api'
+import api, {
+  call,
+  callGet,
+  USE_MOCKS,
+  setAuthToken,
+  hasAuthToken,
+  isMethodMissing,
+} from './api'
 import { mockBackend } from './mockBackend'
 import { matchMood, FALLBACK_MOODS } from './moods'
 import { VENUE_LOOKUPS } from './lookups'
@@ -545,11 +552,39 @@ export const updateVenue = (venueId, payload) =>
 
 /* --------------------------------------------------------------------- menu */
 
-export const getMenu = (venueId) =>
-  pick(
-    () => callGet('shotright.api.get_venue_products', { venue_name: venueId }),
-    () => mockBackend.getMenu(venueId),
-  )()
+/**
+ * REPORTED: opening a venue's menu returned "Not found".
+ *
+ * A 404 here has two completely different causes and they were being shown to
+ * the partner identically, as a red error where their menu should be:
+ *
+ *   THE ENDPOINT IS NOT DEPLOYED. `get_venue_products` is one of the method
+ *   names that predate the real API — the same class of mistake that produced
+ *   the `vendor_name` and `Rejected` bugs. Nothing is wrong with the partner's
+ *   venue; the portal is asking for something that is not there.
+ *
+ *   THE VENUE IS NOT THEIRS, or does not exist. That is a real error and must
+ *   still be reported as one.
+ *
+ * So this returns `{ headings, unavailable }` rather than throwing on the first
+ * case. The page then renders — the partner can still add headings and items by
+ * hand — with a banner that says which endpoint is missing, instead of a dead
+ * end that reads as "we lost your menu".
+ */
+export const MENU_READ_METHOD = 'shotright.api.get_venue_products'
+
+export const getMenu = async (venueId) => {
+  if (USE_MOCKS) return { headings: await mockBackend.getMenu(venueId), unavailable: false }
+  try {
+    const headings = await callGet(MENU_READ_METHOD, { venue_name: venueId })
+    return { headings: headings || [], unavailable: false }
+  } catch (err) {
+    if (isMethodMissing(err, MENU_READ_METHOD)) {
+      return { headings: [], unavailable: MENU_READ_METHOD }
+    }
+    throw err
+  }
+}
 
 export const createHeading = (venueId, heading) =>
   pick(

@@ -1,7 +1,11 @@
 import { Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { useDashboard } from '../../hooks/useVendor'
+import { useSetupDrafts } from '../../hooks/useSetupDraft'
+import { discardDraft } from '../../services/setupDraft'
 import { Badge, Button, Card, MetricCard, EmptyState, Alert } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
+import ResumeSetupCard from '../../components/ui/ResumeSetupCard'
 import { inBucket, stateLabel, stateTone } from '../../services/workflowState'
 
 /**
@@ -11,6 +15,19 @@ import { inBucket, stateLabel, stateTone } from '../../services/workflowState'
  */
 export default function Dashboard() {
   const { data, isLoading, error } = useDashboard()
+  const { data: drafts = [] } = useSetupDrafts()
+  const qc = useQueryClient()
+
+  // The most recently touched unfinished setup. One card, not a list: someone
+  // with three abandoned drafts is being asked which one they meant, which is
+  // the dashboard interrogating them instead of helping. The rest stay
+  // reachable from the venues list.
+  const resumable = drafts[0] || null
+
+  const dropDraft = async (draft) => {
+    await discardDraft(draft.id)
+    qc.invalidateQueries({ queryKey: ['venue-drafts'] })
+  }
 
   if (isLoading) return <Spinner label="Loading dashboard…" />
   if (error) return <Alert variant="danger">{error.message}</Alert>
@@ -51,6 +68,11 @@ export default function Dashboard() {
           <Button>Add venue</Button>
         </Link>
       </div>
+
+      {/* Above the tiles, deliberately. An unfinished setup is the only thing on
+          this page with a deadline attached to a human being's attention — the
+          counts will still be there after they have finished it. */}
+      {resumable && <ResumeSetupCard draft={resumable} onDiscard={dropDraft} />}
 
       {/* Each tile is a link to the tab it counts. "3 pending" raises the
           question "which three?" and the tile is where that gets asked. */}
