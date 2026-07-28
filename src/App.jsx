@@ -16,6 +16,7 @@ import VenueForm from './views/vendor/VenueForm'
 import VenueWizard from './views/vendor/wizard/VenueWizard'
 import VenueMenu from './views/vendor/VenueMenu'
 import VenueReview from './views/vendor/VenueReview'
+import VenuePreview from './views/vendor/VenuePreview'
 import Profile from './views/vendor/Profile'
 
 export default function App() {
@@ -73,6 +74,7 @@ export default function App() {
               venue rather than in a notifications pile — it is still there in
               a week, when the partner finally has an hour to deal with it. */}
           <Route path="/venues/:venueId/review" element={<VenueReview />} />
+          <Route path="/venues/:venueId/preview" element={<VenuePreview />} />
           <Route path="/profile" element={<Profile />} />
         </Route>
       </Route>

@@ -252,6 +252,18 @@ export default function VenueList() {
                           Progress
                         </Link>
                       )}
+                      {/* Every venue gets one. A partner fills in eleven fields
+                          across five steps and never sees the thing they are
+                          making — the first look at it as a customer would is
+                          otherwise after it is live, which is the wrong moment
+                          to notice the cover photo is of the car park. */}
+                      <Link
+                        to={`/venues/${venue.name}/preview`}
+                        aria-label={`Preview ${venue.venue_name} as customers see it`}
+                        className="font-medium text-brand-600 hover:underline"
+                      >
+                        Preview
+                      </Link>
                       {/* Names the venue for assistive tech: a column of
                           identical "Edit" links is unusable out of context. */}
                       <Link

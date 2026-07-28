@@ -201,6 +201,30 @@ export default function PhotoUploader({
       </div>
       <p className="text-sm text-ink-700">{hint}</p>
 
+      {/* NAMED SHOTS, not a sentence listing them.
+          eBay's camera walks a strip of labelled slots ("Detail") and Airbnb
+          groups by room; both turn "take good photos" — advice nobody can act
+          on — into a short list of specific pictures somebody can go and take.
+          Ours is the five a restaurant is actually judged on.
+
+          Shown only while the uploader is empty or nearly so. Once someone has
+          five photos they have made their choices, and a checklist still
+          sitting there reads as disapproval. */}
+      {photos.length < 3 && (
+        <ul aria-label="Photos worth taking" className="flex flex-wrap gap-2">
+          {['The room, full', 'The bar', 'A table laid', 'The front door', 'A signature dish'].map(
+            (shot) => (
+              <li
+                key={shot}
+                className="rounded-full bg-tint px-3 py-1 text-xs font-semibold text-ink-700"
+              >
+                {shot}
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+
       {notice}
 
       <div
@@ -280,7 +304,7 @@ export default function PhotoUploader({
       )}
 
       {(photos.length > 0 || queue.length > 0) && (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <ul data-photo-tiles className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {photos.map((photo, index) => (
             <li
               key={photo.file_url || photo.name}
@@ -292,9 +316,16 @@ export default function PhotoUploader({
                 className="aspect-[4/3] w-full object-cover"
               />
 
+              {/* "Customers see this one first", not "Cover".
+                  Turo labels the lead photo "Guests will see this photo first"
+                  and eBay badges it "Main"; the first tells you what happens,
+                  the second names a slot you then have to reason about. A
+                  partner who reads the consequence reorders. Full-width strip
+                  along the bottom rather than a corner pill, because at tile
+                  size a three-word sentence has nowhere else to go. */}
               {index === 0 && (
-                <span className="absolute top-2 left-2 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-bold tracking-wide text-ink-900 uppercase">
-                  Cover
+                <span className="pointer-events-none absolute inset-x-0 top-0 bg-brand-500/95 px-2 py-1 text-center text-[11px] font-bold text-ink-900">
+                  Customers see this one first
                 </span>
               )}
 

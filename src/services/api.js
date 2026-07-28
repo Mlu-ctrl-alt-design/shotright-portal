@@ -78,18 +78,49 @@ api.interceptors.request.use((config) => {
 })
 
 /**
- * 401/403 means the token is no longer usable. Drop it and let the router bounce
- * to /login rather than leaving the UI stuck on a permanently-failing query.
+ * When to throw the partner out.
+ *
+ * 401 means the token is no longer usable. Drop it and let the router bounce to
+ * /login rather than leaving the UI stuck on a permanently-failing query.
+ *
+ * ⚠️ 403 USED TO DO THE SAME, AND THAT WAS WRONG. Frappe returns 403 for two
+ * unrelated things: "we don't know who you are" and "we know exactly who you
+ * are, and this particular row isn't yours to read". The second is ordinary and
+ * expected — the photo read falls back to listing File rows, and a bench that
+ * won't let the Vendor role list File is being sensibly configured, not broken.
+ *
+ * Treating that as a dead session logged people out of the portal from a
+ * BACKGROUND read they never asked for. They would open a venue and land on the
+ * login screen, with the work they were mid-way through gone. A peripheral
+ * permission check must never be able to end someone's session.
+ *
+ * So: 401 always ends it. 403 only when the body actually says authentication —
+ * Frappe names `AuthenticationError` / `SessionExpired` for those, and uses
+ * `PermissionError` for the ordinary kind.
  *
  * 417 is Frappe's ValidationError status — a real, actionable error (for
- * example the Surprise Me rate limit), NOT an auth failure. It must not clear
- * the token.
+ * example the Surprise Me rate limit), NOT an auth failure. It never clears the
+ * token.
  */
+const AUTH_EXC = /AuthenticationError|SessionExpired|CSRFTokenError/i
+
+const endsSession = (status, data) => {
+  if (status === 401) return true
+  if (status !== 403) return false
+  const exc = `${data?.exc_type || ''} ${data?.exception || ''}`
+  // An unlabelled 403 is ambiguous. We keep the session: the cost of being
+  // wrong is one failing query, against losing someone's half-finished venue.
+  return AUTH_EXC.test(exc)
+}
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status
-    if ([401, 403].includes(status) && !window.location.pathname.startsWith('/login')) {
+    if (
+      endsSession(status, error.response?.data) &&
+      !window.location.pathname.startsWith('/login')
+    ) {
       setAuthToken(null)
       window.dispatchEvent(new CustomEvent('shotright:session-expired'))
     }

@@ -1155,7 +1155,7 @@ export const getVenuePhotos = (venueId) =>
         PHOTOS_READ_METHOD,
         async () => {
           const rows = (await callGet(PHOTOS_READ_METHOD, { venue_name: venueId })) || []
-          return { photos: rows.map(normalisePhoto), ordered: true }
+          return { photos: rows.map(normalisePhoto), ordered: true, readable: true }
         },
         async () => {
           try {
@@ -1175,10 +1175,30 @@ export const getVenuePhotos = (venueId) =>
                 .filter((f) => /\.(jpe?g|png|webp|avif)$/i.test(f.file_url || ''))
                 .map(normalisePhoto),
               ordered: false,
+              readable: true,
             }
           } catch {
-            // Reading someone's attachments is not worth failing a page over.
-            return { photos: [], ordered: false }
+            /**
+             * ⚠️ REPORTED 28 Jul: "the images uploaded seem to not persist".
+             *
+             * This catch used to return `{photos: [], ordered: false}` — the
+             * SAME value as a venue that genuinely has no photographs. So when
+             * the read failed (most likely `frappe.client.get_list` on File
+             * being denied to the Vendor role, which is a reasonable thing for
+             * a bench to deny) the uploader came back empty, and a partner who
+             * had just added six photos concluded they had been thrown away.
+             *
+             * They had not. The upload is real, the File exists, and on a venue
+             * that already exists it is attached to the Venue where a moderator
+             * can see it. The only thing that failed was us reading it back.
+             *
+             * `readable: false` is the difference between "you have no photos"
+             * and "we can't see your photos from here", and the partner is
+             * entitled to know which one they are looking at. Same lesson as
+             * the decline notes, twice in one day: an empty result and a failed
+             * read must never render as the same screen.
+             */
+            return { photos: [], ordered: false, readable: false }
           }
         },
       ),

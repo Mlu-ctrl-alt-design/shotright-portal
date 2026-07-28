@@ -1,6 +1,6 @@
 # Verification suites
 
-Nineteen Playwright scripts, ~370 checks, one per feature as it was built. They
+Twenty Playwright scripts, ~400 checks, one per feature as it was built. They
 are the evidence behind the claims in `docs/DEV-LOG.md`.
 
 These are **not** unit tests. Each one drives a **production build** in a real
@@ -43,6 +43,7 @@ Run them one at a time — several drive the full five-step wizard and take
 | `verify17.mjs` | the corrected read name `get_review_fix_items`, and `contact_support` refusing to claim an unconfirmed send |
 | `verify18.mjs` | the pending screen — derived sections, and the four things it refuses to say |
 | `verify19.mjs` | `update_venue` refusing fields instead of ignoring them, and the strip-and-retry |
+| `verify20.mjs` | the photo read that looked like deletion, the 403 logout, and the customer preview |
 
 `verify12b.mjs` needs its own build:
 

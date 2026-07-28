@@ -136,15 +136,41 @@ export default function VenueForm() {
         : await createVenue.mutateAsync(payload)
       const saved = result?.venue ?? result
 
-      // After the venue, because a photo order is meaningless without the venue
-      // it orders. A failure here must not read as "your venue didn't save" —
-      // it didn't fail, and the photos are on the bench either way.
+      /**
+       * After the venue, because a photo order is meaningless without the venue
+       * it orders. A failure here must not read as "your venue didn't save" —
+       * it didn't fail, and the photos are on the bench either way.
+       *
+       * ⚠️ This used to swallow the outcome entirely, on the reasoning that the
+       * Photos card had already warned them. It hadn't: that notice only shows
+       * when the READ falls back, so a bench where the read works and the SAVE
+       * doesn't said nothing at all. The partner saw "Saved", came back, and
+       * found their ordering gone with no explanation — which is most of what
+       * "the images don't persist" felt like from the outside.
+       *
+       * The create path has reported this since day one. The edit path is the
+       * one people actually use twice.
+       */
+      const photoWarnings = []
       if (photos.length) {
         try {
-          await savePhotos.mutateAsync(photos)
-        } catch {
-          // Deliberately swallowed: see the notice on the Photos card, which
-          // has already told the partner the order isn't kept yet.
+          const outcome = await savePhotos.mutateAsync(photos)
+          if (outcome && outcome.saved === false) {
+            photoWarnings.push(
+              outcome.mismatch
+                ? `Your photos uploaded, but the app only kept ${outcome.mismatch.stored} of ` +
+                    `${outcome.mismatch.sent}. Nothing has been lost — we’ve reported it.`
+                : `Your photos uploaded and are attached to this venue, but the order you put ` +
+                    `them in isn’t saved yet — the app has nowhere to keep it. Nothing has been ` +
+                    `lost, and it’ll stick as soon as that lands.`,
+            )
+          }
+        } catch (err) {
+          photoWarnings.push(
+            `Your venue saved, but the photos didn’t go through — ${
+              err?.message || 'the server refused them'
+            }. Nothing else you changed was affected.`,
+          )
         }
       }
 
@@ -158,8 +184,9 @@ export default function VenueForm() {
        * actually holds — leaving their typed name on screen under a warning
        * that it did not save is a screen arguing with itself.
        */
-      if (result?.warnings?.length) {
-        setWarnings(result.warnings)
+      const allWarnings = [...(result?.warnings || []), ...photoWarnings]
+      if (allWarnings.length) {
+        setWarnings(allWarnings)
         setSavedVenue(saved)
         if (saved?.venue_name) setForm((f) => ({ ...f, venue_name: saved.venue_name }))
         window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -285,19 +312,43 @@ export default function VenueForm() {
           max={MAX_VENUE_PHOTOS}
           label="Photos of this venue"
           notice={
-            // Known BEFORE they start, from the read: `ordered: false` means the
-            // photos came back as bare file attachments because the endpoint
-            // that would order them isn't deployed.
-            photoData && photoData.ordered === false ? (
-              <Alert variant="warning">
-                <p className="font-bold">These don’t reach customers yet</p>
-                <p className="mt-1">
-                  Photos you add here upload properly and attach to this venue, so our reviewers
-                  see them. The app has no place to show a venue’s pictures yet, so they won’t
-                  appear in search, and the order below isn’t saved. We’ve asked for it.
-                </p>
-              </Alert>
-            ) : null
+            /* Known BEFORE they start, from the read. Two different problems
+               that used to render as the same empty box — see `getVenuePhotos`.
+
+               `readable: false` is the one behind "my photos didn't persist":
+               the read failed, so we show nothing, and a partner who added six
+               photos yesterday opens this and finds an empty uploader. Nothing
+               was lost. Saying so is the entire fix available to us until the
+               endpoint lands.
+
+               Both can be true at once and both matter, so they stack rather
+               than one winning. "We can't read them back" and "the order isn't
+               kept" are different problems with different consequences, and a
+               partner told only the second still thinks last week's six photos
+               were deleted. */
+            <>
+              {photoData?.readable === false && (
+                <Alert variant="warning">
+                  <p className="font-bold">We can’t show you the photos already on this venue</p>
+                  <p className="mt-1">
+                    They aren’t lost — the app just can’t read them back from the server yet, so
+                    this box starts empty even if you’ve added photos before.{' '}
+                    <strong>Anything you add here is uploaded and kept.</strong> If you’d rather
+                    not risk duplicates, leave this until we’ve fixed it. We’ve reported it.
+                  </p>
+                </Alert>
+              )}
+              {photoData?.ordered === false && (
+                <Alert variant="warning">
+                  <p className="font-bold">These don’t reach customers yet</p>
+                  <p className="mt-1">
+                    Photos you add here upload properly and attach to this venue, so our reviewers
+                    see them. The app has no place to show a venue’s pictures yet, so they won’t
+                    appear in search, and the order below isn’t saved. We’ve asked for it.
+                  </p>
+                </Alert>
+              )}
+            </>
           }
         />
       </Card>
