@@ -37,6 +37,7 @@ Run them one at a time — several drive the full five-step wizard and take
 | `verify12.mjs` | the declined-venue review screen |
 | `verify12b.mjs` | the same screen built **with** `VITE_SUPPORT_EMAIL` set |
 | `verify13.mjs` | editing a venue — the rename identifier bug, and a rename that silently did nothing |
+| `verify14.mjs` | the two-promise split on menu import (mail on vs off), and the phone field |
 
 `verify12b.mjs` needs its own build:
 

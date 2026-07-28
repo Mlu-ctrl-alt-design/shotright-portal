@@ -77,7 +77,17 @@ export function normaliseProfile(profile) {
  * discards without complaint, so sending more is not harmless — it is how a
  * field silently fails to save while the request returns 200.
  */
-const ACCEPTED = ['first_name', 'last_name', 'business_name', 'new_password']
+/**
+ * `phone` was added on 27 Jul, when the backend reported §2 deployed.
+ *
+ * We cannot check the parameter name from the build environment, and getting it
+ * wrong puts this field straight back to accepting input and discarding it.
+ * What makes shipping it safe anyway is the machinery already here for the name
+ * fields: `updateProfile` re-reads the profile after the write and `Profile.jsx`
+ * compares, so a wrong name surfaces as "saved, but the phone number didn't
+ * stick" rather than as a lie.
+ */
+const ACCEPTED = ['first_name', 'last_name', 'business_name', 'phone', 'new_password']
 
 /**
  * Build the update payload for the confirmed signature.
@@ -86,9 +96,6 @@ const ACCEPTED = ['first_name', 'last_name', 'business_name', 'new_password']
  * outside `ACCEPTED` is sent: an earlier version posted both shapes as a hedge
  * while the signature was unknown, which is no longer a hedge but noise.
  *
- * `phone` is dropped here deliberately and the form no longer offers it for
- * editing — dropping it quietly while the field looked editable was the exact
- * failure mode this whole change is about.
  */
 export function toProfilePayload(form) {
   const { vendor_name, ...rest } = form
@@ -100,4 +107,4 @@ export function toProfilePayload(form) {
 }
 
 /** Fields the bench can actually store, for the post-save verification. */
-export const WRITABLE_PROFILE_FIELDS = ['vendor_name', 'business_name']
+export const WRITABLE_PROFILE_FIELDS = ['vendor_name', 'business_name', 'phone']

@@ -196,6 +196,22 @@ export function useMenuImport(venueId, { onComplete } = {}) {
     estimate,
     slowAfter,
     canLeave,
+    /**
+     * "…and we'll email you" is a SECOND promise, and it needs its own permission.
+     *
+     * `canLeave` only says the work outlives the page — true the moment the
+     * import is a server job. The email needs a working mailer, and those two
+     * shipped apart: the background-import endpoints went live while outgoing
+     * mail was still being configured. For that window the portal would have
+     * told every partner to close the tab and wait for a message that was never
+     * going to be sent, which is a worse outcome than making them watch a bar.
+     *
+     * So the backend says. `will_notify` on the import status is the signal, and
+     * it defaults to FALSE — a bench that doesn't send it gets the honest,
+     * smaller promise ("leave and come back") rather than the flattering one.
+     * Turning mail on turns this sentence on, with no frontend release.
+     */
+    willEmail: Boolean(job?.will_notify ?? job?.notify_by_email ?? false),
     uploadPercent,
     busy: phase === 'uploading' || phase === 'reading' || phase === 'slow',
     start,

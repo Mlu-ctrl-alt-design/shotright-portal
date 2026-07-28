@@ -105,6 +105,13 @@ export default function MenuImportStatus({
   elapsed,
   estimate,
   canLeave,
+  // A SECOND permission, not a detail of the first. `canLeave` says the work
+  // outlives the page; `willEmail` says a message is actually coming. Those two
+  // shipped weeks apart — the background import went live while outgoing mail
+  // was still being configured — and for that window promising both would have
+  // told every partner to close the tab and wait for something that was never
+  // going to arrive. Defaults to false, so silence is the honest answer.
+  willEmail = false,
   uploadPercent,
   fileName,
   fileSize,
@@ -263,8 +270,10 @@ export default function MenuImportStatus({
           {canLeave && (
             <>
               {' '}
-              <strong>You don’t have to wait</strong> — leave this page and we’ll email you the
-              moment your menu is ready.
+              <strong>You don’t have to wait</strong> —{' '}
+              {willEmail
+                ? 'leave this page and we’ll email you the moment your menu is ready.'
+                : 'leave this page and come back whenever you like. It keeps going without you, and this panel picks up where it left off.'}
             </>
           )}
           {elapsed > 0 && <span className="text-ink-500"> ({elapsed}s so far)</span>}
@@ -274,7 +283,11 @@ export default function MenuImportStatus({
       {slow && (
         <p className="mt-3 text-sm text-ink-700">
           {canLeave
-            ? `It’s been ${elapsed} seconds. Your menu is still being read and it will finish — leave this page and we’ll email you when it’s done, or start adding items by hand and we’ll skip anything that arrives twice.`
+            ? `It’s been ${elapsed} seconds. Your menu is still being read and it will finish — ${
+                willEmail
+                  ? 'leave this page and we’ll email you when it’s done'
+                  : 'leave this page and come back to it whenever you like'
+              }, or start adding items by hand and we’ll skip anything that arrives twice.`
             : `It’s been ${elapsed} seconds. Please keep this page open a little longer, or add your items by hand instead.`}
         </p>
       )}

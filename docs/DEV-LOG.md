@@ -17,6 +17,58 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
+## 27 Jul 2026 (latest) — the backend shipped, and one promise came loose
+
+Backend reported: **all P0, plus P1 §5, §6, §7, §9, §14 deployed and verified,
+180 tests passing.** Next up their end is outgoing mail, so §8's OTP endpoints
+can ship.
+
+Most of that needs nothing from us — every P1 feature is capability-detected and
+turns itself on. Two things did need attention.
+
+### The email promise came loose
+
+**§6 (background menu import) went live while §8 (mail) did not.** The portal
+keyed its whole "you can leave" panel off one flag, `canLeave`, set the moment
+the import became a server job. So the instant §6 landed, every partner
+uploading a menu was told:
+
+> *You don't have to wait — leave this page and we'll email you the moment your
+> menu is ready.*
+
+No email was going to arrive. This is precisely the failure the project is
+disciplined against, arriving through the back door of somebody else's
+deployment.
+
+**They are two promises, and they now need two permissions.** `canLeave` says
+the work outlives the page — true, and useful on its own. `willEmail` says a
+message is actually coming, and comes from `will_notify` on the import status,
+defaulting to **false**. Without it the partner gets the honest, smaller version:
+*"leave this page and come back whenever you like. It keeps going without you,
+and this panel picks up where it left off."* Configuring the mailer turns the
+bigger sentence on with no frontend release.
+
+The general lesson, which is new: **a capability flag that gates two claims will
+eventually gate them wrongly**, because the things they depend on ship
+separately. One flag per claim.
+
+### The phone field is a control again
+
+§2 landed, so `update_vendor_profile` should now take `phone`. Settings had it
+read-only — a control that accepts input and discards it is worse than one that
+explains itself.
+
+We still can't confirm the parameter name from here. What made it safe to ship
+anyway is machinery that already existed for the name fields: the profile is
+re-read after the write and compared, so a differently-named parameter surfaces
+as *"saved, but your phone number didn't stick"* rather than as a lie. The guard
+written for one bug paid for the next feature.
+
+**Verified** — `verify14.mjs` (14 checks), including both sides of the mail
+window and a deliberately deaf `phone` parameter.
+
+---
+
 ## 27 Jul 2026 (late) — a rename that never happened, and a photo backend going live
 
 **Reported:** *"when editing a venue the name does not persist."*

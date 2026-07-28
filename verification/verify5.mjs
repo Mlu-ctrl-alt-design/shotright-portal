@@ -107,13 +107,12 @@ async function bench({ shape, accepts }) {
     sent.vendor_name === undefined && sent.full_name === undefined,
     `nothing outside the real signature is sent (sent: ${JSON.stringify(sent)})`,
   )
-  check(
-    sent.phone === undefined,
-    'phone is NOT sent — update_vendor_profile has no such parameter',
-  )
+  // Was: "phone is NOT sent". `update_vendor_profile` gained `phone` on 27 Jul
+  // (§2), so the field is a control again and the number travels with the save.
+  check(sent.phone !== undefined, 'phone IS sent now that the method declares it')
   check(
     Object.keys(sent).every((k) =>
-      ['first_name', 'last_name', 'business_name', 'new_password'].includes(k),
+      ['first_name', 'last_name', 'business_name', 'phone', 'new_password'].includes(k),
     ),
     `every key posted is one the method declares (${Object.keys(sent).join(', ')})`,
   )
@@ -178,7 +177,16 @@ async function bench({ shape, accepts }) {
   await page.close()
 }
 
-/* ===== 4b. phone has no home on the bench, so it must not look editable ===== */
+/* ===== 4b. phone: editable, and a bench that drops it still says so =====
+
+   This block used to assert the opposite — that phone was READ-ONLY, because
+   `update_vendor_profile` had no such parameter and a control that accepts
+   input and discards it is worse than one that explains itself. §2 shipped on
+   27 Jul, so the field is a control again.
+
+   What is asserted now is the thing that made it safe to ship without being
+   able to check the parameter name: a bench that drops `phone` is caught by the
+   post-save read-back and named to the partner. */
 {
   const { page } = await bench({
     shape: 'first_last',
@@ -186,10 +194,15 @@ async function bench({ shape, accepts }) {
   })
   await page.goto(`${BASE}/profile`, { waitUntil: 'networkidle' })
   const phone = page.getByLabel('Phone')
-  check(await phone.isDisabled(), 'phone is read-only — the API has no phone parameter')
+  check(await phone.isEditable(), 'phone is editable now that the method declares it')
+
+  await phone.fill('+27 71 555 1234')
+  await page.getByRole('button', { name: 'Save changes' }).click()
+  await page.getByText(/did not stick/).waitFor({ timeout: 10000 })
+  const body = await page.locator('main').innerText()
   check(
-    (await page.locator('main').innerText()).includes('Not editable here yet'),
-    'and says so, rather than silently discarding what is typed',
+    body.includes('your phone number'),
+    'and a bench that drops it is caught by the read-back and named, not silently obeyed',
   )
   await page.close()
 }
