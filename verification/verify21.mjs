@@ -155,25 +155,44 @@ const card = (page) =>
   page.locator('section[aria-labelledby="venue-photos-heading"]').evaluate((n) => n.textContent)
 
 /* ============================================================================
-   1. THE REPORTED CASE — the photo goes up anyway
+   1. THE PERMISSION LANDED — a refusal is now an anomaly, and is loud
+
+   These assertions used to say the opposite: a refused attach was retried
+   WITHOUT the doctype, so the photo went up unattached rather than being lost.
+   That was right while the wall was permanent.
+
+   The Vendor role can attach to `Venue` as of 28 Jul, so the retry is gone —
+   and its removal is the point, not a tidy-up. What it produced was a photo
+   that uploaded, appeared in the uploader, and was attached to nothing: the
+   partner saw success, the moderator opened the Venue and saw no pictures, and
+   nobody was placed to notice the difference. A quiet wrong result.
+
+   What has NOT changed is that the partner never reads a sentence about
+   doctypes, and is never told to try again at something that cannot work.
    ========================================================================= */
 {
   const { page, context, uploads } = await open({ attach: 'denied' })
   await addPhoto(page)
 
-  check(uploads.length === 2, 'the refused attach is retried without it, rather than giving up')
-  check(uploads[0].attaching === true, 'the first attempt does try to attach — a bench that allows it gets it')
-  check(uploads[1].attaching === false, 'and the retry drops the doctype the vendor may not touch')
+  check(uploads.length === 1, 'a refused attach is no longer retried unattached')
+  check(uploads[0].attaching === true, 'the upload attaches to the venue, which is now allowed')
 
   const body = await card(page)
-  check(!/didn’t upload/i.test(body), 'the partner is not told their photo failed')
   check(
-    !/doctype access|role permission/i.test(body),
-    'and never sees a sentence about doctypes and role permissions',
+    /couldn’t attach cosmos_1492129323.jpeg to this venue/i.test(body),
+    'a refusal is reported plainly, rather than silently producing an orphan photo',
   )
   check(
-    await page.locator('img[alt="cosmos_1492129323.jpeg"]').count(),
-    'the photo is there, under the name they gave it',
+    /our problem and not yours/i.test(body),
+    'and owned, because a role permission is not something a partner can fix',
+  )
+  check(
+    !/Try again/i.test(body),
+    'without "try again" — the tenth attempt is refused exactly like the first',
+  )
+  check(
+    !/doctype access|role permission/i.test(body),
+    'and still never a sentence about doctypes and role permissions',
   )
 
   await context.close()
@@ -201,16 +220,15 @@ const card = (page) =>
 }
 
 /* ============================================================================
-   3. A REAL UPLOAD FAILURE IS NOT RETRIED INTO SILENCE
+   3. NO FAILURE EVER LEAVES A TILE BEHIND
    ========================================================================= */
 {
-  /* The retry is narrow on purpose. If any failure got a second unattached
-     attempt, a file the server rejects for a real reason would come back
-     looking like it worked. */
+  /* Whatever went wrong, the uploader must not show a photo that isn't on the
+     server. A tile is the partner's evidence that something worked. */
   const { page, context, uploads } = await open({ attach: 'broken' })
   await addPhoto(page)
 
-  check(uploads.length === 1, 'a non-permission failure gets exactly one attempt')
+  check(uploads.length === 1, 'a failed upload is attempted once')
   check(
     !(await page.locator('img[alt="cosmos_1492129323.jpeg"]').count()),
     'and no tile pretends the photo is there',
@@ -218,20 +236,31 @@ const card = (page) =>
 
   await context.close()
 }
+{
+  const { page, context } = await open({ attach: 'denied' })
+  await addPhoto(page)
+  check(
+    !(await page.locator('img[alt="cosmos_1492129323.jpeg"]').count()),
+    'a refused attach leaves no tile either — the photo is not on the venue',
+  )
+  await context.close()
+}
 
 /* ============================================================================
-   4. A BENCH THAT ALLOWS ATTACHING STILL GETS IT
+   4. THE ORDINARY PATH — attached, and the partner is not made to think about it
    ========================================================================= */
 {
   const { page, context, uploads } = await open({ attach: 'allowed' })
   await addPhoto(page)
 
-  check(uploads.length === 1, 'no pointless second call when the first one worked')
-  check(uploads[0].attaching === true, 'and the photo is attached to the venue for reviewers')
+  check(uploads.length === 1, 'one call')
+  check(uploads[0].attaching === true, 'the photo is attached to the venue for reviewers')
   check(
     await page.locator('img[alt="cosmos_1492129323.jpeg"]').count(),
-    'the photo is shown either way — the partner cannot tell, and shouldn’t have to',
+    'and shown, under the name the partner gave it',
   )
+  const body = await card(page)
+  check(!/couldn’t attach|didn’t upload/i.test(body), 'with nothing said about permissions at all')
 
   await context.close()
 }

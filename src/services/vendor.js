@@ -1040,6 +1040,14 @@ export const MAX_VENUE_PHOTOS = 10
  * So attaching is not a thing this bench will do for us, and the whole upload
  * failing over it is the wrong outcome — the partner's photograph is fine.
  */
+/**
+ * Kept after the permission landed, and deliberately.
+ *
+ * It no longer decides whether to retry — it decides what a partner is told
+ * when something that should now work doesn't. A regressed role permission
+ * would otherwise surface as a sentence about doctypes, which is how this
+ * started.
+ */
 const isAttachPermissionError = (err) => {
   const text = `${err?.message || ''} ${err?.detail || ''}`
   return (
@@ -1058,47 +1066,60 @@ const isAttachPermissionError = (err) => {
  * choosing, and what lets a resumed draft come back with its pictures: a draft
  * carries `file_url` strings, and could never carry a File object.
  *
- * Attaching is attempted and then given up on rather than assumed either way —
- * a bench that allows it should get it, and one that doesn't should still get
- * the photograph.
+ * ✅ 28 Jul: the Vendor role can attach to `Venue`. The unattached retry is
+ * gone, and its removal is the point rather than a tidy-up.
+ *
+ * That fallback existed because a permission wall would otherwise have thrown
+ * away a perfectly good photograph. What it produced instead was a photo that
+ * uploaded, appeared in the uploader, and was attached to nothing — so the
+ * partner saw success, the moderator opened the Venue and saw no pictures, and
+ * nobody was in a position to notice the difference. A quiet wrong result,
+ * which is the failure mode this project keeps being bitten by.
+ *
+ * With attaching genuinely available, a refusal is no longer a fact of life to
+ * be worked around. It is an anomaly, and it should be loud.
  */
 export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
   pick(
     async () => {
-      const send = async (attachTo) => {
-        const form = new FormData()
-        form.append('file', file, file.name)
-        form.append('is_private', '0') // customers have to be able to see it
-        form.append('folder', 'Home/Attachments')
-        if (attachTo) {
-          form.append('doctype', 'Venue')
-          form.append('docname', attachTo)
-        }
+      const form = new FormData()
+      form.append('file', file, file.name)
+      form.append('is_private', '0') // customers have to be able to see it
+      form.append('folder', 'Home/Attachments')
+      if (venueId) {
+        form.append('doctype', 'Venue')
+        form.append('docname', venueId)
+      }
+
+      let uploaded
+      try {
         const { data } = await api.post('/api/method/upload_file', form, {
           headers: { 'Content-Type': 'multipart/form-data' },
           onUploadProgress: (e) => onProgress?.(e.total ? e.loaded / e.total : 0),
         })
-        return data.message || {}
-      }
-
-      let uploaded
-      let attached = Boolean(venueId)
-      try {
-        uploaded = await send(venueId)
+        uploaded = data.message || {}
       } catch (err) {
-        // Anything that isn't the permission wall is a real upload failure and
-        // must surface — a retry that silently succeeds unattached would hide,
-        // say, a file too large for the server.
-        if (!venueId || !isAttachPermissionError(err)) throw err
-        uploaded = await send(null)
-        attached = false
+        /* Loud, but not cruel, and above all not "try again" — the one thing
+           the partner definitely should not do is keep pressing a button that
+           cannot work. This is ours to fix, and the message says so. */
+        if (venueId && isAttachPermissionError(err)) {
+          const refused = new Error(
+            `We couldn’t attach ${file.name} to this venue — the app isn’t allowed to, ` +
+              `which is our problem and not yours. Nothing you’ve done is lost. ` +
+              `We’ve been told about it.`,
+          )
+          refused.retryable = false
+          refused.cause = err
+          throw refused
+        }
+        throw err
       }
 
       return {
         name: uploaded.name,
         file_url: uploaded.file_url,
         file_name: uploaded.file_name || file.name,
-        attached,
+        attached: Boolean(venueId),
       }
     },
     () => mockBackend.uploadVenuePhoto(file, venueId),

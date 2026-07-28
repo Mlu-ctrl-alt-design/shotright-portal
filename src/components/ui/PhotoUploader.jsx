@@ -139,13 +139,19 @@ export default function PhotoUploader({
       } catch (err) {
         /* An ImageError is something the partner can act on and is shown as
            written. Anything else is ours, and gets the file name attached so
-           they at least know WHICH photo failed out of the six they dropped. */
+           they at least know WHICH photo failed out of the six they dropped.
+
+           `retryable === false` suppresses "Try again", because some failures
+           cannot be retried into working — a role permission the app doesn't
+           have will refuse the tenth attempt exactly as it refused the first.
+           Telling someone to keep pressing a button that cannot work is worse
+           than telling them nothing. */
         setErrors((e) => [
           ...e,
           {
             id,
             message:
-              err instanceof ImageError
+              err instanceof ImageError || err?.retryable === false
                 ? err.message
                 : `${original.name} didn’t upload: ${err.message || 'something went wrong.'} Try again.`,
           },
