@@ -275,17 +275,31 @@ junk accounts it prevents.
 
 ### 14. Venue photos — `backend/venue_photos.py`
 
-> 🚨 **28 Jul, from a partner's screen. This is the one to read first.**
+> ✅ **RESOLVED 28 Jul — the Vendor role can attach to `Venue`.** Photos now
+> land on the venue where moderators can see them. The unattached fallback has
+> been removed, so a refusal is a loud error again rather than a silent orphan.
+> Thank you — that was the fastest turnaround on this page.
+>
+> **One thing this did NOT fix, and we'd like to know either way:** attaching is
+> `Venue` permission; reading photos back is `File` permission. If the Vendor
+> role still can't list `File`, `get_venue_photos` remains the only route and
+> the uploader still opens empty on an existing venue (it says so — see the
+> "we can't show you the photos already on this venue" notice). **Can a vendor
+> list their own venue's `File` rows?** If not, `get_venue_photos` is the ask.
+>
+> The history below is kept because the lesson outlived the bug.
+>
+> 🚨 **28 Jul, from a partner's screen.**
 >
 > ```
 > cosmos_1492129323.jpeg didn’t upload: User mlumanda@gmail.com does not have
 > doctype access via role permission for document Venue
 > ```
 >
-> **The Vendor role has no permission on the `Venue` doctype at all.** That is a
+> **The Vendor role had no permission on the `Venue` doctype at all.** That is a
 > sound way to build a Frappe app — everything goes through whitelisted
-> `shotright.api.*` methods that elevate internally — but it means **every stock
-> Frappe endpoint we reach for is refused**, and we have now hit that wall three
+> `shotright.api.*` methods that elevate internally — but it meant **every stock
+> Frappe endpoint we reached for was refused**, and we hit that wall three
 > separate times without recognising it was one wall:
 >
 > | What we tried | Why it fails |
@@ -297,22 +311,17 @@ junk accounts it prevents.
 > All three were reported to you separately — "images don't persist", the 403
 > logout, the photo read falling back to nothing. **They are the same cause.**
 >
-> **What we need is one whitelisted method that elevates, like everything else
-> on this app does:**
+> We asked for either a whitelisted `upload_venue_photo(venue_name, file)` that
+> elevates, or attach permission on `Venue`. **You granted the permission**, so
+> stock `upload_file` works and no new endpoint is needed.
 >
-> ```
-> upload_venue_photo(venue_name, file)  -> {name, file_url, file_name}
-> ```
->
-> Until then the portal uploads the photo **unattached** — it retries without
-> `doctype`/`docname`, so the partner's photograph is never lost and they see it
-> in the uploader. But nothing links it to the venue, so a moderator opening the
-> Venue in Desk sees no pictures. That is the gap, and it is not one we can
-> close from this side.
->
-> Alternatively, granting the Vendor role attach permission on `Venue` also
-> works and needs no code — your call which fits the security model. Tell us
-> which and we'll drop the retry.
+> The interim behaviour — uploading unattached so nothing was lost — is gone,
+> and it is worth recording why we were glad to see the back of it. It produced
+> a photo that uploaded, appeared in the uploader, and was attached to nothing.
+> The partner saw success; the moderator opened the Venue and saw no pictures;
+> nobody was placed to notice the difference. **A quiet wrong answer is worse
+> than a loud failure**, and the only thing that justified it was that the wall
+> was permanent. Once it wasn't, the fallback had to go.
 >
 > (We also stopped printing your messages as raw markup. `frappe.throw` takes
 > HTML, `_server_messages` carries it through, and we render as text — so a
