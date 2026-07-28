@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useVenue, useMenu, useVenuePhotos } from '../../hooks/useVendor'
+import { isMethodMissing } from '../../services/api'
+import { VENUE_DETAIL_METHOD } from '../../services/vendor'
 import { Alert, Badge, Button, Card } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { bucketOf, stateLabel, stateTone } from '../../services/workflowState'
@@ -27,13 +29,18 @@ import {
  * talking over the person they wanted to hear from. Then the checklist, then
  * what we noticed ourselves, then the two ways out.
  *
- * WHAT WE DO NOT DO. The bench has no field for a moderator to write into yet,
- * so today every decline arrives with no reason attached. The tempting fix is a
- * neutral placeholder — "your venue didn't meet our guidelines" — and it is a
- * trap: a partner acts on it, changes the wrong thing, resubmits, and is
- * declined again. We say there is no reason, we say we consider that our
- * problem and not theirs, and we make asking a human the primary action rather
- * than the fallback.
+ * WHAT WE DO NOT DO. When a decline genuinely arrives with no note attached,
+ * the tempting fix is a neutral placeholder — "your venue didn't meet our
+ * guidelines" — and it is a trap: a partner acts on it, changes the wrong
+ * thing, resubmits, and is declined again. We say there is no reason, we say we
+ * consider that our problem and not theirs, and we make asking a human the
+ * primary action rather than the fallback.
+ *
+ * Corrected 28 Jul: this screen used to show that empty state to EVERYONE,
+ * because it asked an undeployed endpoint for notes the venue record was
+ * already carrying. It now reads the record first. The empty state below is
+ * still exactly right — it just applies to the venues it was written for, the
+ * ones where a moderator really did decline without saying why.
  */
 export default function VenueReview() {
   const { venueId } = useParams()
@@ -41,27 +48,52 @@ export default function VenueReview() {
   const { data: menuData } = useMenu(venueId)
   const { data: photoData } = useVenuePhotos(venueId)
 
+  // The venue is handed to the review reader deliberately: `review_notes`,
+  // `reviewed_by` and `reviewed_on` ride along on the venue record, so in the
+  // ordinary case there is no second round trip and nothing to deploy. Gated on
+  // `venue` so this can't run against nothing and cache a false "no reason".
   const { data: reviewData, isLoading: loadingReview } = useQuery({
     queryKey: ['venue-review', venueId],
-    queryFn: () => getVenueReview(venueId),
-    enabled: !!venueId,
+    queryFn: () => getVenueReview(venueId, venue),
+    enabled: Boolean(venueId && venue),
   })
 
   // A failed read of the notes must not take the page down with it. The gaps we
   // derive ourselves, the edit route and the way to reach a human all still
   // work without it, and they are most of what someone came here for.
-  const review = reviewData || { available: false, notes: '', fixItems: [], reviewedOn: '' }
+  const review = reviewData || {
+    available: false,
+    source: 'none',
+    notes: '',
+    fixItems: [],
+    reviewedOn: '',
+  }
 
-  if (isLoading || loadingReview) return <Spinner label="Loading this decision…" />
+  if (isLoading || (venue && loadingReview)) return <Spinner label="Loading this decision…" />
   if (error) {
     return (
       <div className="space-y-4">
+        {/* This branch is now genuinely rare — `getVenue` falls back to the
+            dashboard row, so a 404 from `get_venue_detail` no longer lands
+            here. What used to land here was the live bug: a partner clicked
+            "See why" on their own declined venue and was told it wasn't on
+            their account.
+
+            The remaining case still has to be split. A 404 from Frappe is the
+            SAME status for a missing method and a missing document, and only
+            the exception text tells them apart. Guessing "your venue is gone"
+            when the truth is "that endpoint isn't deployed" is the most
+            alarming possible way to report our own gap. */}
         <Alert variant="danger">
           <p className="font-bold">We couldn’t open this venue</p>
           <p className="mt-1">
-            {error.status === 404
-              ? 'It isn’t on the account you’re signed in with, or it has been removed.'
-              : error.message}
+            {isMethodMissing(error, VENUE_DETAIL_METHOD)
+              ? 'This part of the portal isn’t on your server yet — your venue is fine. We’ve flagged it.'
+              : error.status === 404
+                ? 'It isn’t on the account you’re signed in with, or it has been removed.'
+                : error.status === 403
+                  ? 'This venue belongs to a different account.'
+                  : error.message}
           </p>
         </Alert>
         <Link to="/venues">
@@ -92,12 +124,21 @@ export default function VenueReview() {
 
       {/* A venue that is not declined can still be opened here — from a
           bookmark, or a link sent before it was resubmitted. Saying which
-          state it IS in beats a screen that argues with what the badge says. */}
+          state it IS in beats a screen that argues with what the badge says.
+
+          This line used to end "we'll email you the moment there's a decision".
+          It was the same untrue promise the menu-import panel was making, in a
+          second place nobody thought to look — outgoing mail (§8) is not
+          configured, so no message is sent when a venue is decided either. The
+          replacement points at the thing that IS true: this page shows the
+          outcome, so it is worth coming back to. When §8 ships, the email
+          sentence can come back — and it needs its own capability flag, not a
+          borrowed one. */}
       {!declined && (
         <Alert variant={bucket === 'approved' ? 'success' : 'info'}>
           {bucket === 'approved'
             ? 'This venue is approved and showing to customers. Nothing to fix.'
-            : 'This venue is with our team. We’ll email you the moment there’s a decision.'}
+            : 'This venue is with our team. The decision shows up on this page — check back here for it.'}
         </Alert>
       )}
 

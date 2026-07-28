@@ -412,9 +412,49 @@ export const getVenues = () =>
     () => mockBackend.getVenues(),
   )()
 
+export const VENUE_DETAIL_METHOD = 'shotright.api.get_venue_detail'
+
+/**
+ * One venue.
+ *
+ * ⚠️ 28 Jul, from the live site: `get_venue_detail?venue_name=VEN-00002`
+ * returns **404** while `get_vendor_dashboard` lists VEN-00002 in the same
+ * session, signed in as the same partner. Every screen that opens a single
+ * venue — edit, menu, photos, and the decline screen behind "See why" — died on
+ * that 404 and told the partner their venue "isn't on the account you're signed
+ * in with, or it has been removed". About a venue sitting in their own list,
+ * one click behind them.
+ *
+ * THE VENUE WAS NEVER MISSING. We already had it: the dashboard returned it,
+ * review notes and all. A second endpoint declining to repeat itself is not a
+ * reason to tell someone their data is gone.
+ *
+ * So the dashboard row is the fallback now. Same record, same server. Detail is
+ * still tried first because it may carry fields the list omits, and `_partial`
+ * marks which one answered — so a screen needing a field the row doesn't have
+ * can say "we couldn't load this bit" rather than render it as empty.
+ *
+ * Second time today the answer has been: look at what you already hold before
+ * asking whether you're allowed to fetch it.
+ */
 export const getVenue = (venueId) =>
   pick(
-    () => callGet('shotright.api.get_venue_detail', { venue_name: venueId }),
+    async () => {
+      try {
+        return await callGet(VENUE_DETAIL_METHOD, { venue_name: venueId })
+      } catch (err) {
+        // 403 is a real answer — this venue is not theirs. Say so, rather than
+        // papering over it with a row we happen to be holding.
+        if (err?.status === 403) throw err
+
+        const dash = await call('shotright.api.get_vendor_dashboard').catch(() => null)
+        const row = (dash?.venues || []).find(
+          (v) => v?.name === venueId || v?.venue_name === venueId,
+        )
+        if (row) return { ...row, _partial: true, _detailError: err }
+        throw err
+      }
+    },
     () => mockBackend.getVenue(venueId),
   )()
 

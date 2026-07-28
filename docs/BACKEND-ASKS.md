@@ -26,6 +26,45 @@ and will save nothing, and nobody finds out until a partner loses their work.
 
 ## P0 — a partner is hitting this now
 
+### 0. `get_venue_detail` 404s on a venue the dashboard just listed
+
+> **Live on production, 28 Jul.** Signed in as a real partner, clicking **See
+> why** on their own declined venue:
+
+```
+GET …/api/method/shotright.api.get_venue_review?venue_name=VEN-00002  417 (Expectation Failed)
+GET …/api/method/shotright.api.get_venue_detail?venue_name=VEN-00002  404 (Not Found)
+```
+
+**`get_venue_detail` 404s for `VEN-00002` while `get_vendor_dashboard` returns
+`VEN-00002` in the same session, to the same user, seconds earlier.** That is
+the whole bug. The partner reached the link by clicking a row the dashboard
+gave them, so the venue provably exists and provably belongs to them.
+
+We have made the portal survive it — every single-venue screen now falls back
+to the dashboard row — but the endpoint is still wrong and we can't see why
+from here. Candidates, in the order we'd check them:
+
+1. **Identifier.** We send the docname (`VEN-00002`) as `venue_name`. If
+   `get_venue_detail` looks up by the *title* field rather than by `name`,
+   it 404s on every venue. This exact confusion has bitten us twice already
+   (see §1b) — `venue_name` is a docname on some methods and a title on others.
+2. **Ownership check.** If it resolves the vendor differently from
+   `get_vendor_dashboard`, it will 404 rather than 403 on a venue it can see.
+3. **Not deployed under that name.** The 404 carries no `Method Not Found` text,
+   which argues against this, but it's cheap to rule out.
+
+**Please tell us which, and what the parameter should be.** Also, if a venue
+genuinely isn't the caller's, **return 403, not 404** — 404 is
+indistinguishable from a missing method and we have to guess which we're
+looking at.
+
+**Separately: `get_venue_review` returns 417, not 404** — so it *is* deployed
+and it's raising. Whatever it throws on (`_owned`? the same identifier
+problem?) it throws for every venue we've tried. See §12; the portal no longer
+depends on it, but it is broken rather than absent, and the two look very
+different from our side.
+
 ### 1. The menu endpoints 404
 
 Opening a venue's menu returns "Not found". These five method names predate the
@@ -307,63 +346,124 @@ immediately so the partner sees them, then has nothing to link them to.
 
 ### 12. When a venue is declined, what does the partner get back?
 
-> **Promoted 27 Jul — this is now blocking a shipped screen, not a design.**
-> Drop-in: **`backend/venue_review.py`**.
+> **Mostly withdrawn 28 Jul — you already built it and we were not looking.**
 
-The decline screen is built and live. A partner opening it today is told, in as
-many words, that **no reason was recorded** — because a decline is a workflow
-state and nothing more, and there is no field for a moderator to write into.
+**Our mistake, corrected.** This section used to say the bench had no field for
+a moderator to write into. It has had three the whole time — `review_notes`,
+`reviewed_by`, `reviewed_on` on `Venue` (`venue.json:81-94`) — and
+`get_vendor_dashboard` has been handing them to this portal all along
+(`vendor_dashboard.py:27`), put there deliberately so a declined venue could
+render its reasons without a second round trip.
 
-That is honest, and it is a bad thing for a business owner to read about their
-own livelihood. We are not filling the gap with a generic line: "your venue
-didn't meet our guidelines" removes the awkwardness and replaces it with
-something worse, because the partner acts on it, changes the wrong thing,
-resubmits, and is declined again.
+The decline screen was asking `get_venue_review` — undeployed — and reporting
+the 404 to the partner as **"no reason was recorded"**, printed over a reason it
+had already been given. Fixed on our side: the screen now reads the venue record
+first and only falls back to an endpoint. **Nothing needs deploying for this to
+work.** Also withdrawn:
+
+- ~~stamp `reviewed_on` on the transition~~ — already done, `venue.py:31-54`,
+  `_stamp_review()` only writes when `workflow_state` actually changes.
+- ~~confirm the workflow states~~ — **Venue Approval**, `is_active=1`, states
+  **Pending / Approved / Declined**. Recorded in `workflowState.js`.
+- ~~the resubmit decision~~ — settled in shipped code, not in principle:
+  `update_venue()` (`venue_service.py:84-95`) flips a Declined venue back to
+  Pending on edit, and `Venue Draft` has no link to a `Venue`. It edits the
+  Venue. Our button was already pointed at the right thing.
+
+#### What is genuinely still open
+
+**1. `fix_items` — the only part of the screen with nothing behind it.**
+The "What to fix" checklist renders from `fix_items[]` and today that array is
+always empty, so the card never appears. Needs child table **`Venue Fix Item`**
+(`istable=1`, `label` Data, `done` Check — ticked by the *partner*) as
+`fix_items` on `Venue`, plus:
 
 ```
-get_venue_review(venue_name)               -> {state, notes, reviewed_by,
-                                               reviewed_by_name, reviewed_on,
-                                               fix_items[]}
+get_venue_review(venue_name)                -> {state, notes, reviewed_by,
+                                                reviewed_by_name, reviewed_on,
+                                                fix_items[]}
 set_review_fix_item(venue_name, item, done) -> {ok: true}
 ```
 
-On **`Venue`**: `review_notes` (Small Text, **plain text**), `reviewed_by`
-(Link → User), `reviewed_on` (Datetime), `fix_items` (Table). Child table
-**`Venue Fix Item`**: `label` (Data), `done` (Check, ticked by the *partner*).
+Drop-in remains **`backend/venue_review.py`**. Without `set_review_fix_item` the
+ticks fall back to `localStorage` — fine on one browser, gone on their phone.
+This is the least urgent thing here; the notes matter more than the checklist.
 
-`notes` is shown to the partner **verbatim**, in a quote block, attributed. It
-is not summarised or reformatted on the way through — they came to the page to
-read exactly what was said. So write it as a message to a business owner, not
-as an internal moderation note.
+**2. Make `review_notes` required on the decline transition.** Still open, and
+now the *most* important item in this section — because of an interaction with
+your own stamping logic. `_stamp_review()` clears `reviewed_by`/`reviewed_on` on
+resubmit but **keeps `review_notes`**. So:
 
-**Two things that belong in the Desk, not in the endpoint:**
+> declined with a note → partner edits and resubmits → declined again, moderator
+> writes nothing → the July note is restamped with today's date and shown to the
+> partner as the reason for the second decline.
 
-1. **Make `review_notes` required on the decline transition.** A workflow that
-   permits an empty note will produce empty notes, and this whole item exists
-   to stop that.
-2. Stamp `reviewed_on` on the *transition*, not on every save — the screen
-   renders it as a date, and a save today reads as "reviewed again today".
+A stale reason presented as a fresh one is worse than no reason: they already
+fixed that, so they conclude the fix didn't count. The portal cannot detect this
+— a kept note and a new note are byte-identical to us. **Only a required note on
+the transition closes it.** (The alternative, clearing `review_notes` alongside
+the other two on resubmit, is worse — it destroys the history.)
 
-**The decision we need:** does resubmitting **edit the Venue** or **restore a
-Draft**? We think the Venue (the review history hangs off it, and the partner
-keeps one thing with one identity) and the shipped button goes to the venue's
-edit form. If you'd rather it became a draft, `save_venue_draft` needs a `venue`
-link field and that button changes. Those are different products — tell us
-before you build either.
+**3. `notes` is shown to the partner verbatim,** in a quote block, attributed.
+Not summarised or reformatted on the way through — they came to the page to read
+exactly what was said. So it needs writing as a message to a business owner, not
+as an internal moderation note. `photos low-res, 3x no price` is a true note and
+a cruel screen. Worth saying to whoever moderates, since the field is live and
+2 declined venues are on the site right now.
 
-**Also, separately: we have no support address.** "Contact support" is wired to
-a `mailto:` from `VITE_SUPPORT_EMAIL`, and that variable is deliberately not
-defaulted — a guessed address doesn't bounce, it just never gets read. With it
-unset the screen shows no support button and says so. **Send us the address.**
-Better still would be a `contact_support(venue_name, message)` endpoint so the
-partner's question lands attached to the venue the reviewer already has open,
-rather than in a shared inbox with no context.
+**4. We still have no support address.** "Contact support" is a `mailto:` from
+`VITE_SUPPORT_EMAIL`, deliberately not defaulted — a guessed address doesn't
+bounce, it just never gets read. Unset, the screen shows no support button and
+says so. **Send us the address.** Better still would be a
+`contact_support(venue_name, message)` endpoint, so the partner's question lands
+attached to the venue the reviewer already has open rather than in a shared
+inbox with no context.
 
 ### 13. Do drafts expire?
 
 The resume card currently says **"nothing expires"**. If there is a cleanup job,
 tell us the real TTL and we will change the copy. We are not printing "nothing
 expires" over a row with a 30-day delete on it.
+
+### 15. How long does approval take? We tell partners nothing.
+
+Right now a partner who submits a venue gets one sentence — *"This venue is with
+our team"* — and no answer to the only question they have, which is **when**.
+There is no submission date on the screen, no expected turnaround, and no way to
+tell a venue submitted this morning from one submitted three weeks ago.
+
+We are not inventing a number. "Usually approved within 2 working days" is a
+commitment the business makes, not a string the frontend gets to choose, and the
+cost of getting it wrong is a partner who stops checking. Three things, cheapest
+first:
+
+**a. A submission timestamp.** The one thing we could show today and can't.
+`reviewed_on` is cleared on resubmit (correctly), `creation` is when the record
+was made rather than when it was submitted, and `modified` moves whenever
+anyone touches the row. **We need a `submitted_on` (Datetime) stamped on the
+transition into Pending** — including on resubmit. With just that we can say
+"Submitted 24 July" and "with our team for 3 working days", both of which are
+true without anyone promising anything.
+
+**b. A turnaround figure, if you're willing to commit to one.** A number and its
+unit — we'll render "usually approved within N working days" and nothing else.
+If you'd rather not commit, say so and we'll ship (a) alone; a date with no
+promise beats a promise nobody can keep.
+
+**c. Per-section review states — the bigger one.** The designs show *Venue
+details / Operating hours / Moods & vibe / Menu photos & prices* each carrying
+its own Approved / In review state, plus items that are waiting on a third party
+(a 360° tour booking) or on the partner (a payout account). Today the workflow
+has **three states on the whole Venue** and nothing underneath it. That's a
+data-model change, not a screen: something like a `Venue Review Section` child
+table with `section`, `state`, and an optional `blocked_on`. Worth scoping
+before it's designed further, because everything on that mock — the "six of your
+eight items are cleared" line included — derives from it.
+
+Related, and blocked on §8: while mail is unconfigured we cannot say "we'll
+email you either way, so there's no need to check back". That sentence was on
+the pending screen and has been removed for the same reason it was removed from
+the menu importer.
 
 ---
 
