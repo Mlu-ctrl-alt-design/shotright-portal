@@ -45,8 +45,10 @@ Run them one at a time — several drive the full five-step wizard and take
 `verify12b.mjs` needs its own build:
 
 ```bash
-VITE_SUPPORT_EMAIL=help@example.co.za npm run build
+VITE_SUPPORT_EMAIL=help@shotright.example npm run build
 ```
+
+The address matters — `verify12b` asserts on the exact `mailto:` it produces.
 
 ## Why they are shaped like this
 
