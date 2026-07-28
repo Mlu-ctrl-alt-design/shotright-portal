@@ -48,6 +48,33 @@ falls back to `frappe.client.delete` on `Product Item`, which needs the Vendor
 role to have delete permission on that doctype. Please confirm the doctype name
 and either grant it or add `delete_product_item(item_id)`.
 
+### 1b. Can `update_venue` rename a venue — and what is it called?
+
+> **Reported 27 Jul: editing a venue's name doesn't stick.**
+
+Half of that was ours and is fixed: `venue_name` is the identifier on every
+endpoint in this API, and the edit form was spreading the partner's *new* name
+over it. Every rename said "update the venue called &lt;the name that doesn't
+exist yet&gt;" and never mentioned the venue being edited.
+
+The other half is yours, and we can't check it from here:
+
+| Question | Why it matters |
+|---|---|
+| Is `shotright.api.update_venue` deployed at all? | It's another name out of `api_reference.py` — the same source as the five menu methods. |
+| What does it take a **new name** under? | We now send `new_name` **and** `new_venue_name`; Frappe drops whichever isn't declared. If it's a third spelling, both get dropped and the rename silently does nothing. |
+| Is `Venue` autonamed from `venue_name`? | If so, a rename needs `frappe.rename_doc` — a plain field write won't do it, whatever the parameter is called. |
+
+The portal now **re-reads the venue after the write and compares**. If the name
+didn't change it stays on the page and says so, rather than navigating on and
+letting the partner believe it saved. That is a guard, not a fix — a partner
+renaming their venue still can't.
+
+Two other things the portal stopped doing on this call, worth knowing: it no
+longer sends the whole loaded venue back (including **`workflow_state`** — a
+client setting its own approval state), only an explicit list of writable
+fields.
+
 ### 2. `update_vendor_profile` has no `phone`
 
 Signature confirmed as
@@ -178,8 +205,19 @@ junk accounts it prevents.
 ### 14. Venue photos — `backend/venue_photos.py`
 
 > **Added 27 Jul. This was missing from the first version of this page** — §11
-> below covers *menu item* photos only. A venue's own photographs were not
-> asked for, because the portal had nowhere to upload one. It does now.
+> below covers *menu item* photos only.
+>
+> **Reported ready 27 Jul.** We can't confirm it from the build environment, so
+> nothing on our side assumes it landed — the probe decides per tab, and if the
+> names differ we fall straight back to the pre-deployment behaviour.
+>
+> **Please confirm the exact signature of `set_venue_photos`.** It is the one
+> call where a mismatch used to be invisible: the endpoint existing and the
+> endpoint understanding us are different things, and a `photos` argument spelt
+> differently server-side is dropped by Frappe at HTTP 200. The portal now
+> **reads the gallery back after writing it** and reports a short count rather
+> than claiming a save, so this fails loudly now — but it fails at a partner,
+> which is one place too far.
 
 Sho't Right sells a **mood**. A customer picks a feeling on a Friday night and
 gets a list of places. A listing with no picture asks them to choose where to

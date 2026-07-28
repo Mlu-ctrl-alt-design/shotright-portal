@@ -12,7 +12,8 @@ import { Button, Input, Textarea, Card, Alert, Badge } from '../../components/ui
 import Spinner from '../../components/ui/Spinner'
 import { OperatingHoursEditor } from '../../components/ui/OperatingHours'
 import PhotoUploader from '../../components/ui/PhotoUploader'
-import { MAX_VENUE_PHOTOS, uploadVenuePhoto } from '../../services/vendor'
+import { MAX_VENUE_PHOTOS, UPDATE_VENUE_METHOD, uploadVenuePhoto } from '../../services/vendor'
+import { isMethodMissing } from '../../services/api'
 import { clsx } from '../../utils/clsx'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -51,10 +52,15 @@ export default function VenueForm() {
   const { data: existing, isLoading: loadingVenue } = useVenue(venueId)
   const { data: moods = [], isLoading: loadingMoods } = useMoods()
   const createVenue = useCreateVenue()
-  const updateVenue = useUpdateVenue(venueId)
+  const updateVenue = useUpdateVenue(venueId, existing?.venue_name)
 
   const [form, setForm] = useState(EMPTY)
   const [error, setError] = useState(null)
+  // Things that did NOT save, on a request that otherwise succeeded. Kept apart
+  // from `error` because "your venue saved, except this" and "your venue did
+  // not save" need different words and different next steps.
+  const [warnings, setWarnings] = useState([])
+  const [savedVenue, setSavedVenue] = useState(null)
 
   /**
    * Photos are kept out of `form` on purpose.
@@ -101,6 +107,7 @@ export default function VenueForm() {
   const onSubmit = async (event) => {
     event.preventDefault()
     setError(null)
+    setWarnings([])
 
     if (form.moods.length === 0) {
       setError('Select at least one mood so customers can find this venue.')
@@ -124,9 +131,11 @@ export default function VenueForm() {
     }
 
     try {
-      const saved = isEdit
+      const result = isEdit
         ? await updateVenue.mutateAsync(payload)
         : await createVenue.mutateAsync(payload)
+      const saved = result?.venue ?? result
+
       // After the venue, because a photo order is meaningless without the venue
       // it orders. A failure here must not read as "your venue didn't save" —
       // it didn't fail, and the photos are on the bench either way.
@@ -138,9 +147,34 @@ export default function VenueForm() {
           // has already told the partner the order isn't kept yet.
         }
       }
+
+      /**
+       * Something didn't save. Stay put and say so.
+       *
+       * Navigating away on a partial save is how a silent failure becomes a
+       * belief: the partner watches the page change, concludes it worked, and
+       * finds out weeks later that customers are searching for a name their
+       * venue never had. The name field is also reset to what the server
+       * actually holds — leaving their typed name on screen under a warning
+       * that it did not save is a screen arguing with itself.
+       */
+      if (result?.warnings?.length) {
+        setWarnings(result.warnings)
+        setSavedVenue(saved)
+        if (saved?.venue_name) setForm((f) => ({ ...f, venue_name: saved.venue_name }))
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+
       navigate(`/venues/${saved.name}/menu`)
     } catch (err) {
-      setError(err.message)
+      setError(
+        isMethodMissing(err, UPDATE_VENUE_METHOD)
+          ? `We can’t save changes to a venue on this server yet — the portal is asking for ` +
+            `${UPDATE_VENUE_METHOD}, and it isn’t there. Nothing has been lost or changed. ` +
+            `We’ve flagged it.`
+          : err.message,
+      )
     }
   }
 
@@ -169,6 +203,27 @@ export default function VenueForm() {
       </div>
 
       <Alert variant="danger">{error}</Alert>
+
+      {warnings.length > 0 && (
+        <Alert variant="warning">
+          <p className="font-bold">Saved — but not all of it</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+          {/* Staying put is the point — but a warning you cannot walk away from
+              is a trap. The way on stays open. */}
+          {savedVenue?.name && (
+            <Link
+              to={`/venues/${savedVenue.name}/menu`}
+              className="mt-2 inline-block font-bold underline underline-offset-2"
+            >
+              Carry on to the menu →
+            </Link>
+          )}
+        </Alert>
+      )}
 
       <Card title="Venue details">
         <div className="space-y-4">

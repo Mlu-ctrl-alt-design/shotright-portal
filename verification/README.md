@@ -36,6 +36,7 @@ Run them one at a time — several drive the full five-step wizard and take
 | `verify11.mjs` | venue photos — upload, downscale, reorder, cover, HEIC, draft, submit |
 | `verify12.mjs` | the declined-venue review screen |
 | `verify12b.mjs` | the same screen built **with** `VITE_SUPPORT_EMAIL` set |
+| `verify13.mjs` | editing a venue — the rename identifier bug, and a rename that silently did nothing |
 
 `verify12b.mjs` needs its own build:
 
