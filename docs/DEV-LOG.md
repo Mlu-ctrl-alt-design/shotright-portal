@@ -130,8 +130,62 @@ cheap half is a `submitted_on` stamped on the transition into Pending, which
 lets us say "Submitted 24 July" and "with our team for 3 working days" without
 anyone promising anything.
 
-Verification: `verify15.mjs` (18 checks, where the reason comes from) and
-`verify16.mjs` (13 checks, the live 404 reproduced). All sixteen suites green.
+### 4. The sixth name mismatch — and it explains the 417
+
+Backend traced it while this was being written:
+
+```
+AttributeError: module 'shotright.api' has no attribute 'get_venue_review'
+hasattr(get_review_fix_items | set_review_fix_item | contact_support) → True
+```
+
+The read endpoint was built as **`get_review_fix_items`**. Attribute resolution
+fails before any handler runs — which is exactly why we saw **417 and not 404**,
+and why I read it as "deployed and throwing" rather than "not there". Our
+capability detection keys on 404, so a missing *attribute* and a missing
+*whitelist* land on opposite sides of the same test. That's now flagged to them
+as the generalisable bit; the specific fix is the usual one, a list of names
+tried in order. Sixth time on this project.
+
+Consequence worth having: **the fix-item checklist renders for the first time.**
+It had never appeared, because it was reading from an endpoint that didn't
+exist. The note and the checklist now come from different places — notes off the
+venue record, items off `get_review_fix_items` — and either can be absent.
+
+### 5. "Contact support" reaches somebody now
+
+`contact_support` is live. The button had been **hidden entirely** whenever
+`VITE_SUPPORT_EMAIL` was unset, which it always was — so the primary action on
+the one screen where a partner most needs a human was simply not on the page.
+That was the right call when a mailto to a guessed address was the only route.
+It isn't now.
+
+The care went into **not claiming delivery**. Frappe drops undeclared kwargs at
+HTTP 200, and I don't know this endpoint's parameter names. For a profile field
+that costs a value; here it would cost a business owner believing they had asked
+for help and waiting for a reply nobody can send — the worst version of this
+failure on the project. So the message goes under several plausible names at
+once, and "Sent" appears only if the response carries a `name`/`reference`/`id`
+or an explicit `ok`. A bare `null` gets *"we couldn't confirm that went
+through"*, their text stays in the box, and the mailto sits beside it.
+
+Asked them to return the docname on success, since otherwise every partner who
+contacts support gets the unconfirmed wording.
+
+Three assertions in `verify12.mjs` encoded the old rule — no address means no
+button. Updated, not deleted: the replacement is where the requirement went. The
+rule underneath it hasn't changed, it just moved to where it can now be answered
+honestly, at the point of sending.
+
+One small regression caught by that update: the venue reference had only ever
+been printed inside the "we have no support address" notice, so removing the
+notice took it with it. It's back on its own, always visible — it's what a
+partner quotes on WhatsApp or a phone call, which is how most of them will
+actually reach us.
+
+Verification: `verify15.mjs` (18 checks, where the reason comes from),
+`verify16.mjs` (13 checks, the live 404 reproduced), `verify17.mjs` (17 checks,
+the corrected name and the unconfirmed send). All seventeen suites green.
 
 ---
 

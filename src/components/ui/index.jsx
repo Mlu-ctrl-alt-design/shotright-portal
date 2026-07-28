@@ -570,7 +570,7 @@ export function EmptyState({ title, description, action }) {
 
 /* ----------------------------------------------------------------- Alert */
 // UNTITLED UI: https://www.untitledui.com/react/components/alerts
-export function Alert({ variant = 'info', children }) {
+export function Alert({ variant = 'info', className, children }) {
   const variants = {
     info: 'bg-blue-50 text-blue-800 ring-blue-600/20',
     success: 'bg-green-50 text-green-800 ring-green-600/20',
@@ -579,7 +579,14 @@ export function Alert({ variant = 'info', children }) {
   }
   if (!children) return null
   return (
-    <div role="alert" className={clsx('rounded-2xl px-4 py-3 text-sm ring-1 ring-inset', variants[variant])}>
+    <div
+      role="alert"
+      className={clsx(
+        'rounded-2xl px-4 py-3 text-sm ring-1 ring-inset',
+        variants[variant],
+        className,
+      )}
+    >
       {children}
     </div>
   )

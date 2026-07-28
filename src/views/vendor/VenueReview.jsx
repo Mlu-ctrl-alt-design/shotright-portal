@@ -8,7 +8,7 @@ import { Alert, Badge, Button, Card } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { bucketOf, stateLabel, stateTone } from '../../services/workflowState'
 import {
-  SUPPORT_EMAIL,
+  contactSupport,
   deriveGaps,
   getVenueReview,
   localFixState,
@@ -327,6 +327,8 @@ function WhatWeNoticed({ gaps, venueId }) {
 function Next({ venue, venueId, review }) {
   const [asking, setAsking] = useState(false)
   const [message, setMessage] = useState('')
+  const [sending, setSending] = useState(false)
+  const [result, setResult] = useState(null)
   const noReason = !review.notes
 
   const mailto = supportMailto({
@@ -335,6 +337,22 @@ function Next({ venue, venueId, review }) {
     reviewedOn: review.reviewedOn,
     message,
   })
+
+  // `contact_support` is deployed, so this is a real send rather than a handoff
+  // to the partner's mail app. What it must never do is claim delivery it can't
+  // prove — see contactSupport(). An unconfirmed send keeps their words on the
+  // screen and offers the mailto beside it.
+  const send = async () => {
+    setSending(true)
+    setResult(null)
+    try {
+      setResult(await contactSupport({ venueId, venueName: venue?.venue_name, message }))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const canReach = Boolean(mailto) || result?.reason !== 'not-deployed'
 
   // With no reason to act on, "edit and resubmit" is an invitation to guess.
   // Asking becomes the primary action and editing the secondary one — the same
@@ -357,15 +375,18 @@ function Next({ venue, venueId, review }) {
       <div className="mt-5 flex flex-wrap items-center gap-3">
         {editFirst && edit}
 
-        {SUPPORT_EMAIL ? (
-          <Button
-            variant={editFirst ? 'secondary' : 'primary'}
-            onClick={() => setAsking((v) => !v)}
-            aria-expanded={asking}
-          >
-            Contact support
-          </Button>
-        ) : null}
+        {/* Shown unconditionally now. It used to depend on VITE_SUPPORT_EMAIL,
+            which nobody ever sent us, so the primary action on a screen with no
+            reason on it was missing entirely. `contact_support` is deployed;
+            if it turns out to be absent on some bench, the panel says so at the
+            point of sending rather than hiding the button before anyone asks. */}
+        <Button
+          variant={editFirst ? 'secondary' : 'primary'}
+          onClick={() => setAsking((v) => !v)}
+          aria-expanded={asking}
+        >
+          Contact support
+        </Button>
 
         {!editFirst && edit}
       </div>
@@ -388,30 +409,83 @@ function Next({ venue, venueId, review }) {
             className="mt-2 block w-full rounded-2xl border-2 border-field bg-white px-4 py-3 text-sm text-ink-900 placeholder:text-ink-500 focus:border-brand-edge focus:outline-none"
           />
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            {/* A real link, not a scripted window.location: it opens in the
-                partner's own mail app, is right-clickable, and shows where it
-                is going before it is clicked. The venue reference travels with
-                it so the first reply isn't "which venue?". */}
-            <Button as="a" href={mailto || undefined} disabled={!mailto}>
-              Open my email
+            <Button onClick={send} loading={sending} disabled={!message.trim()}>
+              Send to the Sho’t Right team
             </Button>
+            {/* The mailto stays as a second route, not the only one. A real
+                link rather than a scripted window.location: right-clickable,
+                opens in their own mail app, and shows where it goes first. */}
+            {mailto && (
+              <Button as="a" variant="secondary" href={mailto}>
+                Open my email instead
+              </Button>
+            )}
             <p className="text-xs text-ink-500">
-              We&rsquo;ll include this venue&rsquo;s name and reference so you don&rsquo;t have to.
+              We&rsquo;ll attach this venue&rsquo;s name and reference so you don&rsquo;t have to.
             </p>
           </div>
+
+          {/* Three outcomes, three different things to say. The one that matters
+              is the middle one: the server took the message but told us nothing
+              back, so we cannot honestly say it arrived. The partner's words
+              stay on screen and the other route stays open. */}
+          {result?.confirmed && (
+            <Alert variant="success" className="mt-4">
+              Sent. We&rsquo;ll reply by email
+              {result.reference ? (
+                <>
+                  {' '}
+                  — your reference is{' '}
+                  <code className="font-mono text-xs">{result.reference}</code>
+                </>
+              ) : null}
+              .
+            </Alert>
+          )}
+
+          {result?.sent && !result.confirmed && (
+            <Alert variant="warning" className="mt-4">
+              <p className="font-bold">We couldn’t confirm that went through</p>
+              <p className="mt-1">
+                The server accepted it but didn&rsquo;t acknowledge it, so we&rsquo;re not going
+                to tell you it arrived. Your message is still in the box above —{' '}
+                {mailto ? 'send it by email as well, to be safe.' : 'please keep a copy.'} Quote{' '}
+                <code className="font-mono text-xs">{venueId}</code>.
+              </p>
+            </Alert>
+          )}
+
+          {result?.reason === 'not-deployed' && (
+            <Alert variant="warning" className="mt-4">
+              <p className="font-bold">This isn’t wired up on your server yet</p>
+              <p className="mt-1">
+                {mailto
+                  ? 'Use “Open my email instead” — it carries the same details.'
+                  : `Nothing here can reach our team yet. Use whichever contact you already have for the Sho’t Right team, and quote ${venueId}.`}
+              </p>
+            </Alert>
+          )}
+
+          {result?.reason === 'error' && (
+            <Alert variant="danger" className="mt-4">
+              That didn&rsquo;t send — {result.error?.message || 'something went wrong.'} Your
+              message is still above.
+            </Alert>
+          )}
         </div>
       )}
 
-      {!SUPPORT_EMAIL && (
-        <p className="mt-4 text-sm text-ink-700">
-          {/* No invented address. See the note in venueReview.js — every made-up
-              string on this project became a bug, and a support address that
-              silently goes nowhere is the worst kind. */}
-          We don&rsquo;t have a support address wired into the portal yet, so there&rsquo;s no
-          button here that would actually reach anybody. Use whichever contact you already have for
-          the Sho&rsquo;t Right team, and quote <code className="font-mono text-xs">{venueId}</code>.
-        </p>
-      )}
+      {/* The reference, always visible.
+          It used to appear only inside the "we have no support address" notice,
+          which disappeared when contact_support landed — taking with it the one
+          string a partner needs when they reach us by any route we don't
+          control, which in South Africa is usually WhatsApp or a phone call.
+          It belongs on the page in its own right, not as a consolation prize
+          for a broken button. */}
+      <p className="mt-5 text-xs text-ink-500">
+        Reference for this venue: <code className="font-mono">{venueId}</code>
+        {canReach ? '' : ' — use whichever contact you already have for the Sho’t Right team.'}
+      </p>
     </Card>
   )
 }

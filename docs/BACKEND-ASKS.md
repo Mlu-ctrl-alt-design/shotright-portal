@@ -59,11 +59,23 @@ genuinely isn't the caller's, **return 403, not 404** — 404 is
 indistinguishable from a missing method and we have to guess which we're
 looking at.
 
-**Separately: `get_venue_review` returns 417, not 404** — so it *is* deployed
-and it's raising. Whatever it throws on (`_owned`? the same identifier
-problem?) it throws for every venue we've tried. See §12; the portal no longer
-depends on it, but it is broken rather than absent, and the two look very
-different from our side.
+**The 417 is solved — it was never deployed under that name.** You built the
+read side as **`get_review_fix_items`**; `get_venue_review` never existed, so
+attribute resolution fails before any handler runs and Frappe returns 417 rather
+than a clean 404. Ours now tries both names in order, `get_review_fix_items`
+first. **Nothing needed from you on this one.**
+
+Worth flagging for next time, though, since it cost a day between us: our
+capability detection keys on **404** to mean "not deployed", which is what
+Frappe returns for a method that isn't whitelisted. An `AttributeError` on the
+module surfaces as **417**, which we read as "deployed and raising" — the exact
+opposite conclusion. If there's a way to make a missing attribute 404 like a
+missing whitelist does, it would remove a whole class of misdiagnosis.
+
+(For the record, `get_venue_review` *was* named — it is in §12's code block,
+first line. Not worth relitigating; flagging only in case that block isn't what
+you worked from, since the rest of the section describes fields and a child
+table you'd want to check against what you built.)
 
 ### 1. The menu endpoints 404
 
@@ -370,26 +382,28 @@ work.** Also withdrawn:
   Pending on edit, and `Venue Draft` has no link to a `Venue`. It edits the
   Venue. Our button was already pointed at the right thing.
 
+#### Also already built — we had the name wrong
+
+`get_review_fix_items`, `set_review_fix_item` and `contact_support` are all
+live. We were calling the read side `get_venue_review`, which never existed.
+Both names are now tried in order and the **checklist renders** for the first
+time. Two things we'd still like confirmed, since we're guessing from the name:
+
+- **What does `get_review_fix_items` return** — a bare array of rows, or
+  `{fix_items: [...]}`? We accept both, and read `name`/`label`/`done` off each
+  row. If your fields differ, say so rather than letting us map silently.
+- **`contact_support`'s parameter names.** We send `venue_name`, `venue`,
+  `message` and `subject` together, because Frappe drops what it doesn't
+  declare and we'd rather over-send than lose a partner's question. We only tell
+  them it was sent if the response carries a `name`/`reference`/`id` or an
+  explicit `ok` — a bare `null` is reported to them as *"we couldn't confirm
+  that went through"*, with their text kept on screen. **If it returns nothing
+  on success, please make it return the docname**, otherwise every partner who
+  contacts support is told we're not sure their message arrived.
+
 #### What is genuinely still open
 
-**1. `fix_items` — the only part of the screen with nothing behind it.**
-The "What to fix" checklist renders from `fix_items[]` and today that array is
-always empty, so the card never appears. Needs child table **`Venue Fix Item`**
-(`istable=1`, `label` Data, `done` Check — ticked by the *partner*) as
-`fix_items` on `Venue`, plus:
-
-```
-get_venue_review(venue_name)                -> {state, notes, reviewed_by,
-                                                reviewed_by_name, reviewed_on,
-                                                fix_items[]}
-set_review_fix_item(venue_name, item, done) -> {ok: true}
-```
-
-Drop-in remains **`backend/venue_review.py`**. Without `set_review_fix_item` the
-ticks fall back to `localStorage` — fine on one browser, gone on their phone.
-This is the least urgent thing here; the notes matter more than the checklist.
-
-**2. Make `review_notes` required on the decline transition.** Still open, and
+**1. Make `review_notes` required on the decline transition.** Still open, and
 now the *most* important item in this section — because of an interaction with
 your own stamping logic. `_stamp_review()` clears `reviewed_by`/`reviewed_on` on
 resubmit but **keeps `review_notes`**. So:
@@ -404,20 +418,20 @@ fixed that, so they conclude the fix didn't count. The portal cannot detect this
 the transition closes it.** (The alternative, clearing `review_notes` alongside
 the other two on resubmit, is worse — it destroys the history.)
 
-**3. `notes` is shown to the partner verbatim,** in a quote block, attributed.
+**2. `notes` is shown to the partner verbatim,** in a quote block, attributed.
 Not summarised or reformatted on the way through — they came to the page to read
 exactly what was said. So it needs writing as a message to a business owner, not
 as an internal moderation note. `photos low-res, 3x no price` is a true note and
 a cruel screen. Worth saying to whoever moderates, since the field is live and
 2 declined venues are on the site right now.
 
-**4. We still have no support address.** "Contact support" is a `mailto:` from
-`VITE_SUPPORT_EMAIL`, deliberately not defaulted — a guessed address doesn't
-bounce, it just never gets read. Unset, the screen shows no support button and
-says so. **Send us the address.** Better still would be a
-`contact_support(venue_name, message)` endpoint, so the partner's question lands
-attached to the venue the reviewer already has open rather than in a shared
-inbox with no context.
+**3. ~~We still have no support address.~~ Closed by `contact_support`.**
+The partner's question now posts to the endpoint and arrives attached to the
+venue the reviewer already has open, which is what we wanted and better than the
+mailto. `VITE_SUPPORT_EMAIL` remains an optional second route — still not
+defaulted to a guess — and the button no longer depends on it, so we've stopped
+hiding the primary action on this screen. See the return-value note above; it is
+the one thing that decides whether a partner is told their message arrived.
 
 ### 13. Do drafts expire?
 
