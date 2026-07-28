@@ -16,6 +16,7 @@ import Spinner from '../../components/ui/Spinner'
 const FIELD_LABELS = {
   vendor_name: 'your name',
   business_name: 'business name',
+  phone: 'your phone number',
 }
 
 /** "your name", or "your name and business name" */
@@ -30,7 +31,7 @@ export default function Profile() {
   const updateProfile = useUpdateProfile()
   const setStoreProfile = useAuthStore((s) => s.setProfile)
 
-  const [form, setForm] = useState({ vendor_name: '', business_name: '' })
+  const [form, setForm] = useState({ vendor_name: '', business_name: '', phone: '' })
   const [passwords, setPasswords] = useState({ new_password: '', confirm: '' })
   const [notice, setNotice] = useState(null)
   const [formError, setFormError] = useState(null)
@@ -51,6 +52,7 @@ export default function Profile() {
     setForm({
       vendor_name: profile.vendor_name || '',
       business_name: profile.business_name || '',
+      phone: profile.phone || '',
     })
   }, [profile])
 
@@ -89,6 +91,7 @@ export default function Profile() {
         setForm({
           vendor_name: saved?.vendor_name || '',
           business_name: saved?.business_name || '',
+          phone: saved?.phone || '',
         })
         setWarning(
           `Saved, but ${LABELS_FOR(missed)} did not stick — the app couldn't store ` +
@@ -144,18 +147,21 @@ export default function Profile() {
             <Input label="Your name" name="vendor_name" required value={form.vendor_name} onChange={set('vendor_name')} />
             <Input label="Business name" name="business_name" value={form.business_name} onChange={set('business_name')} />
           </div>
-          {/* `update_vendor_profile` takes first_name, last_name, business_name
-              and new_password — there is no phone parameter, so anything typed
-              here would be discarded silently at HTTP 200. Read-only until the
-              backend has somewhere to put it: a control that accepts input and
-              throws it away is worse than one that explains itself. */}
+          {/* Editable since 27 Jul, when `update_vendor_profile` gained `phone`.
+              It was read-only before that, because a control that accepts input
+              and silently discards it is worse than one that explains itself.
+              What lets it be a control again is not trust in the parameter name
+              — we still cannot check that from here — but the post-save
+              comparison below, which catches a field that did not stick and
+              says so. */}
           <Input
             label="Phone"
             name="phone"
             type="tel"
-            value={profile?.phone || ''}
-            disabled
-            hint="Not editable here yet — ask the Sho’t Right team to change it."
+            inputMode="tel"
+            value={form.phone}
+            onChange={set('phone')}
+            hint="The number customers and our team can reach you on."
           />
           <Input
             label="Email"

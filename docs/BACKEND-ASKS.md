@@ -75,14 +75,17 @@ longer sends the whole loaded venue back (including **`workflow_state`** — a
 client setting its own approval state), only an explicit list of writable
 fields.
 
-### 2. `update_vendor_profile` has no `phone`
+### 2. `update_vendor_profile` has no `phone` — ✅ reported deployed 27 Jul
 
-Signature confirmed as
-`update_vendor_profile(first_name, last_name, business_name, new_password)`.
+The Settings phone field was read-only, because a control that accepts input and
+silently discards it is worse than one that explains itself. **It is a control
+again**, sending `phone`.
 
-The venue wizard collects a contact number and the profile page displays one, but
-there is no parameter to save it — so the Settings phone field is **read-only**.
-Please add `phone`.
+We still can't check the parameter name from here. What makes that safe is the
+post-save comparison already in place: the profile is re-read after the write, so
+a differently-named parameter surfaces to the partner as *"saved, but your phone
+number didn't stick"* rather than as a lie. **Tell us if it isn't `phone`** and
+that warning goes away.
 
 ### 3. What does `get_vendor_dashboard` put in `profile`?
 
@@ -152,6 +155,23 @@ get_menu_import_status(name)              -> {status, stage, processed, total,
                                               created_count, skipped_count, errors[]}
 cancel_menu_import(name)
 ```
+
+> **🔴 One field needed now that §6 is live and §8 isn't.**
+>
+> `get_menu_import_status` must return **`will_notify`** — true only when a
+> completion email will genuinely be sent.
+>
+> This shipped ahead of outgoing mail, and the two promises are not the same
+> promise. *"You can leave"* became true the moment the import was a server job.
+> *"We'll email you"* needs a working mailer. Without a signal separating them,
+> the portal would tell every partner to close the tab and wait for a message
+> that is never sent — which is worse than making them watch a progress bar,
+> because they stop watching.
+>
+> The portal now defaults it to **false** and shows the smaller, true promise
+> ("leave and come back, it keeps going"). **Set `will_notify` true once the
+> mailer is configured and the `shotright_menu_ready` template exists** — the
+> sentence turns itself on, no frontend release.
 
 `stage` is one of `uploaded | scanning | reading | checking | done | failed` and
 drives the partner-facing checklist ("Found 4 categories · reading 38 items and
