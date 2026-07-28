@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useVenue, useMenu, useVenuePhotos } from '../../hooks/useVendor'
 import { isMethodMissing } from '../../services/api'
 import { VENUE_DETAIL_METHOD } from '../../services/vendor'
+import VenuePending from './VenuePending'
 import { Alert, Badge, Button, Card } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { bucketOf, stateLabel, stateTone } from '../../services/workflowState'
@@ -122,19 +123,23 @@ export default function VenueReview() {
         <Badge tone={stateTone(venue?.workflow_state)}>{stateLabel(venue?.workflow_state)}</Badge>
       </div>
 
-      {/* A venue that is not declined can still be opened here — from a
-          bookmark, or a link sent before it was resubmitted. Saying which
-          state it IS in beats a screen that argues with what the badge says.
+      {/* Pending gets a screen of its own rather than a one-line alert. It is
+          the state a venue spends the most time in and the one where a partner
+          has the least to go on — a sentence saying "with our team" answers the
+          question they already knew the answer to. */}
+      {bucket === 'pending' && (
+        <VenuePending
+          venue={venue}
+          venueId={venueId}
+          photos={photoData?.photos || []}
+          menu={menuData?.headings || []}
+        />
+      )}
 
-          This line used to end "we'll email you the moment there's a decision".
-          It was the same untrue promise the menu-import panel was making, in a
-          second place nobody thought to look — outgoing mail (§8) is not
-          configured, so no message is sent when a venue is decided either. The
-          replacement points at the thing that IS true: this page shows the
-          outcome, so it is worth coming back to. When §8 ships, the email
-          sentence can come back — and it needs its own capability flag, not a
-          borrowed one. */}
-      {!declined && (
+      {/* Approved, or a state no bucket claims — reached from a bookmark, or a
+          link sent before the venue was resubmitted. Saying which state it IS
+          in beats a screen that argues with what the badge says. */}
+      {!declined && bucket !== 'pending' && (
         <Alert variant={bucket === 'approved' ? 'success' : 'info'}>
           {bucket === 'approved'
             ? 'This venue is approved and showing to customers. Nothing to fix.'

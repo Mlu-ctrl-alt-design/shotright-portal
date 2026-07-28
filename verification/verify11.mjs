@@ -172,7 +172,7 @@ function jpegSize(buf) {
 }
 
 const tiles = (page) =>
-  page.locator('section[aria-labelledby="venue-photos-heading"] ul > li')
+  page.locator('section[aria-labelledby="venue-photos-heading"] ul[data-photo-tiles] > li')
 
 /** Wait for a photo to FINISH. A queued tile is an <li> too — counting them
     races the upload and reads the placeholder instead of the result. */
@@ -223,7 +223,7 @@ async function setLocation(page) {
   check((await tiles(page).count()) === 1, 'a chosen photo appears as a tile')
   check(uploads.length === 1, 'and is uploaded immediately, not held until submit')
   check(
-    /Cover/.test(await tiles(page).first().evaluate((n) => n.textContent)),
+    /Customers see this one first/.test(await tiles(page).first().evaluate((n) => n.textContent)),
     'the first photo is marked as the cover, in a word and not only a colour',
   )
 
@@ -280,7 +280,7 @@ async function setLocation(page) {
   await page.getByRole('button', { name: /Move three\.png earlier, to position 1 of 3/ }).click()
 
   const first = await tiles(page).first().evaluate((n) => n.textContent)
-  check(/Cover/.test(first), 'the cover badge follows the photo that was moved to the front')
+  check(/Customers see this one first/.test(first), "the cover label follows the photo that was moved to the front")
   check(
     (await tiles(page).first().locator('img').getAttribute('alt')) === 'three.png',
     'and it is the right photo',
