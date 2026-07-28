@@ -236,6 +236,22 @@ export default function VenueList() {
                           Why?
                         </Link>
                       )}
+                      {/* A pending venue had no route to its own status at
+                          all: the row said "Pending" and that was the end of
+                          it. Deliberately not emphasised the way "Why?" is —
+                          a decline needs acting on, waiting does not, and
+                          shouting about a venue that is simply in a queue
+                          would be noise in a column that has to stay
+                          scannable. */}
+                      {inBucket(venue, 'pending') && (
+                        <Link
+                          to={`/venues/${venue.name}/review`}
+                          aria-label={`Progress of ${venue.venue_name}`}
+                          className="font-medium text-brand-600 hover:underline"
+                        >
+                          Progress
+                        </Link>
+                      )}
                       {/* Names the venue for assistive tech: a column of
                           identical "Edit" links is unusable out of context. */}
                       <Link

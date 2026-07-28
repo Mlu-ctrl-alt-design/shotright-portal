@@ -657,6 +657,115 @@ const VENUE_WRITE_FIELDS = [
 
 export const UPDATE_VENUE_METHOD = 'shotright.api.update_venue'
 
+/**
+ * Human labels for fields we may have to report as unsaved.
+ * Anything not listed falls back to the raw name, which is ugly but honest.
+ */
+const FIELD_LABELS = {
+  address: 'the address',
+  latitude: 'the map pin',
+  longitude: 'the map pin',
+  dress_code: 'the dress code',
+  atmosphere_desc: 'the description',
+  moods: 'the moods',
+  operating_hours: 'the opening hours',
+  venue_name: 'the venue name',
+}
+
+/**
+ * Fields the endpoint told us it will not accept.
+ *
+ * ⚠️ 28 Jul, from production. `update_venue` does NOT quietly drop kwargs it
+ * doesn't declare — it validates and throws:
+ *
+ *   ValidationError: Cannot update field(s): address, cmd, new_name,
+ *                    new_venue_name
+ *
+ * That breaks the assumption the rest of this file is built on. Everywhere else
+ * on this bench, sending a field a method doesn't know about is a silent no-op,
+ * which is why we send alias families and check afterwards. Here an extra key
+ * doesn't get ignored, it takes the ENTIRE SAVE down with it — so a partner
+ * editing their dress code lost the whole edit because we also offered a rename
+ * the endpoint had no parameter for.
+ *
+ * Two of those four are our doing (`new_name`, `new_venue_name` — speculative
+ * rename aliases). `cmd` is Frappe's own routing key leaking through the
+ * backend's `**frappe.form_dict`, and we never sent it. `address` being refused
+ * is the backend's to explain — a venue that cannot change its address is not
+ * a venue anyone can maintain.
+ *
+ * The response is precise and parseable, so we use it: strip exactly what was
+ * named, retry once, and report what could not be saved instead of failing the
+ * lot. It self-heals the day the allow-list is fixed.
+ */
+const REFUSED_FIELDS = /Cannot update field\(s\):\s*([^"\\\n]+)/i
+
+const parseRefused = (err) => {
+  const text = `${err?.detail || ''} ${err?.message || ''}`
+  const match = text.match(REFUSED_FIELDS)
+  if (!match) return null
+  return match[1]
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Write, and if the endpoint names fields it won't take, drop those and retry.
+ *
+ * Returns the list it refused (empty if it took everything). Only one retry:
+ * a server that refuses a second, different set is telling us something we
+ * should surface rather than loop over.
+ */
+const writeVenue = async (body) => {
+  try {
+    await call(UPDATE_VENUE_METHOD, body)
+    return []
+  } catch (err) {
+    const refused = parseRefused(err)
+    if (!refused?.length) throw err
+
+    // `cmd` is Frappe's, not ours — it appears in the refusal list but not in
+    // anything we sent, and filtering on what we actually hold keeps the
+    // partner-facing message about their own edit.
+    const ours = refused.filter((field) => field in body)
+    if (!ours.length) throw err
+
+    const retry = { ...body }
+    for (const field of ours) delete retry[field]
+
+    // Nothing left worth sending: the identifier alone changes nothing, and a
+    // second call that can only no-op is noise.
+    const meaningful = Object.keys(retry).filter((k) => k !== 'venue_name')
+    if (!meaningful.length) return ours
+
+    await call(UPDATE_VENUE_METHOD, retry)
+    return ours
+  }
+}
+
+/**
+ * Say what didn't save, naming it.
+ *
+ * The rename aliases are excluded — a refused `new_name` is reported by the
+ * read-back below as "still called X", which is the sentence that means
+ * something to a partner. Listing the parameter names as well would be us
+ * explaining our own plumbing to someone who wanted to change their address.
+ */
+const warnAboutRefused = (refused) => {
+  const shown = (refused || []).filter((f) => f !== 'new_name' && f !== 'new_venue_name')
+  if (!shown.length) return []
+
+  const labels = [...new Set(shown.map((f) => FIELD_LABELS[f] || f))]
+  const list =
+    labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`
+
+  return [
+    `Everything else was saved, but this app couldn’t update ${list} — the server won’t ` +
+      `accept ${labels.length === 1 ? 'that change' : 'those changes'} yet. We’ve reported it.`,
+  ]
+}
+
 export const updateVenue = async (venueId, payload, currentName) => {
   if (USE_MOCKS) {
     const venue = await mockBackend.updateVenue(venueId, payload)
@@ -695,9 +804,15 @@ export const updateVenue = async (venueId, payload, currentName) => {
   // Last, so nothing above can reach it.
   body.venue_name = venueId
 
-  await call(UPDATE_VENUE_METHOD, body)
+  const refused = await writeVenue(body)
 
-  if (!renaming) return { venue: await getVenue(venueId), renamed: null, warnings: [] }
+  if (!renaming) {
+    return {
+      venue: await getVenue(venueId),
+      renamed: null,
+      warnings: warnAboutRefused(refused),
+    }
+  }
 
   /**
    * Did the rename actually happen?
@@ -718,16 +833,23 @@ export const updateVenue = async (venueId, payload, currentName) => {
   const venue = underNew || underOld
   const renamed = String(venue?.venue_name || '').trim() === wanted
 
+  // Both things can be true at once — the rename bounced AND the address was
+  // refused — and a partner needs to hear both. "Everything else was saved" is
+  // said once, by whichever message goes first, rather than twice.
+  const refusedWarnings = warnAboutRefused(refused)
+  const renameWarning = renamed
+    ? null
+    : `The venue is still called “${venue?.venue_name || venueId}”. ` +
+      // Said here only when nothing else is being reported, so a partner with
+      // two problems doesn't read "everything else was saved" twice and have to
+      // work out which "everything else" each one meant.
+      (refusedWarnings.length ? '' : 'Everything else you changed was saved — but ') +
+      `this app can’t rename a venue yet, so that part didn’t take. We’ve reported it.`
+
   return {
     venue,
     renamed,
-    warnings: renamed
-      ? []
-      : [
-          `The venue is still called “${venue?.venue_name || venueId}”. Everything else you ` +
-            `changed was saved — but this app can’t rename a venue yet, so that part didn’t ` +
-            `take. We’ve reported it.`,
-        ],
+    warnings: [renameWarning, ...refusedWarnings].filter(Boolean),
   }
 }
 
