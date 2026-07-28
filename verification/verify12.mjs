@@ -235,7 +235,20 @@ const text = (page, sel = 'main') => page.locator(sel).evaluate((n) => n.textCon
 }
 
 /* ============================================================================
-   6. NO SUPPORT ADDRESS — say so, do not print a button that goes nowhere
+   6. NO SUPPORT ADDRESS — but there is now an endpoint
+
+   These three assertions used to say the opposite: with VITE_SUPPORT_EMAIL
+   unset there must be NO support button, because a button that reaches nobody
+   is worse than no button. That was correct for as long as the only route was
+   a mailto to an address nobody ever sent us.
+
+   `contact_support` was confirmed deployed on 28 Jul, so the route exists
+   without an address — and hiding the button now removes the primary action
+   from the one screen where a partner most needs to reach a person. Updated
+   rather than deleted, because the replacement is where the old requirement
+   went. What has NOT changed is the rule underneath it: nothing may be offered
+   that silently reaches nobody. verify17 enforces that at the point of sending,
+   which is where it can now be answered honestly.
    ========================================================================= */
 {
   const { page, context } = await open({ review: 'absent' })
@@ -244,14 +257,14 @@ const text = (page, sel = 'main') => page.locator(sel).evaluate((n) => n.textCon
 
   const body = await text(page)
   check(
-    !(await page.getByRole('button', { name: /Contact support/i }).count()),
-    'with no address configured there is no support button, rather than one that reaches nobody',
+    await page.getByRole('button', { name: /Contact support/i }).count(),
+    'the support button is offered with no mail address configured — the endpoint is the route now',
   )
   check(
-    /don’t have a support address wired into the portal yet/i.test(body),
-    'and it says so plainly',
+    !/don’t have a support address wired into the portal yet/i.test(body),
+    'and the old apology for having no address goes with it',
   )
-  check(/V-9/.test(body), 'giving the partner the reference to quote through whatever channel they have')
+  check(/V-9/.test(body), 'the reference stays on the page for any other channel they use')
 
   await context.close()
 }

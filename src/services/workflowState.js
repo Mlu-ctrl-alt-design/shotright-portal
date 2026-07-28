@@ -24,8 +24,14 @@
  * bench introduces "On Hold" tomorrow, a partner sees "1 venue has a status
  * this portal doesn't recognise yet" instead of a venue that has vanished.
  *
- * ⚠️ Whatever the bench actually uses SHOULD still be added to the lists below
- * once confirmed — the aliases are a safety net, not a substitute for knowing.
+ * ✅ CONFIRMED 28 Jul. The bench workflow is **Venue Approval** (`is_active=1`)
+ * and its states are exactly **Pending / Approved / Declined**. All three are
+ * already in the lists below, so the buckets match the live vocabulary — this
+ * is no longer a guess wrapped in a safety net.
+ *
+ * The aliases stay regardless. They cost nothing, and what they prevent is the
+ * silent failure: the day a fourth state appears, an unrecognised venue is
+ * shown with its raw status instead of vanishing.
  */
 
 /** Lowercase, strip punctuation, collapse whitespace. The comparison key. */

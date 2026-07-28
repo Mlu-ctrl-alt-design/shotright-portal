@@ -1,6 +1,6 @@
 # Verification suites
 
-Thirteen Playwright scripts, ~250 checks, one per feature as it was built. They
+Seventeen Playwright scripts, ~320 checks, one per feature as it was built. They
 are the evidence behind the claims in `docs/DEV-LOG.md`.
 
 These are **not** unit tests. Each one drives a **production build** in a real
@@ -38,12 +38,17 @@ Run them one at a time — several drive the full five-step wizard and take
 | `verify12b.mjs` | the same screen built **with** `VITE_SUPPORT_EMAIL` set |
 | `verify13.mjs` | editing a venue — the rename identifier bug, and a rename that silently did nothing |
 | `verify14.mjs` | the two-promise split on menu import (mail on vs off), and the phone field |
+| `verify15.mjs` | where the decline reason comes from — endpoint vs venue record vs dashboard row |
+| `verify16.mjs` | the live "See why" 404: `get_venue_detail` failing on a venue the dashboard just listed |
+| `verify17.mjs` | the corrected read name `get_review_fix_items`, and `contact_support` refusing to claim an unconfirmed send |
 
 `verify12b.mjs` needs its own build:
 
 ```bash
-VITE_SUPPORT_EMAIL=help@example.co.za npm run build
+VITE_SUPPORT_EMAIL=help@shotright.example npm run build
 ```
+
+The address matters — `verify12b` asserts on the exact `mailto:` it produces.
 
 ## Why they are shaped like this
 

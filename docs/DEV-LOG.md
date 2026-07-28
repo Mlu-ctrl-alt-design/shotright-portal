@@ -17,7 +17,179 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 27 Jul 2026 (latest) — the backend shipped, and one promise came loose
+## 28 Jul 2026 (latest) — asking for what we already had
+
+Two corrections today, both in the same direction, and the direction is the
+lesson: **check what you are already holding before you ask whether you may
+fetch it.**
+
+### 1. The decline reason was on the wire the whole time
+
+I wrote §12 of BACKEND-ASKS asking the backend to add `review_notes`,
+`reviewed_by` and `reviewed_on` to `Venue`, to stamp the date on the transition
+rather than on save, and to confirm the workflow state names.
+
+All four already existed. `venue.json:81-94` has the fields.
+`vendor_dashboard.py:27` has been returning them to this portal all along — put
+there deliberately so a declined venue could render its reasons without a second
+round trip. `venue.py:31-54` (`_stamp_review`) already only writes when
+`workflow_state` actually changes. The states are **Pending / Approved /
+Declined** on the **Venue Approval** workflow, `is_active=1`, and all three were
+already in `workflowState.js`'s alias lists.
+
+Meanwhile the decline screen was calling `get_venue_review` — not deployed —
+catching the 404, and rendering **"No reason was recorded"** to every declined
+partner. Printed on top of a reason we had been handed and hadn't looked at.
+
+Nothing errored. The capability detection was correct: the endpoint really is
+missing. It was just answering a question that didn't need asking, and the
+answer got reported as a fact about the partner's data rather than about our own
+plumbing. **A missing ENDPOINT was shown to a business owner as missing DATA.**
+
+Fixed: `getVenueReview(venueId, venue)` now reads in order — the endpoint if it
+ever ships (only source of `fix_items`), then **the venue record already in
+hand**, then the dashboard row. First source carrying the field wins. Nothing
+needs deploying.
+
+Three details worth keeping:
+
+- `available` no longer means "an endpoint answered", it means "we could read
+  the fields". Those came apart the moment the data turned out to ride along on
+  the venue. `source` names which of the three paths produced the screen.
+- The presence test is `'review_notes' in raw`, **not** truthiness. A field
+  present and empty is a moderator who wrote nothing — a process gap. A field
+  absent is our plumbing. They look identical to the partner and must not read
+  identically to us, and Frappe sends an empty Small Text as `""` or `null`.
+- `reviewed_on` no longer falls back to `modified`. `modified` moves whenever
+  anyone touches the row, so a moderator opening the doc in October would make a
+  July decline read as "· 12 October". A missing date beats a wrong one.
+
+### 2. "See why" was 404ing on production
+
+Reported from the live site mid-session, signed in as a real partner:
+
+```
+GET …get_venue_review?venue_name=VEN-00002  417 (Expectation Failed)
+GET …get_venue_detail?venue_name=VEN-00002  404 (Not Found)
+→ "We couldn't open this venue. It isn't on the account you're signed in with,
+   or it has been removed."
+```
+
+Both halves of that sentence were false. The venue was on their account and had
+not been removed — `get_vendor_dashboard` had just listed it, which is how they
+got a "See why" link to click. One endpoint refused to repeat what another had
+already told us, and the portal turned that into a message about their
+livelihood having disappeared.
+
+`getVenue` now falls back to the dashboard row on any non-403 failure, marking
+the result `_partial`. **403 still throws** — "this venue is not yours" is a real
+answer, and the fallback must not become a way of never admitting anything is
+wrong. A venue genuinely in neither place still errors too.
+
+The error copy also split `isMethodMissing` out of the 404 branch. Frappe
+returns the same 404 for a missing method and a missing document, and guessing
+"your venue is gone" when the truth is "that endpoint isn't deployed" is the
+most alarming possible way to report our own gap.
+
+The 417 is its own finding: `get_venue_review` is **deployed and throwing**, not
+absent. `withFallback` rethrows non-404s by design, so that is a hard error — it
+just isn't the partner's problem, and no longer reaches them. Filed as §0.
+
+### 3. A third place the email promise was loose
+
+While looking at the pending state, found `VenueReview.jsx` telling partners
+*"We'll email you the moment there's a decision"* — the same untrue sentence
+fixed yesterday in the menu importer, in a second component nobody thought to
+check. §8 is not shipped; no mail goes out for venue decisions either. Replaced
+with what is true: the decision appears on that page.
+
+Yesterday's lesson was *one capability flag per claim*. Today's addition:
+**when you find a promise you can't keep, grep for the promise, not the flag.**
+The same sentence had been written twice, independently, in two components that
+share no code.
+
+### Still open after all that
+
+`fix_items` / `Venue Fix Item` is the only part of the decline screen with
+nothing behind it — the checklist card never renders. Least urgent thing there.
+
+The **required note on the decline transition** got *more* important, because of
+an interaction with the backend's own stamping. `_stamp_review()` clears
+`reviewed_by`/`reviewed_on` on resubmit but keeps `review_notes`. So a venue
+declined with a note, edited, resubmitted, and declined again by a moderator who
+writes nothing will show the **old note restamped with today's date**. A stale
+reason presented as fresh is worse than no reason: they already fixed that, so
+they conclude the fix didn't count. The portal cannot detect it — a kept note and
+a new note are byte-identical to us. Only a required note closes it.
+
+Also asked (§15): we tell a waiting partner **nothing** about how long approval
+takes. No submitted date, no turnaround, no way to tell this morning's
+submission from one three weeks old. We are not inventing a number — a turnaround
+figure is a commitment the business makes, not a string the frontend picks. The
+cheap half is a `submitted_on` stamped on the transition into Pending, which
+lets us say "Submitted 24 July" and "with our team for 3 working days" without
+anyone promising anything.
+
+### 4. The sixth name mismatch — and it explains the 417
+
+Backend traced it while this was being written:
+
+```
+AttributeError: module 'shotright.api' has no attribute 'get_venue_review'
+hasattr(get_review_fix_items | set_review_fix_item | contact_support) → True
+```
+
+The read endpoint was built as **`get_review_fix_items`**. Attribute resolution
+fails before any handler runs — which is exactly why we saw **417 and not 404**,
+and why I read it as "deployed and throwing" rather than "not there". Our
+capability detection keys on 404, so a missing *attribute* and a missing
+*whitelist* land on opposite sides of the same test. That's now flagged to them
+as the generalisable bit; the specific fix is the usual one, a list of names
+tried in order. Sixth time on this project.
+
+Consequence worth having: **the fix-item checklist renders for the first time.**
+It had never appeared, because it was reading from an endpoint that didn't
+exist. The note and the checklist now come from different places — notes off the
+venue record, items off `get_review_fix_items` — and either can be absent.
+
+### 5. "Contact support" reaches somebody now
+
+`contact_support` is live. The button had been **hidden entirely** whenever
+`VITE_SUPPORT_EMAIL` was unset, which it always was — so the primary action on
+the one screen where a partner most needs a human was simply not on the page.
+That was the right call when a mailto to a guessed address was the only route.
+It isn't now.
+
+The care went into **not claiming delivery**. Frappe drops undeclared kwargs at
+HTTP 200, and I don't know this endpoint's parameter names. For a profile field
+that costs a value; here it would cost a business owner believing they had asked
+for help and waiting for a reply nobody can send — the worst version of this
+failure on the project. So the message goes under several plausible names at
+once, and "Sent" appears only if the response carries a `name`/`reference`/`id`
+or an explicit `ok`. A bare `null` gets *"we couldn't confirm that went
+through"*, their text stays in the box, and the mailto sits beside it.
+
+Asked them to return the docname on success, since otherwise every partner who
+contacts support gets the unconfirmed wording.
+
+Three assertions in `verify12.mjs` encoded the old rule — no address means no
+button. Updated, not deleted: the replacement is where the requirement went. The
+rule underneath it hasn't changed, it just moved to where it can now be answered
+honestly, at the point of sending.
+
+One small regression caught by that update: the venue reference had only ever
+been printed inside the "we have no support address" notice, so removing the
+notice took it with it. It's back on its own, always visible — it's what a
+partner quotes on WhatsApp or a phone call, which is how most of them will
+actually reach us.
+
+Verification: `verify15.mjs` (18 checks, where the reason comes from),
+`verify16.mjs` (13 checks, the live 404 reproduced), `verify17.mjs` (17 checks,
+the corrected name and the unconfirmed send). All seventeen suites green.
+
+---
+
+## 27 Jul 2026 — the backend shipped, and one promise came loose
 
 Backend reported: **all P0, plus P1 §5, §6, §7, §9, §14 deployed and verified,
 180 tests passing.** Next up their end is outgoing mail, so §8's OTP endpoints

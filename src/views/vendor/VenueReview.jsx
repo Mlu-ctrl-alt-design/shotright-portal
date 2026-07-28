@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useVenue, useMenu, useVenuePhotos } from '../../hooks/useVendor'
+import { isMethodMissing } from '../../services/api'
+import { VENUE_DETAIL_METHOD } from '../../services/vendor'
 import { Alert, Badge, Button, Card } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { bucketOf, stateLabel, stateTone } from '../../services/workflowState'
 import {
-  SUPPORT_EMAIL,
+  contactSupport,
   deriveGaps,
   getVenueReview,
   localFixState,
@@ -27,13 +29,18 @@ import {
  * talking over the person they wanted to hear from. Then the checklist, then
  * what we noticed ourselves, then the two ways out.
  *
- * WHAT WE DO NOT DO. The bench has no field for a moderator to write into yet,
- * so today every decline arrives with no reason attached. The tempting fix is a
- * neutral placeholder — "your venue didn't meet our guidelines" — and it is a
- * trap: a partner acts on it, changes the wrong thing, resubmits, and is
- * declined again. We say there is no reason, we say we consider that our
- * problem and not theirs, and we make asking a human the primary action rather
- * than the fallback.
+ * WHAT WE DO NOT DO. When a decline genuinely arrives with no note attached,
+ * the tempting fix is a neutral placeholder — "your venue didn't meet our
+ * guidelines" — and it is a trap: a partner acts on it, changes the wrong
+ * thing, resubmits, and is declined again. We say there is no reason, we say we
+ * consider that our problem and not theirs, and we make asking a human the
+ * primary action rather than the fallback.
+ *
+ * Corrected 28 Jul: this screen used to show that empty state to EVERYONE,
+ * because it asked an undeployed endpoint for notes the venue record was
+ * already carrying. It now reads the record first. The empty state below is
+ * still exactly right — it just applies to the venues it was written for, the
+ * ones where a moderator really did decline without saying why.
  */
 export default function VenueReview() {
   const { venueId } = useParams()
@@ -41,27 +48,52 @@ export default function VenueReview() {
   const { data: menuData } = useMenu(venueId)
   const { data: photoData } = useVenuePhotos(venueId)
 
+  // The venue is handed to the review reader deliberately: `review_notes`,
+  // `reviewed_by` and `reviewed_on` ride along on the venue record, so in the
+  // ordinary case there is no second round trip and nothing to deploy. Gated on
+  // `venue` so this can't run against nothing and cache a false "no reason".
   const { data: reviewData, isLoading: loadingReview } = useQuery({
     queryKey: ['venue-review', venueId],
-    queryFn: () => getVenueReview(venueId),
-    enabled: !!venueId,
+    queryFn: () => getVenueReview(venueId, venue),
+    enabled: Boolean(venueId && venue),
   })
 
   // A failed read of the notes must not take the page down with it. The gaps we
   // derive ourselves, the edit route and the way to reach a human all still
   // work without it, and they are most of what someone came here for.
-  const review = reviewData || { available: false, notes: '', fixItems: [], reviewedOn: '' }
+  const review = reviewData || {
+    available: false,
+    source: 'none',
+    notes: '',
+    fixItems: [],
+    reviewedOn: '',
+  }
 
-  if (isLoading || loadingReview) return <Spinner label="Loading this decision…" />
+  if (isLoading || (venue && loadingReview)) return <Spinner label="Loading this decision…" />
   if (error) {
     return (
       <div className="space-y-4">
+        {/* This branch is now genuinely rare — `getVenue` falls back to the
+            dashboard row, so a 404 from `get_venue_detail` no longer lands
+            here. What used to land here was the live bug: a partner clicked
+            "See why" on their own declined venue and was told it wasn't on
+            their account.
+
+            The remaining case still has to be split. A 404 from Frappe is the
+            SAME status for a missing method and a missing document, and only
+            the exception text tells them apart. Guessing "your venue is gone"
+            when the truth is "that endpoint isn't deployed" is the most
+            alarming possible way to report our own gap. */}
         <Alert variant="danger">
           <p className="font-bold">We couldn’t open this venue</p>
           <p className="mt-1">
-            {error.status === 404
-              ? 'It isn’t on the account you’re signed in with, or it has been removed.'
-              : error.message}
+            {isMethodMissing(error, VENUE_DETAIL_METHOD)
+              ? 'This part of the portal isn’t on your server yet — your venue is fine. We’ve flagged it.'
+              : error.status === 404
+                ? 'It isn’t on the account you’re signed in with, or it has been removed.'
+                : error.status === 403
+                  ? 'This venue belongs to a different account.'
+                  : error.message}
           </p>
         </Alert>
         <Link to="/venues">
@@ -92,12 +124,21 @@ export default function VenueReview() {
 
       {/* A venue that is not declined can still be opened here — from a
           bookmark, or a link sent before it was resubmitted. Saying which
-          state it IS in beats a screen that argues with what the badge says. */}
+          state it IS in beats a screen that argues with what the badge says.
+
+          This line used to end "we'll email you the moment there's a decision".
+          It was the same untrue promise the menu-import panel was making, in a
+          second place nobody thought to look — outgoing mail (§8) is not
+          configured, so no message is sent when a venue is decided either. The
+          replacement points at the thing that IS true: this page shows the
+          outcome, so it is worth coming back to. When §8 ships, the email
+          sentence can come back — and it needs its own capability flag, not a
+          borrowed one. */}
       {!declined && (
         <Alert variant={bucket === 'approved' ? 'success' : 'info'}>
           {bucket === 'approved'
             ? 'This venue is approved and showing to customers. Nothing to fix.'
-            : 'This venue is with our team. We’ll email you the moment there’s a decision.'}
+            : 'This venue is with our team. The decision shows up on this page — check back here for it.'}
         </Alert>
       )}
 
@@ -286,6 +327,8 @@ function WhatWeNoticed({ gaps, venueId }) {
 function Next({ venue, venueId, review }) {
   const [asking, setAsking] = useState(false)
   const [message, setMessage] = useState('')
+  const [sending, setSending] = useState(false)
+  const [result, setResult] = useState(null)
   const noReason = !review.notes
 
   const mailto = supportMailto({
@@ -294,6 +337,22 @@ function Next({ venue, venueId, review }) {
     reviewedOn: review.reviewedOn,
     message,
   })
+
+  // `contact_support` is deployed, so this is a real send rather than a handoff
+  // to the partner's mail app. What it must never do is claim delivery it can't
+  // prove — see contactSupport(). An unconfirmed send keeps their words on the
+  // screen and offers the mailto beside it.
+  const send = async () => {
+    setSending(true)
+    setResult(null)
+    try {
+      setResult(await contactSupport({ venueId, venueName: venue?.venue_name, message }))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const canReach = Boolean(mailto) || result?.reason !== 'not-deployed'
 
   // With no reason to act on, "edit and resubmit" is an invitation to guess.
   // Asking becomes the primary action and editing the secondary one — the same
@@ -316,15 +375,18 @@ function Next({ venue, venueId, review }) {
       <div className="mt-5 flex flex-wrap items-center gap-3">
         {editFirst && edit}
 
-        {SUPPORT_EMAIL ? (
-          <Button
-            variant={editFirst ? 'secondary' : 'primary'}
-            onClick={() => setAsking((v) => !v)}
-            aria-expanded={asking}
-          >
-            Contact support
-          </Button>
-        ) : null}
+        {/* Shown unconditionally now. It used to depend on VITE_SUPPORT_EMAIL,
+            which nobody ever sent us, so the primary action on a screen with no
+            reason on it was missing entirely. `contact_support` is deployed;
+            if it turns out to be absent on some bench, the panel says so at the
+            point of sending rather than hiding the button before anyone asks. */}
+        <Button
+          variant={editFirst ? 'secondary' : 'primary'}
+          onClick={() => setAsking((v) => !v)}
+          aria-expanded={asking}
+        >
+          Contact support
+        </Button>
 
         {!editFirst && edit}
       </div>
@@ -347,30 +409,83 @@ function Next({ venue, venueId, review }) {
             className="mt-2 block w-full rounded-2xl border-2 border-field bg-white px-4 py-3 text-sm text-ink-900 placeholder:text-ink-500 focus:border-brand-edge focus:outline-none"
           />
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            {/* A real link, not a scripted window.location: it opens in the
-                partner's own mail app, is right-clickable, and shows where it
-                is going before it is clicked. The venue reference travels with
-                it so the first reply isn't "which venue?". */}
-            <Button as="a" href={mailto || undefined} disabled={!mailto}>
-              Open my email
+            <Button onClick={send} loading={sending} disabled={!message.trim()}>
+              Send to the Sho’t Right team
             </Button>
+            {/* The mailto stays as a second route, not the only one. A real
+                link rather than a scripted window.location: right-clickable,
+                opens in their own mail app, and shows where it goes first. */}
+            {mailto && (
+              <Button as="a" variant="secondary" href={mailto}>
+                Open my email instead
+              </Button>
+            )}
             <p className="text-xs text-ink-500">
-              We&rsquo;ll include this venue&rsquo;s name and reference so you don&rsquo;t have to.
+              We&rsquo;ll attach this venue&rsquo;s name and reference so you don&rsquo;t have to.
             </p>
           </div>
+
+          {/* Three outcomes, three different things to say. The one that matters
+              is the middle one: the server took the message but told us nothing
+              back, so we cannot honestly say it arrived. The partner's words
+              stay on screen and the other route stays open. */}
+          {result?.confirmed && (
+            <Alert variant="success" className="mt-4">
+              Sent. We&rsquo;ll reply by email
+              {result.reference ? (
+                <>
+                  {' '}
+                  — your reference is{' '}
+                  <code className="font-mono text-xs">{result.reference}</code>
+                </>
+              ) : null}
+              .
+            </Alert>
+          )}
+
+          {result?.sent && !result.confirmed && (
+            <Alert variant="warning" className="mt-4">
+              <p className="font-bold">We couldn’t confirm that went through</p>
+              <p className="mt-1">
+                The server accepted it but didn&rsquo;t acknowledge it, so we&rsquo;re not going
+                to tell you it arrived. Your message is still in the box above —{' '}
+                {mailto ? 'send it by email as well, to be safe.' : 'please keep a copy.'} Quote{' '}
+                <code className="font-mono text-xs">{venueId}</code>.
+              </p>
+            </Alert>
+          )}
+
+          {result?.reason === 'not-deployed' && (
+            <Alert variant="warning" className="mt-4">
+              <p className="font-bold">This isn’t wired up on your server yet</p>
+              <p className="mt-1">
+                {mailto
+                  ? 'Use “Open my email instead” — it carries the same details.'
+                  : `Nothing here can reach our team yet. Use whichever contact you already have for the Sho’t Right team, and quote ${venueId}.`}
+              </p>
+            </Alert>
+          )}
+
+          {result?.reason === 'error' && (
+            <Alert variant="danger" className="mt-4">
+              That didn&rsquo;t send — {result.error?.message || 'something went wrong.'} Your
+              message is still above.
+            </Alert>
+          )}
         </div>
       )}
 
-      {!SUPPORT_EMAIL && (
-        <p className="mt-4 text-sm text-ink-700">
-          {/* No invented address. See the note in venueReview.js — every made-up
-              string on this project became a bug, and a support address that
-              silently goes nowhere is the worst kind. */}
-          We don&rsquo;t have a support address wired into the portal yet, so there&rsquo;s no
-          button here that would actually reach anybody. Use whichever contact you already have for
-          the Sho&rsquo;t Right team, and quote <code className="font-mono text-xs">{venueId}</code>.
-        </p>
-      )}
+      {/* The reference, always visible.
+          It used to appear only inside the "we have no support address" notice,
+          which disappeared when contact_support landed — taking with it the one
+          string a partner needs when they reach us by any route we don't
+          control, which in South Africa is usually WhatsApp or a phone call.
+          It belongs on the page in its own right, not as a consolation prize
+          for a broken button. */}
+      <p className="mt-5 text-xs text-ink-500">
+        Reference for this venue: <code className="font-mono">{venueId}</code>
+        {canReach ? '' : ' — use whichever contact you already have for the Sho’t Right team.'}
+      </p>
     </Card>
   )
 }
