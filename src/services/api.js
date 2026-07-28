@@ -129,6 +129,37 @@ api.interceptors.response.use(
 )
 
 /**
+ * Frappe writes its messages as HTML, and we render them as text.
+ *
+ * ⚠️ Seen by a partner, 28 Jul, verbatim on their own screen:
+ *
+ *   User <strong>mlumanda@gmail.com</strong> does not have doctype access via
+ *   role permission for document <strong>Venue</strong>
+ *
+ * Tags and all. `frappe.throw` takes markup, `_server_messages` carries it
+ * through untouched, and every place we put `err.message` into a paragraph
+ * printed it literally. React escapes it — correctly, we are not injecting
+ * server HTML into the DOM — so the partner reads the angle brackets.
+ *
+ * Stripping is the right fix rather than rendering it: a message written for
+ * the Desk should not decide the typography of a partner-facing screen, and
+ * `dangerouslySetInnerHTML` on a server string is not a trade worth making for
+ * a bold email address.
+ */
+const plainText = (value) =>
+  String(value)
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, '’')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/**
  * Frappe buries the useful message in a few different places depending on
  * whether the failure came from frappe.throw, a validation error, or the
  * server erroring outright. Flatten that into a plain Error.
@@ -140,6 +171,7 @@ export function normalizeError(error) {
     : data?.message || data?.exc_type || error.message
 
   if (!message) message = 'Something went wrong. Please try again.'
+  message = plainText(message)
   const normalized = new Error(message)
   normalized.status = error.response?.status
   // Kept because a 404 is ambiguous on Frappe: a MISSING METHOD and a MISSING
