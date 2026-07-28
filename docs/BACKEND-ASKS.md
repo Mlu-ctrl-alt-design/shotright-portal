@@ -275,6 +275,51 @@ junk accounts it prevents.
 
 ### 14. Venue photos — `backend/venue_photos.py`
 
+> 🚨 **28 Jul, from a partner's screen. This is the one to read first.**
+>
+> ```
+> cosmos_1492129323.jpeg didn’t upload: User mlumanda@gmail.com does not have
+> doctype access via role permission for document Venue
+> ```
+>
+> **The Vendor role has no permission on the `Venue` doctype at all.** That is a
+> sound way to build a Frappe app — everything goes through whitelisted
+> `shotright.api.*` methods that elevate internally — but it means **every stock
+> Frappe endpoint we reach for is refused**, and we have now hit that wall three
+> separate times without recognising it was one wall:
+>
+> | What we tried | Why it fails |
+> |---|---|
+> | `upload_file` with `doctype: 'Venue'` | needs write permission on the Venue |
+> | `frappe.client.get_list` on `File` | needs read permission on File rows |
+> | `frappe.client.set_value` on `File` (`attachOrphans`) | needs write on File |
+>
+> All three were reported to you separately — "images don't persist", the 403
+> logout, the photo read falling back to nothing. **They are the same cause.**
+>
+> **What we need is one whitelisted method that elevates, like everything else
+> on this app does:**
+>
+> ```
+> upload_venue_photo(venue_name, file)  -> {name, file_url, file_name}
+> ```
+>
+> Until then the portal uploads the photo **unattached** — it retries without
+> `doctype`/`docname`, so the partner's photograph is never lost and they see it
+> in the uploader. But nothing links it to the venue, so a moderator opening the
+> Venue in Desk sees no pictures. That is the gap, and it is not one we can
+> close from this side.
+>
+> Alternatively, granting the Vendor role attach permission on `Venue` also
+> works and needs no code — your call which fits the security model. Tell us
+> which and we'll drop the retry.
+>
+> (We also stopped printing your messages as raw markup. `frappe.throw` takes
+> HTML, `_server_messages` carries it through, and we render as text — so a
+> restaurant owner read `User <strong>mlumanda@gmail.com</strong> does not have
+> doctype access…`, tags and all. Ours to fix, and fixed. Worth knowing that
+> anything you `frappe.throw` may end up in front of a partner.)
+
 > **Added 27 Jul. This was missing from the first version of this page** — §11
 > below covers *menu item* photos only.
 >

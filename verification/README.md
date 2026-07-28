@@ -1,6 +1,6 @@
 # Verification suites
 
-Twenty Playwright scripts, ~400 checks, one per feature as it was built. They
+Twenty-one Playwright scripts, ~415 checks, one per feature as it was built. They
 are the evidence behind the claims in `docs/DEV-LOG.md`.
 
 These are **not** unit tests. Each one drives a **production build** in a real
@@ -44,6 +44,7 @@ Run them one at a time — several drive the full five-step wizard and take
 | `verify18.mjs` | the pending screen — derived sections, and the four things it refuses to say |
 | `verify19.mjs` | `update_venue` refusing fields instead of ignoring them, and the strip-and-retry |
 | `verify20.mjs` | the photo read that looked like deletion, the 403 logout, and the customer preview |
+| `verify21.mjs` | the Vendor role having no `Venue` doctype access, and Frappe HTML reaching a partner |
 
 `verify12b.mjs` needs its own build:
 

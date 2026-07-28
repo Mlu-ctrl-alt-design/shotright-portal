@@ -1021,27 +1021,84 @@ export const MAX_VENUE_PHOTOS = 10
  * choosing, and what lets a resumed draft come back with its pictures: a draft
  * carries `file_url` strings, and could never carry a File object.
  */
+/**
+ * Does this failure mean "you may not attach to that doc", rather than
+ * "the upload failed"?
+ *
+ * ⚠️ Reported 28 Jul, on a real partner's own venue:
+ *
+ *   User mlumanda@gmail.com does not have doctype access via role permission
+ *   for document Venue
+ *
+ * The Vendor role has NO direct permission on the `Venue` doctype — everything
+ * legitimately goes through whitelisted `shotright.api.*` methods that elevate
+ * internally. That is a sound way to build a Frappe app, and it means stock
+ * `upload_file` can never attach a photo to a Venue for a vendor. It also
+ * explains the other two symptoms we've been chasing: `frappe.client.get_list`
+ * on File is refused for the same reason, and so is `attachOrphans`.
+ *
+ * So attaching is not a thing this bench will do for us, and the whole upload
+ * failing over it is the wrong outcome — the partner's photograph is fine.
+ */
+const isAttachPermissionError = (err) => {
+  const text = `${err?.message || ''} ${err?.detail || ''}`
+  return (
+    err?.status === 403 ||
+    /PermissionError/i.test(err?.excType || '') ||
+    /doctype access|not permitted|no permission|role permission/i.test(text)
+  )
+}
+
+/**
+ * Upload one photo.
+ *
+ * `venueId` is optional because the wizard has no venue yet — step 2 runs long
+ * before `create_venue`. Uploading anyway (rather than holding the bytes until
+ * submit) is what lets the partner SEE their photo while they are still
+ * choosing, and what lets a resumed draft come back with its pictures: a draft
+ * carries `file_url` strings, and could never carry a File object.
+ *
+ * Attaching is attempted and then given up on rather than assumed either way —
+ * a bench that allows it should get it, and one that doesn't should still get
+ * the photograph.
+ */
 export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
   pick(
     async () => {
-      const form = new FormData()
-      form.append('file', file, file.name)
-      form.append('is_private', '0') // customers have to be able to see it
-      form.append('folder', 'Home/Attachments')
-      if (venueId) {
-        form.append('doctype', 'Venue')
-        form.append('docname', venueId)
+      const send = async (attachTo) => {
+        const form = new FormData()
+        form.append('file', file, file.name)
+        form.append('is_private', '0') // customers have to be able to see it
+        form.append('folder', 'Home/Attachments')
+        if (attachTo) {
+          form.append('doctype', 'Venue')
+          form.append('docname', attachTo)
+        }
+        const { data } = await api.post('/api/method/upload_file', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (e) => onProgress?.(e.total ? e.loaded / e.total : 0),
+        })
+        return data.message || {}
       }
-      const { data } = await api.post('/api/method/upload_file', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (e) => onProgress?.(e.total ? e.loaded / e.total : 0),
-      })
-      const uploaded = data.message || {}
+
+      let uploaded
+      let attached = Boolean(venueId)
+      try {
+        uploaded = await send(venueId)
+      } catch (err) {
+        // Anything that isn't the permission wall is a real upload failure and
+        // must surface — a retry that silently succeeds unattached would hide,
+        // say, a file too large for the server.
+        if (!venueId || !isAttachPermissionError(err)) throw err
+        uploaded = await send(null)
+        attached = false
+      }
+
       return {
         name: uploaded.name,
         file_url: uploaded.file_url,
         file_name: uploaded.file_name || file.name,
-        attached: Boolean(venueId),
+        attached,
       }
     },
     () => mockBackend.uploadVenuePhoto(file, venueId),
