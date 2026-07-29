@@ -84,14 +84,46 @@ const localId = () => `draft-${Date.now().toString(36)}-${Math.random().toString
  * two during the switchover — a server draft made this morning alongside a local
  * one made last week.
  */
+/**
+ * ⚠️ THE SERVER SENDS THESE BACK AS STRINGS. Found 28 Jul by a UI test.
+ *
+ * `saveDraft` posts `payload: JSON.stringify(payload)` and
+ * `completed: JSON.stringify(completed)`, because Frappe stores them in text
+ * fields. What comes back out is therefore text — and this function used to
+ * hand that straight to the wizard, which does:
+ *
+ *     const saved = draft?.payload || {}
+ *     useState(() => ({ ...INITIAL_DETAILS, ...(saved.details || {}) }))
+ *
+ * Spreading a STRING yields nothing. So "Continue setup" on a server-saved
+ * draft opened a completely empty wizard, with no error anywhere — the draft
+ * was found, the request succeeded, and every field was blank.
+ *
+ * It survived because the localStorage path stores the object itself and round
+ * trips fine; only drafts that reached the bench were affected, and those
+ * endpoints landed recently. Which is the same shape as most bugs on this
+ * project: the fallback worked, so nobody saw the real path fail.
+ */
+const reviveJson = (value, fallback) => {
+  if (value === null || value === undefined) return fallback
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    // Not JSON. Better to hand back what we were given than to erase it — a
+    // half-migrated bench holding an older shape should still open.
+    return value
+  }
+}
+
 const normalise = (raw, isPortable) => ({
   id: raw.draft_id || raw.id,
   step: raw.step || WIZARD_STEPS[0].key,
   stepIndex: stepIndex(raw.step),
-  completed: raw.completed || [],
+  completed: reviveJson(raw.completed, []) || [],
   venue_name: raw.venue_name || '',
   updated_at: raw.modified || raw.updated_at || null,
-  payload: raw.payload ?? null,
+  payload: reviveJson(raw.payload, null),
   portable: isPortable,
 })
 

@@ -174,12 +174,67 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
     )
   }
 
+  /**
+   * ⚠️ THE COORDINATE FIELDS COULD NOT BE TYPED INTO. Found 28 Jul by a UI test.
+   *
+   * These are CONTROLLED inputs whose value comes from the parsed number. The
+   * handler used to drop any keystroke that didn't parse:
+   *
+   *     const n = Number(raw)
+   *     if (Number.isFinite(n)) onChange(...)      // else: nothing happens
+   *
+   * With no state change, React re-renders the input with its previous value —
+   * so the character the partner just typed vanishes. Type "-25.7069" and watch
+   * it happen:
+   *
+   *     "-"      Number("-")   → NaN  → rejected, field snaps back to empty
+   *     "2"      → 2                  → field shows "2"
+   *     "5"      → 25                 → "25"
+   *     "."      Number("25.") → 25   → state unchanged, the "." is discarded
+   *     "7"      → 257                → and now the digits are running together
+   *
+   * You end up at 257069, which fails validation as "Latitude must be between
+   * -90 and 90" — a message about a number the partner never typed.
+   *
+   * **Every latitude in South Africa is negative and every useful coordinate
+   * has a decimal point.** So the minus sign and the point were the two
+   * characters that could not be entered, on the one field that decides whether
+   * a venue is findable at all. Only dragging the pin or the geolocation button
+   * worked, and neither is available to someone reading coordinates off a
+   * screen.
+   *
+   * THE FIX: hold what they typed as a string, and parse alongside rather than
+   * instead. `draft` is the in-progress text; the number still flows to the
+   * parent exactly as before, only now the field stops fighting the keyboard.
+   */
+  const [draft, setDraft] = useState({})
+
   const setCoord = (key) => (e) => {
     const raw = e.target.value
     setPinState('adjusted')
+    setDraft((d) => ({ ...d, [key]: raw }))
+
     if (raw === '') return onChange({ latitude, longitude, [key]: undefined, provisional: false })
     const n = Number(raw)
     if (Number.isFinite(n)) onChange({ latitude, longitude, [key]: n, provisional: false })
+  }
+
+  /**
+   * What the field shows.
+   *
+   * The draft wins while it is still being typed — either it doesn't parse yet
+   * ("-", "-25.") or it parses to exactly the value we already hold, meaning
+   * nothing else has changed it. If the number arrives from somewhere else —
+   * the pin being dragged, geolocation, a resumed draft — that wins instead,
+   * because the partner's stale keystrokes are no longer what the venue says.
+   */
+  const shown = (key, value) => {
+    const typed = draft[key]
+    if (typed === undefined) return value ?? ''
+    const n = Number(typed)
+    if (typed !== '' && !Number.isFinite(n)) return typed // mid-typing: "-", "."
+    if (typed !== '' && n === value) return typed // "-25." while value is -25
+    return value ?? ''
   }
 
   /**
@@ -301,7 +356,7 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
           label="Latitude"
           inputMode="decimal"
           placeholder="-26.204100"
-          value={latitude ?? ''}
+          value={shown('latitude', latitude)}
           onChange={setCoord('latitude')}
           error={error}
           reserveMessage
@@ -311,7 +366,7 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
           label="Longitude"
           inputMode="decimal"
           placeholder="28.047300"
-          value={longitude ?? ''}
+          value={shown('longitude', longitude)}
           onChange={setCoord('longitude')}
           reserveMessage
           data-field="longitude"
