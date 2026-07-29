@@ -26,6 +26,83 @@ and will save nothing, and nobody finds out until a partner loses their work.
 
 ## P0 — a partner is hitting this now
 
+### 00. `update_venue` crashes on `moods` — every venue edit, 28 Jul
+
+```
+File "apps/shotright/shotright/venue_service.py", line 89, in update_venue
+    venue.update(fields)
+File "apps/frappe/frappe/model/base_document.py", line 321, in _init_child
+    value["doctype"] = doctype
+TypeError: 'str' object does not support item assignment
+```
+
+**`moods` is a child table on `Venue`, and `venue.update()` cannot take a list
+of ids.** `_init_child` expects a dict per row and assigns into it, so a list of
+strings raises *before anything is written* — the whole edit is lost, not just
+the moods.
+
+**The asymmetry is the bug:** `create_venue` accepts mood ids as strings quite
+happily. `update_venue` passes them straight to `venue.update` and does not. A
+venue can be created with moods but never edited with them.
+
+**Please make `update_venue` accept the same mood shape `create_venue` does.**
+
+What we've done meanwhile, and what we deliberately have NOT:
+
+- The form now sends **only fields the partner actually changed**, so editing a
+  dress code no longer carries the mood list. That alone stops the crash for
+  most edits, and is the right behaviour regardless.
+- When moods genuinely change we still have to send them, so we catch this
+  specific `TypeError`, drop the field, retry, and tell the partner *"couldn't
+  update the moods"*. The rest of their edit lands.
+- **We are not guessing the child-row shape.** `[{mood: id}]` would work if the
+  child field happens to be called `mood` — and if it is called anything else,
+  Frappe writes empty rows and reports success, which silently erases a venue's
+  moods. That is strictly worse than not saving them. Tell us the field name and
+  we'll send rows.
+
+### 0b. `get_venue_detail` omits `address`
+
+> **Reported 28 Jul:** *"when I open a venue to edit it the address does not
+> show even though I know I set it."*
+
+`get_venue_detail` and `get_vendor_dashboard` are different serialisers over the
+same doctype and do not return the same fields. The venue LIST shows each
+venue's address, so the data is plainly there — the edit form was asking the one
+endpoint that leaves it out, and rendering the blank as though nothing had been
+typed.
+
+**That is a data-loss path, not a cosmetic one:** a partner opens the form, sees
+an empty address, saves, and has now genuinely erased it.
+
+We fill the gap from the dashboard row when detail comes back missing
+`address`, `latitude`, `longitude`, `moods` or `operating_hours`. **Please make
+`get_venue_detail` return everything the edit form writes** — one serialiser
+that omits a writable field will do this again with the next one.
+
+### 0c. Uploaded photos render as broken links
+
+> **Reported 28 Jul:** *"the uploaded pictures are showing as broken links."*
+
+An `<img>` is a plain browser GET. **It carries no `Authorization` header** —
+our token only rides on axios calls — so if these files are served as private,
+the browser gets a 403 and draws the broken-image glyph.
+
+Two questions, and we can't answer either from here:
+
+1. **Are venue attachments public?** We post `is_private: 0` to `upload_file`,
+   but a file attached to a doctype can end up private depending on the doctype's
+   settings. If they are private, `<img>` can never load them and we need either
+   public files or a signed/public URL on `get_venue_photos`.
+2. **What does `file_url` actually look like** — `/files/…`, `/private/files/…`,
+   or an absolute URL? Our host rewrites `/files/*` and `/private/files/*` to the
+   bench, so a bare path should work; an absolute URL to the bench would hit CORS
+   and auth directly.
+
+Meanwhile a tile that fails to load now says *"Can't show this one — it uploaded
+and it's on the venue, we just can't load it back here yet"* instead of a torn
+paper icon. That's honest, but it isn't a fix.
+
 ### 0. `get_venue_detail` 404s on a venue the dashboard just listed
 
 > **Live on production, 28 Jul.** Signed in as a real partner, clicking **See

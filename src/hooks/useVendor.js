@@ -75,10 +75,13 @@ export const useCreateVenue = () => {
  * which is its docname and may be `VEN-0001`. The service needs both to tell a
  * rename apart from an ordinary save; see `updateVenue`.
  */
-export const useUpdateVenue = (venueId, currentName) => {
+export const useUpdateVenue = (venueId, existing) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload) => vendorApi.updateVenue(venueId, payload, currentName),
+    // `existing` is the venue as the server holds it. The service needs the
+    // whole record, not just its name: it diffs against it so a save carries
+    // only what the partner actually changed.
+    mutationFn: (payload) => vendorApi.updateVenue(venueId, payload, existing),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['venues'] })
       qc.invalidateQueries({ queryKey: ['venue', venueId] })

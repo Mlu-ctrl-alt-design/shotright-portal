@@ -52,7 +52,7 @@ export default function VenueForm() {
   const { data: existing, isLoading: loadingVenue } = useVenue(venueId)
   const { data: moods = [], isLoading: loadingMoods } = useMoods()
   const createVenue = useCreateVenue()
-  const updateVenue = useUpdateVenue(venueId, existing?.venue_name)
+  const updateVenue = useUpdateVenue(venueId, existing)
 
   const [form, setForm] = useState(EMPTY)
   const [error, setError] = useState(null)

@@ -437,23 +437,67 @@ export const VENUE_DETAIL_METHOD = 'shotright.api.get_venue_detail'
  * Second time today the answer has been: look at what you already hold before
  * asking whether you're allowed to fetch it.
  */
+/**
+ * Fields the edit form cannot function without.
+ *
+ * ⚠️ REPORTED 28 Jul: "when I open a venue to edit it, the address does not
+ * show even though I know I set it."
+ *
+ * `get_venue_detail` and `get_vendor_dashboard` are different serialisers over
+ * the same doctype, and they do not return the same fields. The venue LIST
+ * shows each venue's address, so we demonstrably have it — the edit form was
+ * just asking the one endpoint that omits it, and then rendering the blank as
+ * though the partner had never typed one.
+ *
+ * A partner who opens the form, sees an empty address and saves has now
+ * genuinely erased it. So a gap here is not cosmetic.
+ */
+const VENUE_ESSENTIALS = ['address', 'latitude', 'longitude', 'moods', 'operating_hours']
+
+const missingFrom = (venue) =>
+  VENUE_ESSENTIALS.filter((f) => venue?.[f] === undefined || venue?.[f] === null)
+
+const dashboardRow = async (venueId) => {
+  const dash = await call('shotright.api.get_vendor_dashboard').catch(() => null)
+  return (dash?.venues || []).find((v) => v?.name === venueId || v?.venue_name === venueId) || null
+}
+
 export const getVenue = (venueId) =>
   pick(
     async () => {
+      let detail
       try {
-        return await callGet(VENUE_DETAIL_METHOD, { venue_name: venueId })
+        detail = await callGet(VENUE_DETAIL_METHOD, { venue_name: venueId })
       } catch (err) {
         // 403 is a real answer — this venue is not theirs. Say so, rather than
         // papering over it with a row we happen to be holding.
         if (err?.status === 403) throw err
 
-        const dash = await call('shotright.api.get_vendor_dashboard').catch(() => null)
-        const row = (dash?.venues || []).find(
-          (v) => v?.name === venueId || v?.venue_name === venueId,
-        )
+        const row = await dashboardRow(venueId)
         if (row) return { ...row, _partial: true, _detailError: err }
         throw err
       }
+
+      /**
+       * Detail answered, but is it complete? Fill only the gaps, and only from
+       * the same server — this is not a cache, it is the same venue described
+       * twice. Detail always wins where it has an answer, including a
+       * deliberate empty string; `null`/absent is what counts as "not told".
+       *
+       * The extra request costs one round trip on a form the partner is about
+       * to spend two minutes in, and only when something is actually missing.
+       */
+      const gaps = missingFrom(detail)
+      if (!gaps.length) return detail
+
+      const row = await dashboardRow(venueId)
+      if (!row) return detail
+
+      const filled = { ...detail }
+      for (const field of gaps) {
+        if (row[field] !== undefined && row[field] !== null) filled[field] = row[field]
+      }
+      return filled
     },
     () => mockBackend.getVenue(venueId),
   )()
@@ -722,6 +766,22 @@ const writeVenue = async (body) => {
     await call(UPDATE_VENUE_METHOD, body)
     return []
   } catch (err) {
+    const text = `${err?.message || ''} ${err?.detail || ''} ${err?.original?.response?.data?.exc || ''}`
+
+    // A child table given a list of ids. Nothing was saved — the exception is
+    // raised before the write — so everything else in the edit is still to do.
+    if (CHILD_TABLE_CRASH.test(text)) {
+      const offenders = Object.keys(body).filter((k) => isListOfStrings(body[k]))
+      if (!offenders.length) throw err
+
+      const retry = { ...body }
+      for (const field of offenders) delete retry[field]
+      if (!Object.keys(retry).filter((k) => k !== 'venue_name').length) return offenders
+
+      await call(UPDATE_VENUE_METHOD, retry)
+      return offenders
+    }
+
     const refused = parseRefused(err)
     if (!refused?.length) throw err
 
@@ -745,6 +805,36 @@ const writeVenue = async (body) => {
 }
 
 /**
+ * A list of ids sent into a Frappe CHILD TABLE.
+ *
+ * ⚠️ 28 Jul, from production, on every venue edit that touched moods:
+ *
+ *   File "shotright/venue_service.py", line 89, in update_venue
+ *       venue.update(fields)
+ *   File "frappe/model/base_document.py", line 321, in _init_child
+ *       value["doctype"] = doctype
+ *   TypeError: 'str' object does not support item assignment
+ *
+ * `moods` is a child table on `Venue`. `venue.update()` hands each row to
+ * `_init_child`, which expects a dict and assigns into it — so a list of plain
+ * strings raises before anything is saved, and the whole edit is lost.
+ *
+ * `create_venue` accepts mood ids as strings quite happily. `update_venue`
+ * passes them straight to `venue.update` and does not. That asymmetry is the
+ * bug and it belongs on the bench, so this is a workaround rather than a fix.
+ *
+ * WE DO NOT GUESS THE CHILD-ROW SHAPE. Sending `[{mood: id}]` would work if the
+ * child field happens to be called `mood` — and if it is called anything else,
+ * Frappe writes empty rows and reports success, which would silently erase a
+ * venue's moods. That is strictly worse than not saving them. So: drop the
+ * field, save the rest, and tell the partner exactly which part didn't land.
+ */
+const CHILD_TABLE_CRASH = /does not support item assignment|_init_child/i
+
+const isListOfStrings = (value) =>
+  Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === 'string')
+
+/**
  * Say what didn't save, naming it.
  *
  * The rename aliases are excluded — a refused `new_name` is reported by the
@@ -766,11 +856,45 @@ const warnAboutRefused = (refused) => {
   ]
 }
 
-export const updateVenue = async (venueId, payload, currentName) => {
+/**
+ * Did this field actually change?
+ *
+ * Deliberately shallow-but-ordered for arrays: a mood list is a set the partner
+ * edits by clicking chips, and reordering it means nothing, but comparing by
+ * JSON is honest about "I cannot tell" and errs toward sending. Sending a field
+ * that didn't change is a wasted key; NOT sending one that did is data loss, so
+ * the comparison leans the safe way.
+ */
+const same = (a, b) => {
+  if (a === b) return true
+  if (a == null && b == null) return true
+  if (a === '' && b == null) return true
+  if (b === '' && a == null) return true
+  if (Array.isArray(a) && Array.isArray(b)) {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b)
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
+/**
+ * @param existing the venue as the SERVER holds it, used for two things: the
+ *                 current name (which is not the docname), and working out what
+ *                 the partner actually changed.
+ */
+export const updateVenue = async (venueId, payload, existing) => {
   if (USE_MOCKS) {
     const venue = await mockBackend.updateVenue(venueId, payload)
     return { venue, renamed: null, warnings: [] }
   }
+
+  // Callers used to pass just the name. Both are accepted so a stale call site
+  // degrades to "send everything" rather than crashing.
+  const current = typeof existing === 'string' ? { venue_name: existing } : existing || null
+  const currentName = current?.venue_name
 
   /**
    * `currentName` is the venue's name as the SERVER holds it, and it is not the
@@ -790,12 +914,23 @@ export const updateVenue = async (venueId, payload, currentName) => {
   const wanted = String(payload.venue_name || '').trim()
   const renaming = Boolean(wanted) && wanted !== known
 
-  // An explicit list, not `...payload`. The edit form spreads the whole venue
-  // it loaded, which means `workflow_state` was going back up on every save —
-  // the one field the create path is careful never to let a client set.
+  /**
+   * An explicit list, not `...payload`. The edit form spreads the whole venue
+   * it loaded, which means `workflow_state` was going back up on every save —
+   * the one field the create path is careful never to let a client set.
+   *
+   * AND ONLY WHAT CHANGED. This is the real fix for the child-table crash: an
+   * edit to the dress code has no business sending the mood list, and while it
+   * did, every single edit went through the one field the endpoint cannot
+   * accept. Sending less is also just correct — it makes a save mean "this is
+   * what I changed" rather than "here is the whole document again", which is
+   * how `workflow_state` escaped in the first place.
+   */
   const body = {}
   for (const field of VENUE_WRITE_FIELDS) {
-    if (payload[field] !== undefined) body[field] = payload[field]
+    if (payload[field] === undefined) continue
+    if (current && same(payload[field], current[field])) continue
+    body[field] = payload[field]
   }
   if (renaming) {
     body.new_name = wanted

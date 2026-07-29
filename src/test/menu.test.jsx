@@ -1,0 +1,193 @@
+import { describe, expect, it } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import { renderApp } from './render'
+import { bench } from './bench'
+
+/**
+ * A venue's menu — adding, editing and deleting.
+ *
+ * These three are one suite because they share a failure mode: the menu is the
+ * only part of the portal where the partner does destructive work, and the
+ * server is the only place that knows whether any of it happened. So every
+ * assertion here checks `bench.items` / `bench.headings` after the click, not
+ * just what the screen says.
+ *
+ * The delete tests matter most. A "Remove" that removes the row from the list
+ * and not from the database is indistinguishable from a working one until the
+ * partner reloads — and by then they have moved on, believing a dish nobody can
+ * order is gone.
+ */
+
+const MENU_ROUTE = '/venues/VEN-00001/menu'
+
+const addHeading = async (user, name = 'Starters') => {
+  await user.type(await screen.findByLabelText(/^heading$/i), name)
+  await user.click(screen.getByRole('button', { name: /add heading/i }))
+  return name
+}
+
+const addItem = async (user, { heading = 'Starters', item = 'Chakalaka', price = '45' } = {}) => {
+  // Each heading gets its own item form, so the fields have to be found inside
+  // the right card rather than by document-wide label.
+  const card = (await screen.findByRole('heading', { name: heading })).closest('section')
+  await user.type(within(card).getByLabelText(/^item$/i), item)
+  await user.type(within(card).getByLabelText(/price/i), price)
+  await user.click(within(card).getByRole('button', { name: /add item/i }))
+  return item
+}
+
+describe('add a menu', () => {
+  it('creates a heading on the server', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    const name = await addHeading(user)
+
+    await waitFor(() => expect(bench.headings.some((h) => h.heading === name)).toBe(true))
+    expect(await screen.findByRole('heading', { name })).toBeInTheDocument()
+  })
+
+  it('adds an item under the right heading, with its price', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    const item = await addItem(user)
+
+    await waitFor(() => expect(bench.items.some((i) => i.item_name === item)).toBe(true))
+    const saved = bench.items.find((i) => i.item_name === item)
+    expect(saved.price).toBe(45)
+    expect(saved.parent_heading).toBe(bench.headings.find((h) => h.heading === 'Starters').name)
+  })
+
+  it('shows the item on the page once it is saved', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user)
+
+    expect(await screen.findByText('Chakalaka')).toBeInTheDocument()
+  })
+
+  it('does not create an empty heading', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await screen.findByLabelText(/^heading$/i)
+    await user.click(screen.getByRole('button', { name: /add heading/i }))
+
+    await new Promise((r) => setTimeout(r, 300))
+    expect(bench.headings).toHaveLength(0)
+  })
+
+  it('clears the field after adding, so the next one can be typed straight in', async () => {
+    /* Leaving the text behind means the partner adding six headings deletes the
+       previous one six times, or accidentally creates "StartersMains". */
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await waitFor(() => expect(screen.getByLabelText(/^heading$/i)).toHaveValue(''))
+  })
+
+  it('says so plainly when the menu endpoints are not deployed', async () => {
+    /* This screen returned a raw "Not found" for weeks. A partner reading that
+       about their own menu reasonably concludes their menu is gone. */
+    bench.deploy.get_venue_products = false
+    renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    const alerts = await screen.findAllByRole('alert')
+    const text = alerts.map((a) => a.textContent).join(' ')
+    expect(text).toMatch(/isn’t|not|yet/i)
+    expect(text).not.toMatch(/DoesNotExistError|Traceback/)
+  })
+})
+
+describe('edit a menu', () => {
+  it('keeps existing items when a new one is added', async () => {
+    /* An "add" that rewrites the whole menu is a data-loss bug wearing a
+       feature's clothes. */
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user, { item: 'Chakalaka', price: '45' })
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await addItem(user, { item: 'Bunny chow', price: '90' })
+    await waitFor(() => expect(bench.items).toHaveLength(2))
+
+    expect(bench.items.map((i) => i.item_name).sort()).toEqual(['Bunny chow', 'Chakalaka'])
+  })
+
+  it('adds a second heading without disturbing the first', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user, 'Starters')
+    await addItem(user, { heading: 'Starters', item: 'Chakalaka' })
+    await addHeading(user, 'Mains')
+
+    await waitFor(() => expect(bench.headings).toHaveLength(2))
+    expect(bench.items).toHaveLength(1)
+    expect(await screen.findByText('Chakalaka')).toBeInTheDocument()
+  })
+
+  it('sends the price as a number the server can total', async () => {
+    /* Prices come off a text input. "45" sorts and sums differently from 45,
+       and a menu that cannot be totalled is a menu that cannot be checked. */
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user, { price: '45' })
+
+    await waitFor(() => expect(bench.calls.some((c) => c.method === 'add_product_item')).toBe(true))
+    const saved = bench.items.find((i) => i.item_name === 'Chakalaka')
+    expect(typeof saved.price).toBe('number')
+  })
+})
+
+describe('delete a menu item', () => {
+  it('removes it from the server, not just the screen', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /remove/i }))
+
+    await waitFor(() => expect(bench.items).toHaveLength(0))
+    await waitFor(() => expect(screen.queryByText('Chakalaka')).not.toBeInTheDocument())
+  })
+
+  it('does not report a delete that the server refused', async () => {
+    /* The one that matters. `frappe.client.delete` needs a permission the
+       Vendor role may not have — and if we drop the row from the list on an
+       optimistic update and swallow the error, the partner believes a dish is
+       gone. They find out when somebody orders it. */
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    bench.deploy['frappe.client.delete'] = false
+    await user.click(await screen.findByRole('button', { name: /remove/i }))
+
+    // Whatever it says, the item must still be on screen, because it is still
+    // on the server.
+    await new Promise((r) => setTimeout(r, 600))
+    expect(bench.items).toHaveLength(1)
+    expect(screen.getByText('Chakalaka')).toBeInTheDocument()
+  })
+
+  it('deletes only the item that was clicked', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user, { item: 'Chakalaka', price: '45' })
+    await addItem(user, { item: 'Bunny chow', price: '90' })
+    await waitFor(() => expect(bench.items).toHaveLength(2))
+
+    const row = (await screen.findByText('Bunny chow')).closest('li')
+    await user.click(within(row).getByRole('button', { name: /remove/i }))
+
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+    expect(bench.items[0].item_name).toBe('Chakalaka')
+  })
+})
