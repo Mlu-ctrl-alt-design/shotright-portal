@@ -117,6 +117,60 @@ describe('edit a venue', () => {
     expect(body).not.toMatch(/\bcmd\b|new_venue_name|Traceback|ValidationError/)
   })
 
+  it('does not send fields the partner did not touch', async () => {
+    /* PRODUCTION, 28 Jul: every venue edit 500'd with
+       `TypeError: 'str' object does not support item assignment`. `moods` is a
+       child table on Venue and `venue.update()` hands each row to Frappe's
+       `_init_child`, which assigns into it — so a list of ids raises before
+       anything saves.
+
+       The form sends the whole venue back, so EVERY edit went through the one
+       field the endpoint cannot accept. Changing a dress code should not carry
+       the mood list at all. */
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    await save(user)
+
+    await waitFor(() => expect(bench.calls.some((c) => c.method === 'update_venue')).toBe(true))
+    const call = bench.calls.find((c) => c.method === 'update_venue')
+    expect(call.args).not.toHaveProperty('moods')
+    expect(call.args).not.toHaveProperty('operating_hours')
+    expect(call.args.dress_code).toBe('Formal')
+    expect(venueById('VEN-00001').dress_code).toBe('Formal')
+  })
+
+  it('saves the rest of the edit when the mood list crashes the child table', async () => {
+    /* When moods genuinely change we have to send them, and on today's bench
+       that raises. Nothing is saved — the exception is raised before the write
+       — so the rest of the edit is still to do. */
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    // Add a second mood, so `moods` differs and has to be sent.
+    await user.click(screen.getByRole('button', { name: /lively/i }))
+    await save(user)
+
+    // The dress code lands on the retry rather than being lost with the moods.
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    expect(await screen.findByText(/couldn’t update the moods/i)).toBeInTheDocument()
+  })
+
+  it('never shows a raw Python TypeError to a partner', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    await screen.findByLabelText(/dress code/i)
+    await user.click(screen.getByRole('button', { name: /lively/i }))
+    await save(user)
+
+    await screen.findByText(/couldn’t update/i)
+    expect(document.body.textContent).not.toMatch(/TypeError|item assignment|base_document|Traceback/)
+  })
+
   it('says something honest when the venue cannot be loaded', async () => {
     bench.deploy.get_venue_detail = false
     bench.deploy.get_vendor_dashboard = false
@@ -127,6 +181,30 @@ describe('edit a venue', () => {
       { timeout: 5000 },
     )
     expect(document.body.textContent).not.toMatch(/DoesNotExistError|Traceback/)
+  })
+
+  it('fills in an address the detail endpoint left out', async () => {
+    /* REPORTED 28 Jul: "when I open a venue to edit it, the address does not
+       show even though I know I set it."
+
+       `get_venue_detail` and `get_vendor_dashboard` are different serialisers
+       over the same doctype and do not return the same fields. The venue LIST
+       shows each address, so we demonstrably have it — the form was asking the
+       one endpoint that omits it and rendering the blank as though the partner
+       had never typed one. Open, see empty, save, and it really is erased. */
+    const stripped = { ...bench.venues[0] }
+    delete stripped.address
+    bench.venues[0] = stripped
+    // The dashboard still carries it — restore it only on the list's copy.
+    const withAddress = { ...stripped, address: '12 Long St, Cape Town' }
+    bench.venues[0] = withAddress
+    bench.detailOmits = ['address']
+
+    renderApp({ route: EDIT, signedIn: true })
+
+    expect(await screen.findByLabelText(/^address$/i, {}, { timeout: 5000 })).toHaveValue(
+      '12 Long St, Cape Town',
+    )
   })
 
   it('recovers the venue from the list when the detail endpoint 404s', async () => {

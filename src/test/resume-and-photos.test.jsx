@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
 
@@ -207,6 +207,26 @@ describe('upload venue images', () => {
     await screen.findByRole('heading', { name: /photos of this venue/i })
     await new Promise((r) => setTimeout(r, 500))
     expect(document.body.textContent).not.toMatch(/can’t show you the photos already/i)
+  })
+
+  it('says a photo it cannot load is not lost, rather than drawing a broken icon', async () => {
+    /* REPORTED 28 Jul: "the uploaded pictures are showing as broken links."
+
+       An <img> is a plain browser GET carrying no Authorization header — our
+       token only rides on axios calls — so a private file, or a host not
+       forwarding /files, renders as the browser's torn-paper glyph. The photo
+       is not gone: it uploaded, and it is attached to the venue. What failed is
+       showing it back, and a partner deserves to be told which. */
+    bench.photos['VEN-00001'] = [
+      { name: 'F1', file_url: '/files/unreachable.jpg', file_name: 'unreachable.jpg' },
+    ]
+    renderApp({ route: EDIT, signedIn: true })
+
+    const img = await screen.findByAltText('unreachable.jpg')
+    fireEvent.error(img)
+
+    expect(await screen.findByText(/can’t show this one/i)).toBeInTheDocument()
+    expect(screen.getByText(/it uploaded and it’s on the venue/i)).toBeInTheDocument()
   })
 
   it('reports an upload that failed, rather than showing a tile for it', async () => {

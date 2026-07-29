@@ -86,6 +86,16 @@ const initial = () => ({
     update_vendor_profile: ['first_name', 'last_name', 'business_name', 'phone', 'new_password'],
   },
 
+  /**
+   * `moods` is a child table on `Venue`, so `venue.update()` cannot take a list
+   * of plain strings — see the handler. Production behaviour; set false to
+   * model a bench that has been fixed.
+   */
+  moodsAreChildRows: true,
+
+  /** Fields `get_venue_detail` leaves out that `get_vendor_dashboard` returns. */
+  detailOmits: [],
+
   /** `update_venue` throws on unrecognised fields rather than dropping them. */
   venueWritable: [
     'venue_name',

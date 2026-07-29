@@ -45,6 +45,8 @@ export default function PhotoUploader({
   const [errors, setErrors] = useState([])
   const [announcement, setAnnouncement] = useState('')
   const [dragging, setDragging] = useState(false)
+  /* Photos whose <img> failed to load, keyed by url — see the tile below. */
+  const [broken, setBroken] = useState({})
   const inputRef = useRef(null)
   const dragDepth = useRef(0)
 
@@ -316,11 +318,35 @@ export default function PhotoUploader({
               key={photo.file_url || photo.name}
               className="relative overflow-hidden rounded-2xl bg-ink-50 ring-1 ring-brand-200"
             >
-              <img
-                src={photo.file_url}
-                alt={photo.file_name}
-                className="aspect-[4/3] w-full object-cover"
-              />
+              {/* ⚠️ REPORTED 28 Jul: "the uploaded pictures are showing as
+                  broken links."
+
+                  An <img> is a plain browser GET. It carries no Authorization
+                  header — our token only rides on axios calls — so if the bench
+                  serves these as private files, or the host isn't forwarding
+                  /files, every tile renders as the browser's broken-image glyph
+                  and the partner concludes their photographs are gone.
+
+                  They are not gone. The upload succeeded, the File exists, and
+                  it is attached to the venue. What failed is displaying it back,
+                  and that is worth saying rather than drawing a torn-paper icon
+                  and hoping. `broken` is keyed per photo so one unreachable file
+                  doesn't indict the rest. */}
+              {broken[photo.file_url] ? (
+                <div className="flex aspect-[4/3] w-full flex-col justify-center gap-1 bg-tint px-3 text-center">
+                  <p className="text-xs font-bold text-ink-900">Can’t show this one</p>
+                  <p className="text-[11px] leading-snug text-ink-700">
+                    It uploaded and it’s on the venue — we just can’t load it back here yet.
+                  </p>
+                </div>
+              ) : (
+                <img
+                  src={photo.file_url}
+                  alt={photo.file_name}
+                  className="aspect-[4/3] w-full object-cover"
+                  onError={() => setBroken((b) => ({ ...b, [photo.file_url]: true }))}
+                />
+              )}
 
               {/* "Customers see this one first", not "Cover".
                   Turo labels the lead photo "Guests will see this photo first"

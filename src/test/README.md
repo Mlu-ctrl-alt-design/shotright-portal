@@ -1,6 +1,6 @@
 # UI tests
 
-React Testing Library + vitest + MSW. **63 checks, ~18 seconds**, run with:
+React Testing Library + vitest + MSW. **68 checks, ~28 seconds**, run with:
 
 ```bash
 npm test
@@ -41,7 +41,7 @@ expect(venueById('VEN-00001').venue_name).toBe('Corner Kitchen and Bar')
 HTTP 200 that stored nothing. A test asserting the form still showed the typed
 name would have passed happily through it.
 
-## Two bugs these found on the day they were written
+## Bugs these found
 
 **The coordinate fields could not be typed into.** `MapPicker` dropped any
 keystroke that didn't parse as a number, and the inputs are controlled — so `-`
@@ -53,8 +53,20 @@ in South Africa is negative. Only dragging the pin worked.
 opened a blank wizard with no error anywhere. The localStorage path round-tripped
 the object fine, which is why nobody saw it.
 
-Both are the same shape: a fallback worked, so the real path failing was
-invisible.
+**Every venue edit crashed the server.** `moods` is a child table on `Venue`, so
+`venue.update()` handed a list of ids to Frappe's `_init_child`, which assigns
+into each row: `TypeError: 'str' object does not support item assignment`. The
+form sent the whole venue back on every save, so every edit went through the one
+field the endpoint cannot accept. It now sends only what changed.
+
+**The edit form opened with a blank address.** `get_venue_detail` omits fields
+`get_vendor_dashboard` returns. Open, see empty, save — and the address really is
+erased.
+
+The first two are the same shape: a fallback worked, so the real path failing was
+invisible. The last two are the same shape as each other: two views of one
+record that don't agree, and the one we happened to ask was the one missing the
+answer.
 
 ## Adding one
 

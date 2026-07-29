@@ -165,9 +165,18 @@ const apiHandlers = [
   ),
 
   /* -------------------------------------------------------------- venues */
+  /**
+   * `get_venue_detail` and `get_vendor_dashboard` are different serialisers
+   * over the same doctype and do NOT return the same fields. `bench.detailOmits`
+   * models that: production omits `address` here while the dashboard carries
+   * it, which is why the edit form opened with a blank address.
+   */
   method('shotright.api.get_venue_detail', ({ venue_name }) => {
     const venue = venueById(venue_name)
-    return venue ? ok({ ...venue }) : docMissing()
+    if (!venue) return docMissing()
+    const out = { ...venue }
+    for (const field of bench.detailOmits || []) delete out[field]
+    return ok(out)
   }),
 
   method('shotright.api.create_venue', (args) => {
@@ -206,7 +215,39 @@ const apiHandlers = [
         venue.venue_name = value
         continue
       }
-      venue[key] = key === 'moods' || key === 'operating_hours' ? parse(value, value) : value
+
+      /**
+       * `moods` is a CHILD TABLE on Venue, and `venue.update()` hands each row
+       * to Frappe's `_init_child`, which does `value["doctype"] = doctype`.
+       * A list of plain strings therefore explodes:
+       *
+       *   TypeError: 'str' object does not support item assignment
+       *
+       * Reproduced from production, 28 Jul. `create_venue` accepts mood ids as
+       * strings; `update_venue` passes them straight through to `venue.update`
+       * and does not. That asymmetry is the bug, and modelling it here is what
+       * makes the test fail before the fix.
+       */
+      const parsed = key === 'moods' || key === 'operating_hours' ? parse(value, value) : value
+      if (
+        bench.moodsAreChildRows &&
+        key === 'moods' &&
+        Array.isArray(parsed) &&
+        parsed.some((row) => typeof row === 'string')
+      ) {
+        return HttpResponse.json(
+          {
+            exc_type: 'TypeError',
+            exception: "TypeError: 'str' object does not support item assignment",
+            exc: JSON.stringify([
+              'Traceback (most recent call last):\n  File "apps/shotright/shotright/venue_service.py", line 89, in update_venue\n    venue.update(fields)\n  File "apps/frappe/frappe/model/base_document.py", line 321, in _init_child\n    value["doctype"] = doctype\nTypeError: \'str\' object does not support item assignment\n',
+            ]),
+          },
+          { status: 500 },
+        )
+      }
+
+      venue[key] = parsed
     }
     return ok({ ...venue })
   }),
@@ -379,6 +420,32 @@ const apiHandlers = [
 
   /* Photo <img> requests. jsdom won't decode them, but they must not 'error'. */
   http.get('*/files/*', () => new HttpResponse(null, { status: 200 })),
+
+  /**
+   * Nominatim — OpenStreetMap's geocoder, called by the address field.
+   *
+   * Caught by `onUnhandledRequest: 'error'` on the first verbose run: the
+   * suite was reaching for **the live internet**. Nothing failed, because the
+   * component degrades to "address suggestions are unavailable right now" — but
+   * a test that quietly depends on a third-party service is a test that goes red
+   * on a train, and it was putting real load on a free community endpoint every
+   * time anyone typed an address in a test.
+   *
+   * Returns one plausible suggestion so the autocomplete path is exercised
+   * rather than only its failure branch.
+   */
+  http.get('https://nominatim.openstreetmap.org/search', ({ request }) => {
+    const q = new URL(request.url).searchParams.get('q') || ''
+    return HttpResponse.json([
+      {
+        place_id: 1,
+        display_name: `${q}, Gauteng, South Africa`,
+        lat: '-25.7069',
+        lon: '28.2294',
+        address: { road: q, city: 'Pretoria', country_code: 'za' },
+      },
+    ])
+  }),
 ]
 
 export const server = setupServer(...apiHandlers)
