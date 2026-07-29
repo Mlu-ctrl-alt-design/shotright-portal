@@ -153,7 +153,23 @@ const apiHandlers = [
 
   method('shotright.api.resend_otp', () => ok({ sent: true })),
   method('shotright.api.request_password_reset', () => ok({ sent: true })),
-  method('shotright.api.reset_password', () => ok({ ok: true })),
+  /**
+   * Validates the code and returns a session, like the real one.
+   *
+   * The first draft returned `{ok: true}` unconditionally, so a WRONG reset
+   * code appeared to work — the test asserting an error found none. A double
+   * that accepts anything cannot fail the case it exists to cover.
+   */
+  method('shotright.api.reset_password', ({ email, code, new_password }) => {
+    if (String(code) !== bench.otpCode) return validationError('That code is not right')
+    const user = bench.users.find((u) => u.email === email)
+    if (user) {
+      user.password = new_password
+      user.enabled = true
+    }
+    bench.session = email
+    return ok({ api_key: 'KEY', api_secret: 'SECRET', user: email })
+  }),
 
   /* ----------------------------------------------------------- dashboard */
   method('shotright.api.get_vendor_dashboard', () =>

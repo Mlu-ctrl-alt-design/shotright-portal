@@ -331,6 +331,39 @@ them never reach customer search.
 
 ### 8. OTP + transactional email — `backend/otp_and_email.py`
 
+> ✅ **REPORTED LIVE 28 Jul — OTP and the mail service are set up.**
+>
+> Nothing on our side needed changing: registration branches on
+> `register_vendor` returning `otp_required`, so verification turned itself on.
+> Two flows that were built but unreachable are now load-bearing — **password
+> reset** and **resend code** — and both have UI tests as of today, because a
+> flow somebody reaches for while already locked out is the worst place to find
+> the first bug.
+>
+> **We have NOT switched the email promises back on, and here is why.**
+>
+> "Mail is configured" and "this particular message is sent" are different
+> facts, and we have been bitten by conflating them once already this week: §6
+> shipped before mail, and the portal spent days telling every partner *"we'll
+> email you the moment your menu is ready"* with no mailer behind it. The fix
+> was one capability flag per claim, and that discipline only pays if we keep it
+> now that the tempting thing is to relax it.
+>
+> So, three separate questions — a yes to one is not a yes to the others:
+>
+> 1. **Menu import.** Does the finished job actually send, and does
+>    `shotright_menu_ready` exist? If so, return **`will_notify: true`** on
+>    `get_menu_import_status` and the sentence turns itself back on with no
+>    release from us. Nothing else will make us print it.
+> 2. **Venue decisions.** Is there an email when a venue is approved or
+>    declined? `shotright_venue_submitted` is a *submission* confirmation, which
+>    is a different message. Until you confirm a decision email exists, the
+>    pending screen says *"the decision appears on this page"* — true, and less
+>    than we'd like to say.
+> 3. **Anything else** on the template list that is now genuinely sending.
+>
+> Tell us which of those are real and we will wire each to its own signal.
+
 📄 `docs/EMAIL-SETUP.md`
 
 Registration has no verification, so junk accounts are trivial. Needs, **in this
