@@ -83,11 +83,28 @@ export const __resetCapabilities = () => {
 
 /* --------------------------------------------------------------------- auth */
 
-/** Exchanges credentials for a reusable api_key/api_secret pair. */
+/**
+ * Exchanges credentials for a reusable api_key/api_secret pair.
+ *
+ * ⚠️ 28 Jul — the same capability branch `register` has had since the OTP work,
+ * missing here because at the time login could not return this shape.
+ *
+ * With verification live, a bench can answer login for an unverified account
+ * with `{otp_required: true}` and NO token: the credentials were right, there
+ * is just a step left. `setAuthToken` correctly refuses a response with no
+ * api_key — but the store went on to set `status: 'authenticated'` anyway, so
+ * the partner landed on a dashboard with nothing to authenticate with, and
+ * every call behind it failed.
+ *
+ * Reported as "login goes straight through to the dashboard".
+ */
 export const login = (email, password) =>
   pick(
     async () => {
       const result = await call('shotright.api.login', { email, password })
+      if (result?.otp_required) {
+        return { otpRequired: true, email: result.email || email }
+      }
       setAuthToken(result)
       return result
     },

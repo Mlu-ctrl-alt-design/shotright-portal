@@ -63,6 +63,24 @@ const next = async (page) => {
 }
 const on = async (page, text) => (await page.locator('main').innerText()).includes(text)
 
+/**
+ * `on()`, but patient.
+ *
+ * A fixed `waitForTimeout` before an assertion is a bet that the machine is not
+ * busy. Under the full 21-suite run it isn't, and two validation checks here
+ * went red purely because the re-render hadn't landed inside 600ms — passing
+ * alone, failing in the suite. A flaky check is worse than a missing one,
+ * because it teaches people that red doesn't mean anything.
+ */
+const onSoon = async (page, text, timeout = 5000) => {
+  const deadline = Date.now() + timeout
+  do {
+    if (await on(page, text)) return true
+    await page.waitForTimeout(100)
+  } while (Date.now() < deadline)
+  return false
+}
+
 /* ============ step 1 gates before you can leave it ============ */
 {
   const { page, context } = await wizard()
@@ -157,14 +175,21 @@ const on = async (page, text) => (await page.locator('main').innerText()).includ
   await page.waitForTimeout(600)
 
   check(await on(page, "Enter your venue's details"), 'Next is blocked on the details step')
-  check(await on(page, 'Your venue needs a name'), 'the missing venue name is shown inline')
+  check(await onSoon(page, 'Your venue needs a name'), 'the missing venue name is shown inline')
   check(
-    await on(page, 'Set your location'),
+    await onSoon(page, 'Set your location'),
     'AND the missing location is shown at the same time, not one at a time',
   )
 
+  /* Focus is moved in the same tick as the errors render, so poll for it
+     rather than assuming both have happened by an arbitrary deadline. */
+  let focused = false
+  for (let i = 0; i < 50 && !focused; i += 1) {
+    focused = await field(page, 'Venue name').evaluate((n) => n === document.activeElement)
+    if (!focused) await page.waitForTimeout(100)
+  }
   check(
-    await field(page, 'Venue name').evaluate((n) => n === document.activeElement),
+    focused,
     'focus moves to the FIRST problem in DOM order, not a random key',
   )
 

@@ -94,3 +94,62 @@ describe('login', () => {
     )
   })
 })
+
+/**
+ * An account that exists but has not verified its email.
+ *
+ * REPORTED 28 Jul: "not seeing the OTP screen — login goes straight through to
+ * the dashboard."
+ *
+ * OTP lives on registration, so a partner who already has an account will never
+ * see it at login, and that is correct. But there is a real hole underneath the
+ * report: `login` never branched on `otp_required`. `setAuthToken` refuses a
+ * response with no api_key, so the token ended up null — and then the store set
+ * `status: 'authenticated'` anyway. Straight to a dashboard where every
+ * subsequent call has no credentials.
+ *
+ * `register` has guarded against exactly this since the OTP work landed. Login
+ * did not, because at the time login could not return that shape. Now it can.
+ */
+describe('login for an unverified account', () => {
+  it('sends them to verification instead of the dashboard', async () => {
+    bench.loginNeedsOtp = true
+    bench.users[0].enabled = false
+    const { user } = renderApp({ route: '/login' })
+
+    await user.type(await screen.findByLabelText(/email/i), 'thabo@cornerkitchen.co.za')
+    await user.type(screen.getByLabelText(/password/i), 'correct-horse')
+    await user.click(screen.getByRole('button', { name: /login/i }))
+
+    expect(await screen.findByLabelText(/verification code/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /welcome back/i })).not.toBeInTheDocument()
+  })
+
+  it('never reports a session it has no token for', async () => {
+    /* The specific failure: authenticated with nothing to authenticate with. */
+    bench.loginNeedsOtp = true
+    bench.users[0].enabled = false
+    const { user } = renderApp({ route: '/login' })
+
+    await user.type(await screen.findByLabelText(/email/i), 'thabo@cornerkitchen.co.za')
+    await user.type(screen.getByLabelText(/password/i), 'correct-horse')
+    await user.click(screen.getByRole('button', { name: /login/i }))
+    await screen.findByLabelText(/verification code/i)
+
+    expect(bench.calls.some((c) => c.method === 'get_vendor_dashboard')).toBe(false)
+  })
+
+  it('lets them finish verifying and then come in', async () => {
+    bench.loginNeedsOtp = true
+    bench.users[0].enabled = false
+    const { user } = renderApp({ route: '/login' })
+
+    await user.type(await screen.findByLabelText(/email/i), 'thabo@cornerkitchen.co.za')
+    await user.type(screen.getByLabelText(/password/i), 'correct-horse')
+    await user.click(screen.getByRole('button', { name: /login/i }))
+
+    await user.type(await screen.findByLabelText(/verification code/i), '123456')
+
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument()
+  })
+})

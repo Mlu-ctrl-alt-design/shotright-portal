@@ -1,6 +1,6 @@
 # UI tests
 
-React Testing Library + vitest + MSW. **68 checks, ~28 seconds**, run with:
+React Testing Library + vitest + MSW. **80 checks, ~29 seconds**, run with:
 
 ```bash
 npm test
@@ -8,7 +8,7 @@ npm test
 
 ## What these are
 
-Ten user flows, driven the way a partner drives them: type into the field, click
+Eleven user flows, driven the way a partner drives them: type into the field, click
 the button, read the screen. The real `<App />` is mounted at a route with the
 real router, query client, auth guard, service layer and axios interceptors. The
 only substitution is the Frappe bench itself, at the network boundary.
@@ -26,6 +26,7 @@ Nearly every bug on this project has lived in the seams between those pieces.
 | `venue-edit.test.jsx` | editing, renaming, and a server that refuses fields |
 | `menu.test.jsx` | adding, editing and deleting menu items |
 | `resume-and-photos.test.jsx` | picking up a saved setup, uploading photos |
+| `password-reset.test.jsx` | resetting a password, resending a verification code |
 
 ## The rule these follow
 
