@@ -113,7 +113,18 @@ const apiHandlers = [
     if (!user || user.password !== password) {
       return validationError('Invalid login credentials')
     }
-    if (!user.enabled) return validationError('User is disabled')
+    /**
+     * An account that exists but has not verified its email.
+     *
+     * With OTP live, a bench can answer login with `otp_required` and NO token
+     * rather than a hard error — the credentials were right, there is just a
+     * step left. Modelled because the portal has to handle it: treating it as a
+     * session drops someone on a dashboard where every call fails.
+     */
+    if (!user.enabled) {
+      if (bench.loginNeedsOtp) return ok({ otp_required: true, email: user.email })
+      return validationError('User is disabled')
+    }
     bench.session = user.email
     return ok({ api_key: 'KEY', api_secret: 'SECRET', user: user.email })
   }),

@@ -32,7 +32,13 @@ export default function Login() {
     setBusy(true)
     setError(null)
     try {
-      await login(email, password)
+      const result = await login(email, password)
+      // An account that exists but hasn't verified. Same destination as
+      // registration, carrying the address so the code can be resent.
+      if (result?.otpRequired) {
+        navigate('/verify', { replace: true, state: { email: result.email } })
+        return
+      }
       navigate(location.state?.from || '/', { replace: true })
     } catch (err) {
       setError(err.message)

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import * as vendorApi from '../services/vendor'
+import { hasAuthToken } from '../services/api'
 
 /**
  * Session state. `status` is deliberately three-valued: 'unknown' means we have
@@ -24,8 +25,22 @@ export const useAuthStore = create((set) => ({
     }
   },
 
+  /**
+   * Sign in.
+   *
+   * Returns `{otpRequired: true, email}` when the account exists but has not
+   * verified its email — same contract as `register`. The store must NOT move
+   * to 'authenticated' for it, and must not do so for any response that came
+   * back without a usable token either: "authenticated" is a claim about
+   * having credentials, and making it without them produces a portal that
+   * looks signed in and fails every request.
+   */
   async login(email, password) {
     const session = await vendorApi.login(email, password)
+    if (session?.otpRequired) return session
+    if (!hasAuthToken()) {
+      throw new Error('We couldn’t sign you in. Please try again.')
+    }
     set({
       status: 'authenticated',
       user: session.user,

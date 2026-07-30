@@ -363,6 +363,21 @@ them never reach customer search.
 > 3. **Anything else** on the template list that is now genuinely sending.
 >
 > Tell us which of those are real and we will wire each to its own signal.
+>
+> **One question about login.** OTP lives on REGISTRATION, so a partner who
+> already has an account goes straight in — correct, and probably what you're
+> seeing if you tested with an existing login.
+>
+> But it exposed a hole on our side, now fixed: `login` never branched on
+> `otp_required`. If your bench answers login for an *unverified* account with
+> `{otp_required: true}` and no token, we used to set "authenticated" anyway and
+> drop the partner on a dashboard with nothing to authenticate with. Login now
+> routes to the verification screen exactly as registration does, and refuses to
+> claim a session it has no token for.
+>
+> **So: what does `login` return for an account that exists but hasn't verified?**
+> `otp_required`, or a hard error? We handle both, but we'd rather know than
+> infer.
 
 📄 `docs/EMAIL-SETUP.md`
 

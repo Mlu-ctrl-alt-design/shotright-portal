@@ -79,6 +79,8 @@ const initial = () => ({
 
   /** Registration path: true makes register_vendor return otp_required. */
   otpRequired: false,
+  /** Login path: an unverified account answers with otp_required, not an error. */
+  loginNeedsOtp: false,
   otpCode: '123456',
 
   /** Which kwargs each method actually declares. Anything else is DROPPED. */
