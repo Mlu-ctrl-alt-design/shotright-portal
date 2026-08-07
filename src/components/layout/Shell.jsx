@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore'
 import { clsx } from '../../utils/clsx'
 import Logo from './Logo'
 import NavDrawer from './NavDrawer'
+import LegalBanner from './LegalBanner'
 
 /**
  * The authenticated partner shell.
@@ -205,6 +206,9 @@ export default function Shell() {
 
         <main id="main" tabIndex={-1} className="min-w-0 flex-1 lg:pl-4">
           <div className="mx-auto w-full max-w-content">
+            {/* Above the page, inside the content column: it belongs to
+                whatever the partner is doing, not to the chrome. */}
+            <LegalBanner />
             <Outlet />
           </div>
         </main>

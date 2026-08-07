@@ -381,6 +381,46 @@ const apiHandlers = [
     )
   }),
 
+  /* --------------------------------------------------------------- legal */
+
+  method('shotright.api.get_legal_documents', () =>
+    ok(
+      bench.legal.map((d) => ({
+        name: d.name,
+        title: d.title,
+        document_type: d.document_type || '',
+        version: d.version || '',
+        effective_date: d.effective_date || '',
+        content: d.content ?? '',
+        required: d.required === undefined ? 1 : d.required,
+        accepted: d.accepted ? 1 : 0,
+        accepted_on: d.accepted_on || '',
+      })),
+    ),
+  ),
+
+  /**
+   * Accept, with the silent-no-op switch built in.
+   *
+   * `legalAcceptSilentlyFails` returns a perfectly ordinary 200 and writes
+   * nothing — the shape of a kwarg the handler never declared. The portal is
+   * required to catch this by reading back, and to say "we couldn't record
+   * that" rather than showing a tick. A test double that cannot reproduce the
+   * bug cannot prove the fix.
+   */
+  method('shotright.api.accept_legal_document', (args) => {
+    const id = args.document || args.legal_document || args.name || args.document_name
+    const doc = bench.legal.find((d) => d.name === id)
+    if (!doc) return docMissing()
+    if (bench.legalAcceptSilentlyFails) return ok({ ok: true })
+    doc.accepted = 1
+    doc.accepted_on = '2026-08-07 10:15:00'
+    /* What they agreed to, not just that they agreed. A record that cannot name
+       a version cannot answer the only question anyone will ever ask of it. */
+    doc.accepted_version = args.version || doc.version || ''
+    return ok({ ok: true })
+  }),
+
   /* -------------------------------------------------------------- drafts */
   method('shotright.api.save_venue_draft', (args) => {
     const id = args.draft_id || `DRAFT-${bench.drafts.length + 1}`

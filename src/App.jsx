@@ -21,6 +21,7 @@ import VenueLayout from './views/vendor/VenueLayout'
 import VenueOverview from './views/vendor/VenueOverview'
 import VenueBookings from './views/vendor/VenueBookings'
 import Profile from './views/vendor/Profile'
+import Legal from './views/vendor/Legal'
 
 export default function App() {
   const rehydrate = useAuthStore((s) => s.rehydrate)
@@ -87,6 +88,10 @@ export default function App() {
               a week, when the partner finally has an hour to deal with it. */}
           <Route path="/venues/:venueId/review" element={<VenueReview />} />
           <Route path="/profile" element={<Profile />} />
+          {/* Reachable from the banner, from Settings, and from a blocked
+              submit. Always reachable — a partner must be able to re-read what
+              they agreed to without having to ask us for a copy. */}
+          <Route path="/legal" element={<Legal />} />
         </Route>
       </Route>
 

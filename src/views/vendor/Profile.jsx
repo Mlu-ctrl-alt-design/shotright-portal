@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { useProfile, useUpdateProfile } from '../../hooks/useVendor'
 import { useAuthStore } from '../../store/authStore'
 import { WRITABLE_PROFILE_FIELDS } from '../../services/profile'
@@ -201,6 +202,19 @@ export default function Profile() {
             Change password
           </Button>
         </form>
+      </Card>
+
+      {/* A permanent way back to what you signed. Partners are entitled to
+          re-read an agreement without having to ask us to send them a copy,
+          and burying it behind a banner that only appears when something is
+          outstanding would mean it vanishes the moment they accept. */}
+      <Card title="Terms and policies">
+        <p className="text-sm text-ink-700">
+          <Link className="text-brand-700 underline" to="/legal">
+            Read the documents you’ve accepted
+          </Link>
+          , and anything new waiting for you.
+        </p>
       </Card>
     </div>
   )

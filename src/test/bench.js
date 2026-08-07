@@ -86,6 +86,13 @@ const initial = () => ({
        truthful default is what makes an opt-in test meaningful. */
     update_product_item: false,
     delete_product_item: false,
+
+    /* Legal documents were announced on 7 Aug with no method name attached, so
+       the portal is guessing at names. `true` here models the guess landing;
+       tests that want the not-deployed path set them false. Both paths matter
+       and both are covered. */
+    get_legal_documents: true,
+    accept_legal_document: true,
   },
 
   /** Registration path: true makes register_vendor return otp_required. */
@@ -135,6 +142,26 @@ const initial = () => ({
   items: [],
   /** Keyed by venue docname. Empty AND unreadable are different states. */
   bookings: {},
+
+  /**
+   * Legal documents, and whether this vendor has accepted each.
+   *
+   * Empty by default so the whole legal apparatus is invisible until a test
+   * says otherwise — which also proves the shell, the wizard and the submit
+   * path are unaffected on a bench with nothing to accept.
+   */
+  legal: [],
+
+  /**
+   * THE FAILURE THIS SUITE EXISTS FOR: accept returns 200 and writes nothing.
+   *
+   * Not hypothetical. Frappe drops kwargs a method does not declare, silently,
+   * at HTTP 200 — this project has shipped six bugs of exactly that shape. On
+   * a price field it costs a retype. On a consent record it puts "Accepted 7
+   * August" on screen over an empty table, and the first time anyone looks for
+   * that record will be a dispute.
+   */
+  legalAcceptSilentlyFails: false,
   photos: {},
   files: [],
   drafts: [],

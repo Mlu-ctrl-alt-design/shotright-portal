@@ -692,6 +692,99 @@ Worth a decision separately: the PRD still lists **"bookings management"** under
 *Out of scope*. Reading a diary is now shipped and clearly in. Acting on one is
 the line, and it's the difference between a tab and a product area.
 
+### 18. Legal documents — built, guessing at the contract
+
+> **Told 7 Aug: "we've added legal documents in the backend, vendors need to
+> accept these too."** No method name, no shape, no doctype came with it — so
+> everything below is the portal's best guess, and the four questions at the
+> end are the ones that decide whether it works on the first deploy.
+
+**The names we try, in order.** First match wins; the rest are never called:
+
+```
+list    get_legal_documents · get_vendor_legal_documents
+        list_legal_documents · get_terms
+accept  accept_legal_document · accept_legal_documents
+        record_legal_acceptance · accept_terms
+```
+
+**The shape we read**, with aliases so near-misses land:
+
+```
+{ name, title|document_name|document_type, version|document_version|revision,
+  effective_date, content|body|document_html, url|file_url,
+  required, accepted|is_accepted, accepted_on }
+```
+
+`required` defaults to **true** when absent and `accepted` defaults to
+**false** — both default to the cautious reading, because the cost of being
+wrong that way is asking someone to accept twice and the cost the other way is
+a venue going live under an agreement nobody made.
+
+**What we send on accept:** every alias for the document id at once
+(`document`, `legal_document`, `name`, `document_name`), plus `version` and
+`accepted: 1`. Frappe drops what the handler doesn't declare, so this costs
+nothing and removes a whole class of silent no-op.
+
+#### The one thing we need you to know we're doing
+
+**We read the acceptance back before we tell the partner it was recorded.** A
+200 from Frappe means the request routed, not that anything was written — and
+this project has shipped six bugs of exactly that shape. On a menu price that
+costs a retype. On a consent record it would put *"Accepted 7 August 2026"* on
+screen over an empty table, and nobody would find out until there was a dispute
+and nothing to produce. If `get_legal_documents` doesn't come back showing the
+document accepted, the partner is told it didn't save. Please don't optimise
+that read-back away by making accept return the document — actually, **do**:
+if `accept_legal_document` returns the updated document, say so and we'll trust
+its response instead of making a second call.
+
+#### Where it's enforced — a product decision we made, flag it if it's wrong
+
+A partner can sign in, read their dashboard, edit venues and answer a decline
+with a banner up. **A venue cannot be submitted for approval until the
+outstanding documents are accepted** — that's the moment a listing enters your
+review queue and starts heading for real customers.
+
+The alternative is blocking the whole portal at login. Stronger legal position,
+and it's one constant to change (`ENFORCE_AT` in `services/legal.js`). We
+didn't, because a misconfigured document or a flaky accept endpoint would lock
+every partner out of their own data at once, and the portal can't tell that
+apart from a legitimate block from the inside.
+
+**We never enforce what we can't ask.** If the list endpoint is absent we can
+neither show a partner what they're agreeing to nor record that they did, so we
+don't hold them to it — a venue reaching review unaccepted gets caught by a
+human, a partner who can't submit because an endpoint is missing gets caught by
+nobody. Same for the wizard: the draft is saved server-side *before* the
+redirect, so five steps of work survive being sent to the legal screen.
+
+#### Four questions
+
+1. **What are the real method names and the real field names?** One reply and
+   the list above collapses to the truth. If one of our guesses is already
+   right, nothing changes at all.
+2. **Is acceptance versioned?** We send `version` and display it, on the
+   principle that *"they accepted"* is a much weaker record than *"they
+   accepted v2.1 on this date"*. If you publish a new version of the Terms,
+   does `accepted` go back to false for everyone? We assume yes and will show
+   the banner again — confirm, because the alternative (a silent update nobody
+   re-accepts) is worth knowing about deliberately rather than by accident.
+3. **Is the document body HTML, and is it sanitised on save?** We render it
+   with `dangerouslySetInnerHTML`, the same as the wizard renders a partner's
+   own summary. That's fine for staff-authored copy off our own bench and not
+   fine if the field can be edited by anyone else.
+4. **What about registration?** Right now nothing on the register screen
+   mentions terms, deliberately: `register_vendor` would silently drop an
+   `accepted_terms` kwarg it doesn't declare, and a tickbox whose state we
+   can't record is worse than no tickbox. If you want acceptance captured at
+   sign-up, it needs either a declared field on `register_vendor` or a
+   guest-readable list endpoint — tell us which and we'll wire it.
+
+Covered by `src/test/legal.test.jsx` (24 checks) and
+`verification/verify23.mjs` (37 checks), including a fake bench that reproduces
+the silent-200 write so the read-back is provably wired.
+
 ### 13. Do drafts expire?
 
 The resume card currently says **"nothing expires"**. If there is a cleanup job,

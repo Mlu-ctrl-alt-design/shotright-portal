@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useCreateVenue } from '../../../hooks/useVendor'
 import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
 import { useDraft, useSetupDraft } from '../../../hooks/useSetupDraft'
+import { useLegalStanding } from '../../../hooks/useLegalStanding'
 import { WIZARD_STEPS, stepIndex } from '../../../services/wizardSteps'
 import {
   FIELD_STEP,
@@ -134,6 +135,10 @@ function Wizard({ resumeId, draft, draftError }) {
   const [submitError, setSubmitError] = useState(null)
   const [created, setCreated] = useState(null)
   const createVenue = useCreateVenue()
+  /* Submitting is where a listing enters our review queue and starts heading
+     for real customers, so it is where the agreement has to be in place. See
+     `ENFORCE_AT` in services/legal.js for why here and not at login. */
+  const legal = useLegalStanding()
 
   const step = STEPS[currentIndex]
   const isLast = currentIndex === STEPS.length - 1
@@ -227,6 +232,27 @@ function Wizard({ resumeId, draft, draftError }) {
         [s.key]: new Set([...(prev[s.key] || []), ...Object.keys(errors)]),
       }))
       setSubmitError(errors[field])
+      return
+    }
+
+    /**
+     * THE LEGAL GATE — and the reason it is placed AFTER validation.
+     *
+     * By this point the partner has filled in five steps. Sending them away
+     * from that without their work being safe would be the single most
+     * expensive thing this wizard could do, so the draft is written first and
+     * only then do we navigate. They come back to `/venues/new?resume=…` with
+     * everything where they left it.
+     *
+     * `legal.blocks` is false while the answer is still loading and false when
+     * the bench cannot answer at all — a venue reaching review unaccepted is
+     * something a human catches, and a partner blocked from submitting by an
+     * endpoint that is simply absent is not.
+     */
+    if (legal.blocks) {
+      setSubmitError(null)
+      await draftState.saveNow?.()
+      navigate(`/legal?from=submit&resume=${draftState.id || ''}`)
       return
     }
 
@@ -436,6 +462,27 @@ function Wizard({ resumeId, draft, draftError }) {
           <Alert variant="warning">
             We couldn’t save your progress: {draftState.error} Don’t close this tab — press Next to
             try again, or finish and submit.
+          </Alert>
+        </div>
+      )}
+
+      {/* Said on the last step, BEFORE the button is pressed. Being redirected
+          off a finished form is a bad surprise however carefully the work is
+          preserved — and a partner who knows what is coming can accept first
+          and submit once. */}
+      {isLast && legal.blocks && (
+        <div className="mb-5">
+          <Alert variant="warning">
+            <p className="font-bold">One thing before you submit</p>
+            <p className="mt-1">
+              There{legal.outstanding.length === 1 ? ' is a document' : ' are documents'} to accept
+              before a venue can go to our reviewers. Everything here is saved — press Submit and
+              we’ll take you there, or{' '}
+              <Link className="underline" to="/legal?from=submit">
+                read {legal.outstanding.length === 1 ? 'it' : 'them'} now
+              </Link>
+              .
+            </p>
           </Alert>
         </div>
       )}
