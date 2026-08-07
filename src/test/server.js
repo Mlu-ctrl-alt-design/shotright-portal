@@ -307,6 +307,35 @@ const apiHandlers = [
     return ok({ name })
   }),
 
+  /**
+   * Item edit / delete, and bookings — none of which exist on the real bench.
+   *
+   * `bench.deploy` starts them FALSE, because "not deployed" is the truthful
+   * default and a test that wants the happy path should have to say so. That is
+   * the opposite of how the rest of this file is set up, and deliberately: for
+   * everything else the endpoint exists and a test opts OUT; for these the
+   * endpoint doesn't and a test opts IN.
+   */
+  method('shotright.api.update_product_item', (args) => {
+    const item = bench.items.find((i) => i.name === (args.item || args.name))
+    if (!item) return docMissing()
+    if (args.item_name !== undefined) item.item_name = args.item_name
+    if (args.price !== undefined) item.price = Number(args.price) || 0
+    if (args.description !== undefined) item.description = args.description
+    return ok({ ok: true })
+  }),
+
+  method('shotright.api.delete_product_item', (args) => {
+    const id = args.item || args.name
+    const before = bench.items.length
+    bench.items = bench.items.filter((i) => i.name !== id)
+    return before === bench.items.length ? docMissing() : ok({ ok: true })
+  }),
+
+  method('shotright.api.get_venue_bookings', ({ venue_name }) =>
+    ok(bench.bookings[venue_name] || []),
+  ),
+
   /* -------------------------------------------------------------- drafts */
   method('shotright.api.save_venue_draft', (args) => {
     const id = args.draft_id || `DRAFT-${bench.drafts.length + 1}`
@@ -444,6 +473,23 @@ const apiHandlers = [
 
   /* The Mood doctype is read through Frappe's generic resource API. */
   http.get('*/api/resource/Mood', () => HttpResponse.json({ data: bench.moods.map((m) => ({ ...m })) })),
+
+  /**
+   * Any `shotright.api.*` method with no handler above is NOT DEPLOYED.
+   *
+   * Last in the list, so every specific handler wins first. This exists because
+   * the portal legitimately probes a LIST of candidate names for endpoints
+   * nobody has committed to yet — update_product_item, then edit_product_item,
+   * then set_product_item. Without this, the second and third probes hit
+   * `onUnhandledRequest: 'error'` and surfaced as a network failure, so the app
+   * reported "something went wrong" instead of "the server has no way to do
+   * this" — the wrong message, from the right code.
+   *
+   * A truthful 404 here is what lets a capability probe mean what it says.
+   */
+  http.all('*/api/method/shotright.api.:method', ({ params }) =>
+    methodMissing(`shotright.api.${params.method}`),
+  ),
 
   /* Photo <img> requests. jsdom won't decode them, but they must not 'error'. */
   http.get('*/files/*', () => new HttpResponse(null, { status: 200 })),

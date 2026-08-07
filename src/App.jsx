@@ -17,6 +17,9 @@ import VenueWizard from './views/vendor/wizard/VenueWizard'
 import VenueMenu from './views/vendor/VenueMenu'
 import VenueReview from './views/vendor/VenueReview'
 import VenuePreview from './views/vendor/VenuePreview'
+import VenueLayout from './views/vendor/VenueLayout'
+import VenueOverview from './views/vendor/VenueOverview'
+import VenueBookings from './views/vendor/VenueBookings'
 import Profile from './views/vendor/Profile'
 
 export default function App() {
@@ -68,13 +71,21 @@ export default function App() {
             path="/venues/pending"
             element={<Navigate to="/venues?status=pending" replace />}
           />
-          <Route path="/venues/:venueId/edit" element={<VenueForm />} />
-          <Route path="/venues/:venueId/menu" element={<VenueMenu />} />
+          {/* One venue, one place. A LAYOUT rather than a new page, so every
+              existing URL keeps working and simply gains the tab bar — no
+              bookmark breaks and nothing the wizard or the decline screen
+              navigates to has to change. */}
+          <Route path="/venues/:venueId" element={<VenueLayout />}>
+            <Route index element={<VenueOverview />} />
+            <Route path="edit" element={<VenueForm />} />
+            <Route path="menu" element={<VenueMenu />} />
+            <Route path="bookings" element={<VenueBookings />} />
+            <Route path="preview" element={<VenuePreview />} />
+          </Route>
           {/* A decline is a decision made ABOUT a venue, so it lives on the
               venue rather than in a notifications pile — it is still there in
               a week, when the partner finally has an hour to deal with it. */}
           <Route path="/venues/:venueId/review" element={<VenueReview />} />
-          <Route path="/venues/:venueId/preview" element={<VenuePreview />} />
           <Route path="/profile" element={<Profile />} />
         </Route>
       </Route>

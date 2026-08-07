@@ -7,6 +7,7 @@ import {
   useCreateHeading,
   useCreateItem,
   useDeleteItem,
+  useUpdateItem,
   useImportMenu,
 } from '../../hooks/useVendor'
 import { Button, Input, Card, Alert, EmptyState } from '../../components/ui'
@@ -34,6 +35,7 @@ export default function VenueMenu() {
   const createHeading = useCreateHeading(venueId)
   const createItem = useCreateItem(venueId)
   const deleteItem = useDeleteItem(venueId)
+  const updateItem = useUpdateItem(venueId)
   const importMenu = useImportMenu(venueId)
   const qc = useQueryClient()
 
@@ -253,24 +255,13 @@ export default function VenueMenu() {
             ) : (
               <ul className="divide-y divide-gray-200">
                 {heading.items.map((item) => (
-                  <li key={item.name} className="flex items-center justify-between gap-4 py-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-ink-900">{item.item_name}</p>
-                      {item.description && (
-                        <p className="truncate text-xs text-ink-500">{item.description}</p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-4">
-                      <span className="text-sm font-medium text-ink-900">{zar.format(item.price)}</span>
-                      <button
-                        type="button"
-                        onClick={() => deleteItem.mutate(item.name)}
-                        className="text-sm font-medium text-red-600 hover:underline"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </li>
+                  <MenuItemRow
+                    key={item.name}
+                    item={item}
+                    zar={zar}
+                    onSave={(values) => updateItem.mutateAsync({ itemId: item.name, ...values })}
+                    onRemove={() => deleteItem.mutateAsync(item.name)}
+                  />
                 ))}
               </ul>
             )}
@@ -309,5 +300,150 @@ export default function VenueMenu() {
         ))
       )}
     </div>
+  )
+}
+
+/**
+ * One menu item — readable, then editable in place.
+ *
+ * ⚠️ A partner could add a dish and delete it, but never CHANGE one. A price
+ * typed as R450 instead of R45 had to be removed and retyped, and the delete
+ * they'd need for that goes through `frappe.client.delete`, which the Vendor
+ * role almost certainly may not call — so the mistake was, in practice, stuck
+ * on the menu.
+ *
+ * THE PRICE FIELD KEEPS THE TYPED STRING. This is the same trap the latitude
+ * input fell into: a controlled input whose value comes from a parsed number
+ * discards any keystroke that doesn't parse, so "12." loses its point and the
+ * partner cannot type a decimal. Prices have decimals. The raw text is held
+ * here and parsed on save.
+ */
+function MenuItemRow({ item, zar, onSave, onRemove }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState({
+    item_name: item.item_name,
+    price: String(item.price ?? ''),
+    description: item.description || '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+
+  const start = () => {
+    setProblem(null)
+    setDraft({
+      item_name: item.item_name,
+      price: String(item.price ?? ''),
+      description: item.description || '',
+    })
+    setEditing(true)
+  }
+
+  const save = async (event) => {
+    event.preventDefault()
+    setBusy(true)
+    setProblem(null)
+    try {
+      const result = await onSave({
+        item_name: draft.item_name.trim(),
+        price: Number(draft.price) || 0,
+        description: draft.description.trim(),
+      })
+      /* `saved: false` is not an exception — it means the bench has no endpoint
+         for this. Their typed values stay on screen either way, so nothing has
+         to be remembered and retyped from nothing. */
+      if (result && result.saved === false) {
+        setProblem(
+          'This app can’t change a menu item yet — the server has no way to do it. ' +
+            'Your wording is still here, so you can copy it into a new item and remove this one. ' +
+            'We’ve asked for it.',
+        )
+        return
+      }
+      setEditing(false)
+    } catch (err) {
+      setProblem(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    setProblem(null)
+    try {
+      const result = await onRemove()
+      if (result && result.deleted === false) {
+        setProblem(
+          'This app isn’t allowed to remove menu items on your server yet, so this one is still ' +
+            'on your menu. Nothing has changed. We’ve reported it.',
+        )
+      }
+    } catch (err) {
+      setProblem(err.message)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <li className="flex items-center justify-between gap-4 py-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-ink-900">{item.item_name}</p>
+          {item.description && <p className="truncate text-xs text-ink-500">{item.description}</p>}
+          {problem && <p className="mt-1 text-xs font-medium text-red-700">{problem}</p>}
+        </div>
+        <div className="flex shrink-0 items-center gap-4">
+          <span className="text-sm font-medium text-ink-900">{zar.format(item.price)}</span>
+          <button
+            type="button"
+            onClick={start}
+            aria-label={`Edit ${item.item_name}`}
+            className="text-sm font-medium text-brand-600 hover:underline"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={remove}
+            aria-label={`Remove ${item.item_name}`}
+            className="text-sm font-medium text-red-600 hover:underline"
+          >
+            Remove
+          </button>
+        </div>
+      </li>
+    )
+  }
+
+  return (
+    <li className="py-3">
+      <form onSubmit={save} className="flex flex-wrap items-end gap-3">
+        <Input
+          label="Item"
+          value={draft.item_name}
+          onChange={(e) => setDraft((d) => ({ ...d, item_name: e.target.value }))}
+          required
+          className="min-w-40 flex-1"
+        />
+        <Input
+          label="Price (ZAR)"
+          inputMode="decimal"
+          value={draft.price}
+          onChange={(e) => setDraft((d) => ({ ...d, price: e.target.value }))}
+          className="w-32"
+        />
+        <Input
+          label="Description"
+          value={draft.description}
+          onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+          className="min-w-40 flex-1"
+        />
+        <Button type="submit" size="sm" loading={busy}>
+          Save
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </form>
+      {problem && <p className="mt-2 text-sm font-medium text-red-700">{problem}</p>}
+    </li>
   )
 }

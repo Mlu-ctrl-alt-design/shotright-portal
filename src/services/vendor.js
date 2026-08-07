@@ -1060,22 +1060,95 @@ export const createItem = (headingId, payload) =>
   )()
 
 /**
- * GAP: the collection has no `delete_product_item`.
+ * Changing a menu item, and removing one.
  *
- * This used to call the mock unconditionally, which meant that against the real
- * bench the row vanished from the screen, the partner believed it was gone, and
- * it was still on their menu in the customer app after a refresh. A silent
- * no-op dressed as a success is worse than no delete at all.
+ * ⚠️ THE MENU IS HALF-BUILT, and this is the half that was missing. A partner
+ * can add a heading and add items. Until now they could not CHANGE one at all
+ * — a dish priced at R450 instead of R45 had to be deleted and retyped — and
+ * the delete they'd have to use for that is itself unreliable.
  *
- * `frappe.client.delete` is the generic fallback and works if the Vendor role
- * has delete permission on the item doctype. If it doesn't, the partner gets a
- * real permission error and knows the item is still there — which is the truth.
+ * `frappe.client.delete` needs delete permission on `Product Item`, and we know
+ * from the venue photo work that **the Vendor role has no doctype access at
+ * all**; everything legitimate goes through whitelisted `shotright.api.*`
+ * methods that elevate. So the generic call is very likely refused on the real
+ * bench, which means "Remove" has probably never worked for anybody.
+ *
+ * Both go through a LIST of candidate method names, tried in order. Six name
+ * mismatches on this project say guessing one is not a strategy; a list costs
+ * a 404 the first time and nothing after that, and whichever the backend picks,
+ * the portal finds it.
  */
-export const deleteItem = (itemId) =>
-  pick(
-    () => call('frappe.client.delete', { doctype: 'Product Item', name: itemId }),
-    () => mockBackend.deleteItem(itemId),
-  )()
+export const ITEM_UPDATE_METHODS = [
+  'shotright.api.update_product_item',
+  'shotright.api.edit_product_item',
+  'shotright.api.set_product_item',
+]
+
+export const ITEM_DELETE_METHODS = ['shotright.api.delete_product_item']
+
+/** Try each name; `undefined` from all of them means none is deployed. */
+const firstDeployed = async (methods, args) => {
+  for (const method of methods) {
+    const result = await withFallback(
+      method,
+      async () => (await call(method, args)) ?? { ok: true },
+      async () => undefined,
+    )
+    if (result !== undefined) return { result, method }
+  }
+  return null
+}
+
+/**
+ * Edit an item.
+ *
+ * Returns `{saved: false, reason: 'no-endpoint'}` rather than throwing when the
+ * bench has no way to do it — the caller turns that into words a partner can
+ * act on, and keeps their typed values on screen so the work isn't lost.
+ */
+export const updateItem = async (itemId, payload) => {
+  if (USE_MOCKS) return { saved: true, item: await mockBackend.updateItem?.(itemId, payload) }
+
+  const body = { item: itemId, name: itemId, item_name: payload.item_name }
+  if (payload.price !== undefined) body.price = payload.price
+  if (payload.description !== undefined) body.description = payload.description
+
+  const attempt = await firstDeployed(ITEM_UPDATE_METHODS, body)
+  if (attempt) return { saved: true, method: attempt.method }
+
+  return { saved: false, reason: 'no-endpoint' }
+}
+
+/**
+ * Remove an item.
+ *
+ * A whitelisted method first, then the generic delete — which is kept because
+ * a bench that DOES grant the permission should still work, and dropped to
+ * quietly if it doesn't. `saved: false` is reported, never swallowed: a row
+ * that vanishes from the screen and stays on the customer's menu is the exact
+ * failure this function was rewritten to stop.
+ */
+export const deleteItem = async (itemId) => {
+  if (USE_MOCKS) return mockBackend.deleteItem(itemId)
+
+  const attempt = await firstDeployed(ITEM_DELETE_METHODS, { item: itemId, name: itemId })
+  if (attempt) return { deleted: true, method: attempt.method }
+
+  try {
+    await call('frappe.client.delete', { doctype: 'Product Item', name: itemId })
+    return { deleted: true, method: 'frappe.client.delete' }
+  } catch (err) {
+    // A permission refusal is the expected answer on this bench, and it is not
+    // the partner's fault or their problem to solve. Anything else is a real
+    // error and still surfaces.
+    if (err?.status === 403 || /PermissionError|not permitted|doctype access/i.test(
+      `${err?.excType || ''} ${err?.message || ''} ${err?.detail || ''}`,
+    )) {
+      return { deleted: false, reason: 'not-allowed' }
+    }
+    throw err
+  }
+}
 
 export const importMenu = (venueId, rows) =>
   pick(

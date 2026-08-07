@@ -1,6 +1,6 @@
 # UI tests
 
-React Testing Library + vitest + MSW. **80 checks, ~29 seconds**, run with:
+React Testing Library + vitest + MSW. **99 checks, ~26 seconds**, run with:
 
 ```bash
 npm test
@@ -27,6 +27,7 @@ Nearly every bug on this project has lived in the seams between those pieces.
 | `menu.test.jsx` | adding, editing and deleting menu items |
 | `resume-and-photos.test.jsx` | picking up a saved setup, uploading photos |
 | `password-reset.test.jsx` | resetting a password, resending a verification code |
+| `venue-page.test.jsx` | the single venue page and its tabs, editing and removing menu items, bookings |
 
 ## The rule these follow
 
