@@ -86,13 +86,45 @@ describe('one venue, one place', () => {
   })
 })
 
+/**
+ * A local `YYYY-MM-DD`, written out longhand rather than imported from the
+ * service it checks.
+ *
+ * `toISOString()` is UTC and South Africa is UTC+2, so between midnight and
+ * 02:00 it names yesterday — the exact hours a late venue is still open and
+ * most likely to be looking at tomorrow's book. Two independent implementations
+ * is the point: if the service ever drifts to UTC, the fixture and the request
+ * stop agreeing and the suite says so.
+ */
+const day = (offset = 0) => {
+  const d = new Date()
+  d.setDate(d.getDate() + offset)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+const booking = (over = {}) => ({
+  name: 'BK-1',
+  arrival_date: day(),
+  arrival_time: '19:30:00',
+  adults: 4,
+  children: 0,
+  contact_name: 'Nomsa Dlamini',
+  contact_cell_phone: '+27 82 111 2222',
+  ...over,
+})
+
+const bookingCalls = () => bench.calls.filter((c) => c.method === 'get_venue_bookings')
+
 describe('bookings', () => {
   it('says it cannot see them, rather than showing an empty diary', async () => {
-    /* THE ASSERTION THIS TAB EXISTS FOR. "No bookings yet" and "we can't read
-       your bookings" are completely different sentences to a restaurant owner:
-       one is a quiet Tuesday, the other is a reason to stop trusting the portal
-       on a Friday night. Nothing serves bookings yet, so it must say the
-       second. */
+    /* THE ASSERTION THIS TAB EXISTS FOR, and it outlives the endpoint shipping:
+       partners' benches update at different times, so a portal one release
+       ahead of a server still has to say the honest thing. "No bookings yet"
+       and "we can't read your bookings" are completely different sentences to a
+       restaurant owner — one is a quiet Tuesday, the other is a reason to stop
+       trusting the portal on a Friday night. */
+    bench.deploy.get_venue_bookings = false
     renderApp({ route: `${VENUE}/bookings`, signedIn: true })
 
     expect(await screen.findByText(/bookings aren’t switched on yet/i)).toBeInTheDocument()
@@ -106,31 +138,129 @@ describe('bookings', () => {
     expect(body).not.toMatch(/we’ve asked|we’ve reported|we’ve flagged|shotright\.api|endpoint|server/i)
   })
 
-  it('shows real bookings the day an endpoint answers', async () => {
-    bench.deploy.get_venue_bookings = true
-    bench.bookings['VEN-00001'] = [
-      {
-        name: 'BK-1',
-        customer_name: 'Nomsa Dlamini',
-        booking_datetime: '2026-08-02 19:30:00',
-        party_size: 4,
-        phone: '+27 82 111 2222',
-        status: 'Confirmed',
-      },
-    ]
+  it('shows who is coming, from the fields the endpoint actually returns', async () => {
+    bench.bookings['VEN-00001'] = [booking()]
     renderApp({ route: `${VENUE}/bookings`, signedIn: true })
 
-    expect(await screen.findByText(/Nomsa Dlamini/)).toBeInTheDocument()
+    expect(await screen.findByText('Nomsa Dlamini')).toBeInTheDocument()
+    expect(screen.getByText('19:30')).toBeInTheDocument()
     expect(screen.getByText(/4 people/)).toBeInTheDocument()
     expect(screen.queryByText(/aren’t switched on yet/i)).not.toBeInTheDocument()
   })
 
+  it('puts the phone number one tap from dialling', async () => {
+    /* A booking sheet you have to retype numbers off is a booking sheet that
+       stays on paper. */
+    bench.bookings['VEN-00001'] = [booking()]
+    renderApp({ route: `${VENUE}/bookings`, signedIn: true })
+
+    const call = await screen.findByRole('link', { name: '+27 82 111 2222' })
+    expect(call).toHaveAttribute('href', 'tel:+27821112222')
+  })
+
+  it('asks for today onwards, and never for more than the server will give', async () => {
+    bench.bookings['VEN-00001'] = [booking()]
+    renderApp({ route: `${VENUE}/bookings`, signedIn: true })
+    await screen.findByText('Nomsa Dlamini')
+
+    const [{ args }] = bookingCalls()
+    expect(args.from_date).toBe(day())
+    expect(args.to_date).toBeUndefined()
+    /* The service caps at 500 and cints whatever arrives. Asking for more than
+       it will return would make a truncated list look complete. */
+    expect(Number(args.limit)).toBeLessThanOrEqual(500)
+  })
+
+  it('groups by day and says which day is today', async () => {
+    bench.bookings['VEN-00001'] = [
+      booking({ name: 'BK-1', arrival_time: '19:30:00' }),
+      booking({ name: 'BK-2', arrival_date: day(1), arrival_time: '12:00:00', contact_name: 'Sipho Khumalo' }),
+    ]
+    renderApp({ route: `${VENUE}/bookings`, signedIn: true })
+
+    expect(await screen.findByRole('heading', { name: /^today ·/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^tomorrow ·/i })).toBeInTheDocument()
+  })
+
+  it('orders the evening forwards', async () => {
+    /* A service runs forwards. A list that opens on the 21:00 table is a list
+       somebody has to re-sort in their head at the door. */
+    bench.bookings['VEN-00001'] = [
+      booking({ name: 'BK-1', arrival_time: '21:00:00', contact_name: 'Late Table' }),
+      booking({ name: 'BK-2', arrival_time: '18:00:00', contact_name: 'Early Table' }),
+    ]
+    renderApp({ route: `${VENUE}/bookings`, signedIn: true })
+
+    await screen.findByText('Early Table')
+    const names = screen.getAllByText(/Table$/).map((n) => n.textContent)
+    expect(names).toEqual(['Early Table', 'Late Table'])
+  })
+
+  it('trusts the server’s party size and names children separately', async () => {
+    /* `party_size` is computed server-side and `booking_register.py` computes
+       it the same way. Two surfaces disagreeing about whether children count
+       toward covers is the bug worth not having — so we show the server's
+       number, and split it out only when there ARE children, because a high
+       chair is a different table. */
+    bench.bookings['VEN-00001'] = [booking({ adults: 2, children: 3 })]
+    renderApp({ route: `${VENUE}/bookings`, signedIn: true })
+
+    expect(await screen.findByText(/5 people · 2 adults, 3 children/)).toBeInTheDocument()
+  })
+
+  it('never badges a booking as confirmed, because nothing says it is', async () => {
+    /* The endpoint returns no status and is not gated on workflow_state. A
+       "Confirmed" badge would be us making a promise on the server's behalf. */
+    bench.bookings['VEN-00001'] = [booking()]
+    renderApp({ route: `${VENUE}/bookings`, signedIn: true })
+
+    await screen.findByText('Nomsa Dlamini')
+    expect(screen.queryByText(/confirmed|pending|declined/i)).not.toBeInTheDocument()
+  })
+
+  it('can look back at earlier bookings without losing today', async () => {
+    /* Upcoming is the working view. Earlier exists so "where did Friday's
+       booking go?" has an answer other than us having quietly hidden it. */
+    bench.bookings['VEN-00001'] = [
+      booking({ name: 'BK-1', contact_name: 'Tonight' }),
+      booking({ name: 'BK-2', arrival_date: day(-3), contact_name: 'Last Week' }),
+    ]
+    const { user } = renderApp({ route: `${VENUE}/bookings`, signedIn: true })
+
+    await screen.findByText('Tonight')
+    expect(screen.queryByText('Last Week')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /earlier/i }))
+
+    expect(await screen.findByText('Last Week')).toBeInTheDocument()
+    expect(screen.queryByText('Tonight')).not.toBeInTheDocument()
+
+    const past = bookingCalls().at(-1).args
+    expect(past.to_date).toBe(day(-1))
+    expect(past.from_date).toBeUndefined()
+  })
+
+  it('offers a way back when the read fails, instead of an empty diary', async () => {
+    /* Deployed and throwing is a bad minute, not a missing feature — so the way
+       out is to try again, not an explanation of our roadmap. Ownership is
+       checked server-side, so an unknown venue throws rather than answering
+       with an empty list, which would read as "you have no bookings". */
+    renderApp({ route: '/venues/NOT-MINE/bookings', signedIn: true })
+
+    expect(await screen.findByText(/couldn’t load your bookings just now/i)).toBeInTheDocument()
+    expect(screen.getByText(/nothing has changed about them/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument()
+    expect(screen.queryByText(/no one is booked in yet/i)).not.toBeInTheDocument()
+  })
+
   it('says an empty diary is empty only when it actually knows', async () => {
-    bench.deploy.get_venue_bookings = true
     bench.bookings['VEN-00001'] = []
     renderApp({ route: `${VENUE}/bookings`, signedIn: true })
 
-    expect(await screen.findByText(/no bookings for this venue yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no one is booked in yet/i)).toBeInTheDocument()
+    /* And it is not hedged. Once the server has answered, this is a fact about
+       the diary, so saying it plainly is the honest thing. */
+    expect(screen.queryByText(/aren’t switched on yet/i)).not.toBeInTheDocument()
   })
 })
 

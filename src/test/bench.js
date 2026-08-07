@@ -76,11 +76,16 @@ const initial = () => ({
     'frappe.client.set_value': true,
     upload_file: true,
 
-    /* False on purpose — none of these exist on the real bench yet, and the
+    /* Shipped 7 Aug, so `true` is now the truthful default. The flag stays so a
+       test can still put it back to false: partners' benches are updated at
+       different times, and the "we can't see your bookings" path has to keep
+       working for whoever is a release behind. */
+    get_venue_bookings: true,
+
+    /* False on purpose — these do not exist on the real bench yet, and the
        truthful default is what makes an opt-in test meaningful. */
     update_product_item: false,
     delete_product_item: false,
-    get_venue_bookings: false,
   },
 
   /** Registration path: true makes register_vendor return otp_required. */

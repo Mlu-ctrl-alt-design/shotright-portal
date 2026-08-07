@@ -638,41 +638,59 @@ new item.
 on `Product Item`.** If it can, "Remove" works today and only edit is missing;
 if it can't, both are blocked and a partner's menu is currently append-only.
 
-### 17. Bookings — nothing exists, and the PRD says it shouldn't
+### 17. Bookings — ✅ SHIPPED 7 Aug, reading live
 
 > **Asked for 28 Jul: "we also need to see bookings within each venue."**
-
-Flagging one thing before the ask: the PRD lists **"bookings management"** under
-*Out of scope*, so there is no design, no doctype and no endpoint. Treating the
-request as a deliberate scope change rather than an oversight — but it is worth
-someone confirming that, because it is the difference between a tab and a
-product area.
-
-The venue page now has a **Bookings** tab. It says, in as many words, that the
-app cannot read bookings and that the partner should keep taking them however
-they do now. It does **not** show an empty table: "no bookings yet" and "we
-can't see your bookings" are completely different sentences to a restaurant
-owner — one is a quiet Tuesday, the other is a reason to stop trusting the
-portal on a Friday night.
-
-What would make it real:
+> **Answered 7 Aug: `shotright.api.get_venue_bookings`.**
 
 ```
-get_venue_bookings(venue_name) -> [ {name, customer_name, booking_datetime,
-                                     party_size, phone, status, notes} ]
+get_venue_bookings(vendor_email, venue_name, from_date, to_date, limit)
+  -> [ {name, arrival_date, arrival_time, adults, children, party_size,
+        contact_name, contact_cell_phone, creation} ]
 ```
 
-We read a generous set of aliases for each field, so near-misses are fine. The
-portal tries `get_venue_bookings`, `list_venue_bookings` and `get_bookings`.
+Identity from `get_current_vendor_email()`, ownership checked against
+`Venue.vendor` before a row is read, no email parameter — so ADR-0004 holds and
+nothing about how we authenticate changed. The tab reads live; the only frontend
+change was the field mapping.
 
-Two questions that decide how much more there is to build:
+**Four backend decisions, and what the portal does with each.** All four are
+right, and all four are load-bearing on this screen:
 
-1. **Is a booking a doctype yet?** If bookings live somewhere else entirely, or
-   are only in the customer app, this is a bigger conversation than an endpoint.
-2. **Does a partner ACT on a booking** — confirm, decline, mark as arrived — or
-   only read it? We have written the shape for `confirm_booking` /
-   `decline_booking` but wired nothing to a screen, because a button that
-   cannot do anything is worse than no button.
+| Decision | What the screen does |
+| --- | --- |
+| `contact_email` withheld — the customer got their own confirmation from `create_booking` | Nothing shows an email. Name + cell is what running a door needs, and there's a `tel:` link on the number so it dials |
+| `party_size` computed server-side, matching `booking_register.py` | We render the server's number and never re-derive it. Adults/children are split out **only when there are children**, because a high chair is a different table — but the total is always yours |
+| Not gated on `workflow_state` | Correct, and invisible on our side by design: a venue back in Pending on Thursday still shows Friday's arrivals |
+| `from_date`/`to_date` inclusive and independent; `limit` cint'd and capped at 500 | Upcoming sends `from_date = today` computed in **local** time (`toISOString()` is UTC and would show tomorrow's book to anyone opening the portal before 02:00 SAST). "Earlier" sends `to_date = yesterday`. We ask for 100 and say "showing the first 100" when a page comes back full, rather than implying the list ends |
+
+**No status field, so nothing is badged.** The endpoint returns no state and
+isn't gated on one, so a "Confirmed" pill would be the portal making a promise
+the server never made. If a status ever appears we'll render it; we won't invent
+one. Same rule as everywhere else on this project.
+
+**The blind state is kept and still tested.** `bench.deploy.get_venue_bookings`
+can go back to false and the tab returns to saying it cannot see bookings at
+all. Partners' benches update at different times, and an empty diary drawn over
+a missing method is the worst outcome on this screen. There is now a third
+state as well: deployed and throwing reads as *"We couldn't load your bookings
+just now"* with a Try again — a bad minute and an unbuilt feature need different
+actions from the partner and different actions from us.
+
+Covered by `verification/verify22.mjs` (31 checks) and eleven RTL checks.
+
+**One question left open, unchanged from 28 Jul:**
+
+**Does a partner ACT on a booking** — confirm, decline, mark as arrived — or
+only read it? `get_venue_bookings` is read-only, which is a complete answer for
+a diary. The shapes for `confirm_booking` / `decline_booking` are written in
+`services/bookings.js` and deliberately wired to nothing, because a confirm
+button that reaches nobody is worse than no button. If the answer is "read
+only", say so and we'll delete them.
+
+Worth a decision separately: the PRD still lists **"bookings management"** under
+*Out of scope*. Reading a diary is now shipped and clearly in. Acting on one is
+the line, and it's the difference between a tab and a product area.
 
 ### 13. Do drafts expire?
 

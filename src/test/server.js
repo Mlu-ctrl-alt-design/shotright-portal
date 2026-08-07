@@ -332,9 +332,54 @@ const apiHandlers = [
     return before === bench.items.length ? docMissing() : ok({ ok: true })
   }),
 
-  method('shotright.api.get_venue_bookings', ({ venue_name }) =>
-    ok(bench.bookings[venue_name] || []),
-  ),
+  /**
+   * SHIPPED 7 Aug, and modelled to the real contract rather than to what is
+   * convenient to assert against:
+   *
+   * - **ownership is checked before anything is read**, against `Venue.vendor`,
+   *   so `venue_name` alone is never enough — a venue that isn't ours throws
+   *   rather than returning an empty list, which would read as "no bookings".
+   * - **`from_date`/`to_date` are inclusive and independent** — either, both or
+   *   neither.
+   * - **`limit` arrives as a string** because form encoding makes it one. The
+   *   real service runs it through `cint`; this drops it through `Number` for
+   *   the same reason, and caps at 500 so a test can prove we never ask for
+   *   more than the server will give.
+   * - **not gated on `workflow_state`** — a Pending venue still has guests
+   *   arriving, so bench state about the venue's review does not filter this.
+   */
+  method('shotright.api.get_venue_bookings', (args) => {
+    const venue = bench.venues.find((v) => v.name === args.venue_name)
+    if (!venue) return validationError('Not permitted')
+
+    const from = args.from_date || ''
+    const to = args.to_date || ''
+    const limit = Math.min(Number(args.limit) || 20, 500)
+
+    const rows = (bench.bookings[args.venue_name] || [])
+      .filter((b) => (!from || String(b.arrival_date) >= from) && (!to || String(b.arrival_date) <= to))
+      .sort((a, b) =>
+        `${a.arrival_date} ${a.arrival_time}`.localeCompare(`${b.arrival_date} ${b.arrival_time}`),
+      )
+      .slice(0, limit)
+
+    /* party_size is computed server-side — `booking_register.py` does the same,
+       and two surfaces disagreeing about whether children are covers is the bug
+       this models away. */
+    return ok(
+      rows.map((b) => ({
+        name: b.name,
+        arrival_date: b.arrival_date,
+        arrival_time: b.arrival_time,
+        adults: b.adults ?? 0,
+        children: b.children ?? 0,
+        party_size: (b.adults ?? 0) + (b.children ?? 0),
+        contact_name: b.contact_name,
+        contact_cell_phone: b.contact_cell_phone,
+        creation: b.creation || '2026-08-01 09:00:00',
+      })),
+    )
+  }),
 
   /* -------------------------------------------------------------- drafts */
   method('shotright.api.save_venue_draft', (args) => {
