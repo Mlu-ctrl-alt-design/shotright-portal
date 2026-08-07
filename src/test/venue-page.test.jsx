@@ -95,9 +95,15 @@ describe('bookings', () => {
        second. */
     renderApp({ route: `${VENUE}/bookings`, signedIn: true })
 
-    expect(await screen.findByText(/can’t show bookings yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/bookings aren’t switched on yet/i)).toBeInTheDocument()
     expect(screen.getByText(/isn’t an empty diary/i)).toBeInTheDocument()
-    expect(screen.getByText(/keep taking bookings however you do now/i)).toBeInTheDocument()
+    expect(screen.getByText(/keep taking bookings the way you do now/i)).toBeInTheDocument()
+
+    /* Production copy, not a status report. A partner never reads who we have
+       asked for something, what a method is called, or what a server does or
+       doesn't have — that is our process, and it belongs in the backlog. */
+    const body = document.body.textContent
+    expect(body).not.toMatch(/we’ve asked|we’ve reported|we’ve flagged|shotright\.api|endpoint|server/i)
   })
 
   it('shows real bookings the day an endpoint answers', async () => {
@@ -116,7 +122,7 @@ describe('bookings', () => {
 
     expect(await screen.findByText(/Nomsa Dlamini/)).toBeInTheDocument()
     expect(screen.getByText(/4 people/)).toBeInTheDocument()
-    expect(screen.queryByText(/can’t show bookings yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/aren’t switched on yet/i)).not.toBeInTheDocument()
   })
 
   it('says an empty diary is empty only when it actually knows', async () => {
@@ -193,7 +199,7 @@ describe('edit a menu item', () => {
     await user.type(within(form).getByLabelText(/^item$/i), 'Mutton curry')
     await user.click(screen.getByRole('button', { name: /^save$/i }))
 
-    expect(await screen.findByText(/can’t change a menu item yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/can’t change a menu item just yet/i)).toBeInTheDocument()
     expect(within(form).getByLabelText(/^item$/i)).toHaveValue('Mutton curry')
   })
 

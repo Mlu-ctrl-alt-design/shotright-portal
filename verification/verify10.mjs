@@ -45,8 +45,20 @@ async function open(menu404) {
   const body = (await page.locator('main').innerText()).replace(/\n/g, ' ')
   check(!/^Not [Ff]ound/.test(body.trim()), 'a missing endpoint is no longer a bare "Not found"')
   check(/can’t read this menu from the server yet/i.test(body), 'it says what actually happened')
-  check(/get_venue_products/.test(body), 'and names the exact method, so the backend can answer it')
-  check(/has not been lost/i.test(body), 'and says the partner’s menu is not gone')
+  /* UPDATED 28 Jul. These used to assert that the METHOD NAME appeared on
+     screen, on the reasoning that naming it got it fixed faster. It did, and it
+     was still wrong: a restaurant owner reading a dotted Python path has been
+     handed our problem to hold. The name now goes to the console instead — see
+     `withFallback` — so a screenshot still answers "which endpoint?" and no
+     partner-facing screen mentions one.
+
+     What survives unchanged is the requirement underneath: their data is
+     intact, and they are told so in words they can act on. */
+  check(
+    !/shotright\.api|get_venue_products/.test(body),
+    'and does NOT print the method name at a restaurant owner',
+  )
+  check(/hasn’t been lost/i.test(body), 'while still saying the partner’s menu is not gone')
   check(await page.getByRole('button', { name: /Add heading/i }).isVisible(),
     'the page still works — a read failure does not lock the partner out of the whole screen')
   await context.close()

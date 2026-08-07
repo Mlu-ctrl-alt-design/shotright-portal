@@ -69,6 +69,23 @@ export async function withFallback(method, real, whenMissing) {
   } catch (err) {
     if (err?.status === 404) {
       capabilities.set(method, false)
+      /**
+       * The method name goes to the CONSOLE, not to the partner.
+       *
+       * It used to be printed on screen — "the portal is asking for
+       * shotright.api.update_venue, and it isn't there" — on the reasoning that
+       * naming it got it fixed faster. It did, and it was still wrong: a
+       * restaurant owner reading a dotted Python path has been handed our
+       * problem to hold.
+       *
+       * Logged once per method per tab (the capability cache guarantees that),
+       * so a screenshot of the console still answers "which endpoint?" without
+       * a single partner-facing screen mentioning one.
+       */
+      console.warn(
+        `[shotright] endpoint not available on this server: ${method}`,
+        '— the portal has fallen back. This is a deployment gap, not a user error.',
+      )
       return whenMissing()
     }
     throw err
@@ -662,7 +679,7 @@ export const createVenue = (payload) =>
                 // this one is a live mismatch somebody has to look at today.
                 `${uploaded}, but the app only kept ${result.mismatch.stored} of ` +
                   `${result.mismatch.sent}. Nothing has been lost from your device or ours — ` +
-                  `we’ve reported it and we’ll get the rest attached.`
+                  `nothing has been lost — we’re getting the rest attached.`
               : `${uploaded} and ` +
                   `${result?.attached ? 'attached to this venue for our reviewers' : 'stored safely'}, ` +
                   `but they won’t appear to customers yet — the app has no field for a venue’s ` +
@@ -869,7 +886,7 @@ const warnAboutRefused = (refused) => {
 
   return [
     `Everything else was saved, but this app couldn’t update ${list} — the server won’t ` +
-      `accept ${labels.length === 1 ? 'that change' : 'those changes'} yet. We’ve reported it.`,
+      `accept ${labels.length === 1 ? 'that change' : 'those changes'} yet.`,
   ]
 }
 
@@ -996,7 +1013,7 @@ export const updateVenue = async (venueId, payload, existing) => {
       // two problems doesn't read "everything else was saved" twice and have to
       // work out which "everything else" each one meant.
       (refusedWarnings.length ? '' : 'Everything else you changed was saved — but ') +
-      `this app can’t rename a venue yet, so that part didn’t take. We’ve reported it.`
+      `we can’t rename a venue just yet, so that part didn’t take.`
 
   return {
     venue,

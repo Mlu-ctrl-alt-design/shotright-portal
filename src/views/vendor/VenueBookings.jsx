@@ -45,11 +45,12 @@ export default function VenueBookings() {
     return (
       <Card title="Bookings">
         <Alert variant="info">
-          <p className="font-bold">We can’t show bookings yet</p>
+          <p className="font-bold">Bookings aren’t switched on yet</p>
           <p className="mt-1">
-            This isn’t an empty diary — the app has no way to read bookings from the server yet, so
-            it can’t tell you whether you have any. We’ve asked for it.{' '}
-            <strong>Keep taking bookings however you do now.</strong> Nothing here replaces it.
+            This isn’t an empty diary — we can’t see your bookings from here at all, so we can’t
+            tell you whether you have any.{' '}
+            <strong>Keep taking bookings the way you do now.</strong> When this is ready, they’ll
+            show up here on their own.
           </p>
         </Alert>
       </Card>

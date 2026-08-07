@@ -89,7 +89,7 @@ export default function VenueReview() {
           <p className="font-bold">We couldn’t open this venue</p>
           <p className="mt-1">
             {isMethodMissing(error, VENUE_DETAIL_METHOD)
-              ? 'This part of the portal isn’t on your server yet — your venue is fine. We’ve flagged it.'
+              ? 'We can’t open this venue right now. Nothing has happened to it — please try again shortly.'
               : error.status === 404
                 ? 'It isn’t on the account you’re signed in with, or it has been removed.'
                 : error.status === 403
@@ -186,7 +186,7 @@ function WhatTheReviewerSaid({ review }) {
             isn't theirs. */}
         {review.available === false && (
           <p className="mt-3 text-xs text-ink-500">
-            The portal can’t read review notes from this server yet. We’ve flagged it.
+            We can’t load the reviewer’s note right now.
           </p>
         )}
       </Card>

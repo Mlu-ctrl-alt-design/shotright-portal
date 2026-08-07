@@ -159,7 +159,7 @@ export default function VenueForm() {
             photoWarnings.push(
               outcome.mismatch
                 ? `Your photos uploaded, but the app only kept ${outcome.mismatch.stored} of ` +
-                    `${outcome.mismatch.sent}. Nothing has been lost — we’ve reported it.`
+                    `${outcome.mismatch.sent}. Nothing has been lost.`
                 : `Your photos uploaded and are attached to this venue, but the order you put ` +
                     `them in isn’t saved yet — the app has nowhere to keep it. Nothing has been ` +
                     `lost, and it’ll stick as soon as that lands.`,
@@ -197,9 +197,8 @@ export default function VenueForm() {
     } catch (err) {
       setError(
         isMethodMissing(err, UPDATE_VENUE_METHOD)
-          ? `We can’t save changes to a venue on this server yet — the portal is asking for ` +
-            `${UPDATE_VENUE_METHOD}, and it isn’t there. Nothing has been lost or changed. ` +
-            `We’ve flagged it.`
+          ? `We can’t save changes to this venue just yet. Nothing you typed has been lost, ` +
+            `and your venue is exactly as it was. Please try again a bit later.`
           : err.message,
       )
     }
@@ -334,7 +333,7 @@ export default function VenueForm() {
                     They aren’t lost — the app just can’t read them back from the server yet, so
                     this box starts empty even if you’ve added photos before.{' '}
                     <strong>Anything you add here is uploaded and kept.</strong> If you’d rather
-                    not risk duplicates, leave this until we’ve fixed it. We’ve reported it.
+                    not risk duplicates, come back to this a bit later.
                   </p>
                 </Alert>
               )}
@@ -344,7 +343,7 @@ export default function VenueForm() {
                   <p className="mt-1">
                     Photos you add here upload properly and attach to this venue, so our reviewers
                     see them. The app has no place to show a venue’s pictures yet, so they won’t
-                    appear in search, and the order below isn’t saved. We’ve asked for it.
+                    appear in search, and the order below isn’t saved yet.
                   </p>
                 </Alert>
               )}

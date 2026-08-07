@@ -163,11 +163,9 @@ export default function VenueMenu() {
         <Alert variant="warning">
           <p className="font-bold">We can’t read this menu from the server yet</p>
           <p className="mt-1">
-            Your menu has not been lost — the portal is asking for{' '}
-            <code className="rounded bg-white/60 px-1 font-mono text-xs">{menuReadMissing}</code>,
-            and this server doesn’t have it. Anything already on this menu is still there and still
-            showing to customers. We’ve flagged it; adding items here may not work until it’s
-            connected.
+            Your menu hasn’t been lost. We can’t load it here at the moment, but everything
+            already on it is still there and still showing to customers. Adding items may not
+            work until this is back.
           </p>
         </Alert>
       )}
@@ -353,9 +351,8 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
          to be remembered and retyped from nothing. */
       if (result && result.saved === false) {
         setProblem(
-          'This app can’t change a menu item yet — the server has no way to do it. ' +
-            'Your wording is still here, so you can copy it into a new item and remove this one. ' +
-            'We’ve asked for it.',
+          'We can’t change a menu item just yet. Your wording is still here, so you can copy ' +
+            'it into a new item and remove this one.',
         )
         return
       }
@@ -373,8 +370,8 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
       const result = await onRemove()
       if (result && result.deleted === false) {
         setProblem(
-          'This app isn’t allowed to remove menu items on your server yet, so this one is still ' +
-            'on your menu. Nothing has changed. We’ve reported it.',
+          'We can’t remove menu items just yet, so this one is still on your menu. Nothing has ' +
+            'changed.',
         )
       }
     } catch (err) {

@@ -211,11 +211,21 @@ const rename = async (page) => {
   await rename(page)
 
   const body = await page.locator('main').evaluate((n) => n.textContent)
-  check(/can’t save changes to a venue on this server yet/i.test(body),
-    'a missing endpoint is reported as a missing endpoint')
-  check(/shotright\.api\.update_venue/.test(body), 'and named, so the backend can answer it')
-  check(/Nothing has been lost or changed/i.test(body),
-    'and the partner is told their venue is intact')
+  /* UPDATED 28 Jul. These used to assert that the METHOD NAME appeared on
+     screen, on the reasoning that naming it got it fixed faster. It did, and it
+     was still wrong: a restaurant owner reading a dotted Python path has been
+     handed our problem to hold. The name now goes to the console instead — see
+     `withFallback` — so a screenshot still answers "which endpoint?" and no
+     partner-facing screen mentions one.
+
+     What survives unchanged is the requirement underneath: their data is
+     intact, and they are told so in words they can act on. */
+  check(/can’t save changes to this venue just yet/i.test(body),
+    'a missing endpoint is reported as something the partner can understand')
+  check(!/shotright\.api|update_venue/.test(body),
+    'and NOT by naming the method at them')
+  check(/Nothing you typed has been lost/i.test(body),
+    'the partner is told their work and their venue are intact')
   check(!/DoesNotExistError/.test(body), 'never as a raw Frappe exception name')
 
   await context.close()

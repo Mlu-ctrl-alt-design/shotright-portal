@@ -307,7 +307,7 @@ export default function VenueDetailsStep({
               <p className="mt-1">
                 Add them anyway — they upload properly and our reviewers will see them with your
                 venue. The app just has no place to show a venue’s pictures yet, so they won’t
-                appear in search, and the order you put them in isn’t saved. We’ve asked for it.
+                appear in search, and the order you put them in isn’t saved yet.
               </p>
             </Alert>
           ) : null
