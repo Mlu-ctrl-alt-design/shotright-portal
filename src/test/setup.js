@@ -15,10 +15,22 @@ import { resetBench } from './bench'
  */
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 
-afterEach(() => {
+afterEach(async () => {
   cleanup()
   server.resetHandlers()
   resetBench()
+
+  /**
+   * `withFallback` caches "this method is not deployed" in a module-level Map
+   * that lives for the whole file. Without this, the first test to see a 404
+   * poisons every later one — a test that sets `bench.deploy.x = true` still
+   * gets the fallback, and the failure looks like a bug in the app.
+   *
+   * Found by exactly that: the bookings tab reported "we can't see bookings"
+   * in a test that had explicitly deployed the endpoint.
+   */
+  const vendor = await import('../services/vendor')
+  vendor.__resetCapabilities?.()
   localStorage.clear()
   sessionStorage.clear()
   vi.clearAllMocks()

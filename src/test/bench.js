@@ -75,6 +75,12 @@ const initial = () => ({
     'frappe.client.get_list': true,
     'frappe.client.set_value': true,
     upload_file: true,
+
+    /* False on purpose — none of these exist on the real bench yet, and the
+       truthful default is what makes an opt-in test meaningful. */
+    update_product_item: false,
+    delete_product_item: false,
+    get_venue_bookings: false,
   },
 
   /** Registration path: true makes register_vendor return otp_required. */
@@ -122,6 +128,8 @@ const initial = () => ({
   ],
   headings: [],
   items: [],
+  /** Keyed by venue docname. Empty AND unreadable are different states. */
+  bookings: {},
   photos: {},
   files: [],
   drafts: [],

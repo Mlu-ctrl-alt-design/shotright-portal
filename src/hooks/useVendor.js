@@ -152,6 +152,14 @@ export const useCreateItem = (venueId) => {
   })
 }
 
+export const useUpdateItem = (venueId) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ itemId, ...payload }) => vendorApi.updateItem(itemId, payload),
+    onSuccess: invalidateMenu(qc, venueId),
+  })
+}
+
 export const useDeleteItem = (venueId) => {
   const qc = useQueryClient()
   return useMutation({

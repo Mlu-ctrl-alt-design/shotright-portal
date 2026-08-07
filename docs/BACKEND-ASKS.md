@@ -612,6 +612,68 @@ defaulted to a guess — and the button no longer depends on it, so we've stoppe
 hiding the primary action on this screen. See the return-value note above; it is
 the one thing that decides whether a partner is told their message arrived.
 
+### 16. The menu is half-built — no edit, and delete probably never worked
+
+A partner can add a heading and add items. Until 28 Jul they could not **change**
+one at all: a dish priced at R450 instead of R45 had to be deleted and retyped.
+
+And the delete they'd need for that goes through **`frappe.client.delete`** on
+`Product Item` — which, per §14, the Vendor role has no doctype access to call.
+**So "Remove" has most likely never worked for any partner**, and a mistake on a
+menu is currently permanent.
+
+```
+update_product_item(item, item_name, price, description) -> {ok: true}
+delete_product_item(item)                                 -> {ok: true}
+```
+
+The portal already tries `update_product_item`, `edit_product_item` and
+`set_product_item` in order, and `delete_product_item` before falling back to
+the generic delete — **pick any of those names and it works with no release
+from us.** Until one exists, the edit form says the server has no way to save
+the change and keeps the partner's wording on screen so they can copy it into a
+new item.
+
+**Please also confirm whether the Vendor role can call `frappe.client.delete`
+on `Product Item`.** If it can, "Remove" works today and only edit is missing;
+if it can't, both are blocked and a partner's menu is currently append-only.
+
+### 17. Bookings — nothing exists, and the PRD says it shouldn't
+
+> **Asked for 28 Jul: "we also need to see bookings within each venue."**
+
+Flagging one thing before the ask: the PRD lists **"bookings management"** under
+*Out of scope*, so there is no design, no doctype and no endpoint. Treating the
+request as a deliberate scope change rather than an oversight — but it is worth
+someone confirming that, because it is the difference between a tab and a
+product area.
+
+The venue page now has a **Bookings** tab. It says, in as many words, that the
+app cannot read bookings and that the partner should keep taking them however
+they do now. It does **not** show an empty table: "no bookings yet" and "we
+can't see your bookings" are completely different sentences to a restaurant
+owner — one is a quiet Tuesday, the other is a reason to stop trusting the
+portal on a Friday night.
+
+What would make it real:
+
+```
+get_venue_bookings(venue_name) -> [ {name, customer_name, booking_datetime,
+                                     party_size, phone, status, notes} ]
+```
+
+We read a generous set of aliases for each field, so near-misses are fine. The
+portal tries `get_venue_bookings`, `list_venue_bookings` and `get_bookings`.
+
+Two questions that decide how much more there is to build:
+
+1. **Is a booking a doctype yet?** If bookings live somewhere else entirely, or
+   are only in the customer app, this is a bigger conversation than an endpoint.
+2. **Does a partner ACT on a booking** — confirm, decline, mark as arrived — or
+   only read it? We have written the shape for `confirm_booking` /
+   `decline_booking` but wired nothing to a screen, because a button that
+   cannot do anything is worse than no button.
+
 ### 13. Do drafts expire?
 
 The resume card currently says **"nothing expires"**. If there is a cleanup job,
