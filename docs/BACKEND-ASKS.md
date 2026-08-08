@@ -26,16 +26,28 @@ and will save nothing, and nobody finds out until a partner loses their work.
 
 ## P0 — a partner is hitting this now
 
-### 19. Reported 8 Aug — three issues, two of them ours
+### 19. Reported 8 Aug — four reports, three distinct issues, two of them ours
 
 > **19.a** *"When a user edits a venue they are unable to save because the moods
 > are throwing an error."*
 > **19.b** *"Images still cannot be attached, they also throw an error."*
 > **19.c** *"On the dashboard 'discard this draft' button is not working."*
+> **19.d** *"In the edit menu the menu upload is not working."* — same issue as
+> 19.b; both go through `/api/method/upload_file`.
 
-Logged together, and they turned out to be different in kind. **19.a was ours
-and is fixed** — no server error was ever involved, and it was the same incident
-as the `get_venue_detail` 404 reported minutes later. **19.b still needs you.**
+Logged together, and they turned out to be different in kind.
+
+- **19.a — ours, fixed.** No server error was involved, and it was the same
+  incident as the `get_venue_detail` 404 reported minutes later.
+- **19.c — ours, fixed.** The draft id was read under the wrong field name.
+- **19.b / 19.d — yours, still open**, and they are one issue: the menu importer
+  and the photo uploader both post to `/api/method/upload_file`. That the menu
+  path is *also* refused is the most useful fact we have, because it sends no
+  `doctype` — see the table below.
+
+**Three of the four reports arrived as separate issues and were logged as
+separate issues. They were two.** Worth saying because it changed the diagnosis
+twice: the 404 explained the moods, and the menu upload narrowed the 403.
 
 **What we need for 19.b, and cannot get from here.** The browser's Network tab →
 the failing `upload_file` → the **Response body**. The status line alone cannot
@@ -113,7 +125,7 @@ left their machine, which sends someone off to re-export a spreadsheet that was
 never broken. It now separates a refused upload from an unreadable file, and
 only offers "try another file" where another file could actually help.
 
-
+##### The photo half has a change of ours in it
 
 **This one has a change of ours in it.** When the permission was reported done
 we deleted the unattached-upload fallback, deliberately: it had been producing
