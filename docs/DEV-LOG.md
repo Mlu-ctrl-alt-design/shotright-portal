@@ -121,6 +121,37 @@ fails there and passes here; a test that passes both ways proves nothing, and
 this session had already shipped three "no banner" assertions that fired before
 their data arrived.
 
+### The menu upload was the photo upload
+
+Fourth report: "in the edit menu the menu upload is not working." It posts to
+`/api/method/upload_file` — the same endpoint 403ing on venue photos. One
+issue, reported twice, from two screens that look unrelated.
+
+**The diagnostic value is in the difference between the two calls.** Photos send
+`doctype: 'Venue'` and a docname; the menu import sends neither. So a missing
+**Venue** attach permission cannot explain a refused menu upload, and if both
+are refused the missing permission is create on **`File`** itself. That fits
+§14's finding that the Vendor role has no doctype access at all — which is why
+`upload_file`, `frappe.client.get_list` on File and `attachOrphans` all failed
+together and were reported as three separate bugs.
+
+**What was ours: the copy blamed the partner's file.** The failure branch said
+*"We couldn't read that file"* for every failure, including one where the file
+never left their machine. A partner reading that tries another file, then a CSV
+instead of an Excel, then a shorter one — all refused identically. Sending
+someone to fix work that was never broken is worse than saying nothing.
+
+Three failures now, three different things to do: a permission refusal is named
+as ours and does **not** offer "try another file" (the tenth is refused like the
+first — the same rule the photo uploader already follows), a dropped upload
+offers a retry, and a genuine parse error still says the file is the problem,
+because sometimes it is.
+
+That last one needed the fake bench to fail an ASYNC job rather than the
+synchronous endpoint — the first attempt flagged `import_products_from_excel`,
+which the portal never reaches when the background import is deployed. The test
+passed for the wrong reason until that was fixed.
+
 ### Also shipped today
 
 - **Bookings read live** off `get_venue_bookings`, which landed with a full

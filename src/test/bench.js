@@ -154,6 +154,30 @@ const initial = () => ({
    */
   draftDiscardSilentlyFails: false,
 
+  /**
+   * `upload_file` refuses, 403.
+   *
+   * Reported 8 Aug against the live portal for venue photos, and the menu
+   * importer goes through the SAME endpoint — which is how "the menu upload is
+   * not working" turned out to be one report, not two.
+   *
+   * `'always'` refuses every upload. `'attached'` refuses only uploads carrying
+   * a `doctype`/`docname`, which is what a missing **Venue** attach permission
+   * looks like; the menu path sends neither, so it would still work. The
+   * difference decides which permission is actually missing, and the portal has
+   * to behave sanely under both.
+   */
+  uploadRefused: false,
+
+  /**
+   * The import itself fails AFTER the file arrived.
+   *
+   * The one case where a different file genuinely is the answer — and the
+   * control case for the copy above: the fix must not become a way of never
+   * telling someone their CSV is broken.
+   */
+  importFails: false,
+
   /** `update_venue` throws on unrecognised fields rather than dropping them. */
   venueWritable: [
     'venue_name',

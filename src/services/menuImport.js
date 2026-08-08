@@ -35,14 +35,34 @@ export async function uploadMenuFile(file, onProgress) {
   form.append('file', file)
   form.append('is_private', '1')
 
-  const { data } = await api.post('/api/method/upload_file', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    onUploadProgress: (event) => {
-      if (!event.total) return
-      onProgress?.(Math.round((event.loaded / event.total) * 100))
-    },
-  })
-  return data.message
+  try {
+    const { data } = await api.post('/api/method/upload_file', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (event) => {
+        if (!event.total) return
+        onProgress?.(Math.round((event.loaded / event.total) * 100))
+      },
+    })
+    return data.message
+  } catch (err) {
+    /**
+     * ⚠️ TAGGED, because the difference decides what a partner is told.
+     *
+     * Reported 8 Aug as "the menu upload is not working". It goes through
+     * `/api/method/upload_file` — the SAME endpoint that was 403ing on venue
+     * photos, so those were one report rather than two. What the partner saw
+     * was **"We couldn't read that file"**, which is a sentence about their
+     * spreadsheet. Their spreadsheet was never uploaded and there is nothing
+     * wrong with it, so they try a different file, and a CSV instead of an
+     * Excel, and a shorter one, and every attempt fails identically.
+     *
+     * Blaming a partner's work for our permission problem is the worst version
+     * of the failure this project keeps having, because it sends them off to
+     * fix something that was never broken.
+     */
+    err.stage = 'upload'
+    throw err
+  }
 }
 
 /**

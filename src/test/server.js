@@ -524,10 +524,21 @@ const apiHandlers = [
   /* ------------------------------------------------------ menu import job */
   method('shotright.api.start_menu_import', () => ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })),
   method('shotright.api.get_menu_import_status', () =>
-    ok({ name: 'MI-1', status: 'Completed', stage: 'done', total: 0, processed: 0 }),
+    bench.importFails
+      ? ok({
+          name: 'MI-1',
+          status: 'Failed',
+          stage: 'reading',
+          error_message: 'Row 4: Price is not a number',
+        })
+      : ok({ name: 'MI-1', status: 'Completed', stage: 'done', total: 0, processed: 0 }),
   ),
   method('shotright.api.cancel_menu_import', () => ok({ ok: true })),
-  method('shotright.api.import_products_from_excel', () => ok({ created: 0 })),
+  method('shotright.api.import_products_from_excel', () =>
+    bench.importFails
+      ? validationError('Row 4: <strong>Price</strong> is not a number')
+      : ok({ created: 0 }),
+  ),
   method('shotright.api.bulk_import_products', () => ok({ created: 0 })),
 
   /* ------------------------------------------------------ review screens */
@@ -571,6 +582,16 @@ const apiHandlers = [
     const doctype = form.get('doctype')
     const docname = form.get('docname')
     record('upload_file', { doctype, docname, fileName: file?.name })
+
+    if (
+      bench.uploadRefused === 'always' ||
+      bench.uploadRefused === true ||
+      (bench.uploadRefused === 'attached' && docname)
+    ) {
+      return permissionError(
+        `User <strong>thabo@cornerkitchen.co.za</strong> does not have doctype access via role permission for document ${doctype || 'File'}`,
+      )
+    }
 
     const row = {
       name: `FILE-${bench.files.length + 1}`,

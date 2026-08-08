@@ -102,6 +102,9 @@ export default function MenuImportStatus({
   phase,
   job,
   error,
+  /* 'permission' | 'upload' | 'parse'. Decides whether the message is about
+     the partner's file or about us — see the failed branch below. */
+  failure,
   elapsed,
   estimate,
   canLeave,
@@ -125,15 +128,50 @@ export default function MenuImportStatus({
 
   /* ------------------------------------------------------------- failed */
   if (phase === 'failed') {
+    /**
+     * THREE FAILURES, THREE DIFFERENT THINGS TO DO — and only one of them is
+     * about the partner's file.
+     *
+     * This used to say "We couldn't read that file" over all of them. Reported
+     * 8 Aug as "the menu upload is not working": the upload was being refused
+     * 403 at `/api/method/upload_file`, so the spreadsheet never left the
+     * building, and the partner was told their spreadsheet was the problem.
+     * They then try another file, and a CSV instead of an Excel, and a shorter
+     * one, and every attempt fails in exactly the same way.
+     *
+     * Sending someone to fix work that was never broken is worse than saying
+     * nothing, so the offer to try another file only appears where another file
+     * could actually help.
+     */
+    const permission = failure === 'permission'
+    const upload = failure === 'upload' || permission
+
     return (
       <Alert variant="danger">
-        <p className="font-bold">We couldn’t read that file</p>
-        <p className="mt-1">{error || job?.error_message || 'Something went wrong.'}</p>
+        <p className="font-bold">
+          {permission
+            ? 'We couldn’t upload your menu'
+            : upload
+              ? 'Your menu didn’t reach us'
+              : 'We couldn’t read that file'}
+        </p>
+        <p className="mt-1">
+          {permission
+            ? 'This is a problem on our side, not with your file — there’s nothing wrong with it and nothing to fix. Adding items by hand works normally in the meantime, and anything you add is kept.'
+            : upload
+              ? 'The file didn’t finish uploading, so nothing has changed on your menu. If you’re on a patchy connection it’s worth trying again.'
+              : error || job?.error_message || 'Something went wrong.'}
+        </p>
         <div className="mt-3 flex flex-wrap gap-3">
-          <Button size="sm" variant="secondary" onClick={onReplaceFile || onDismiss}>
-            Try another file
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onAddManually}>
+          {/* Not offered on a permission refusal. The tenth file is refused
+              exactly like the first, and pretending otherwise wastes an
+              afternoon. Same rule the photo uploader already follows. */}
+          {!permission && (
+            <Button size="sm" variant="secondary" onClick={onReplaceFile || onDismiss}>
+              {upload ? 'Try again' : 'Try another file'}
+            </Button>
+          )}
+          <Button size="sm" variant={permission ? 'secondary' : 'ghost'} onClick={onAddManually}>
             Add items by hand instead
           </Button>
         </div>

@@ -82,7 +82,38 @@ genuinely changes their moods, we have to send them, and it still crashes.
 404s on VEN-00008 while the dashboard lists it — the portal survives it, but it
 is a real 404 and it is what exposed this).
 
-#### 19.b — attaching images
+#### 19.b — uploads: images AND the menu importer, one endpoint
+
+> **Also reported 8 Aug:** *"in the edit menu the menu upload is not working."*
+> **It is the same issue.** The menu importer posts to
+> `/api/method/upload_file`, exactly as the photo uploader does.
+
+**AND THAT NARROWS IT USEFULLY.** The two calls are not identical:
+
+| | photos | menu import |
+|---|---|---|
+| `doctype` / `docname` | **`Venue` / `VEN-…`** | *not sent* |
+| `is_private` | `0` | `1` |
+| permission needed | write on that **Venue**, plus create on `File` | create on **`File`** only |
+
+So if **both** are refused, the missing permission cannot be the Venue attach
+grant you added on 28 Jul — the menu upload never asks for it. It would mean the
+Vendor role cannot create a `File` **at all**, which fits everything we already
+know: §14 established that the role has *no* doctype access, and that is exactly
+why `upload_file`, `frappe.client.get_list` on File and `attachOrphans` all
+failed together.
+
+**If only the photo upload is refused**, it is the Venue grant and the menu
+importer should still work. Whichever it is, the answer is one test upload away
+and it decides the fix.
+
+We've also stopped the portal blaming the partner for it — the menu importer was
+saying *"We couldn't read that file"* over a request in which the file never
+left their machine, which sends someone off to re-export a spreadsheet that was
+never broken. It now separates a refused upload from an unreadable file, and
+only offers "try another file" where another file could actually help.
+
+
 
 **This one has a change of ours in it.** When the permission was reported done
 we deleted the unattached-upload fallback, deliberately: it had been producing
