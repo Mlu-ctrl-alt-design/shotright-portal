@@ -26,6 +26,82 @@ and will save nothing, and nobody finds out until a partner loses their work.
 
 ## P0 — a partner is hitting this now
 
+### 19. Reported 8 Aug — both of these were previously reported fixed
+
+> **19.a** *"When a user edits a venue they are unable to save because the moods
+> are throwing an error."*
+> **19.b** *"Images still cannot be attached, they also throw an error."*
+
+Logging these together because the important fact is shared: **both are
+recurrences.** 19.a is §00, filed 28 Jul and still open. 19.b is §14, which was
+marked **RESOLVED on 28 Jul** on the strength of *"the backend photo permission
+is done"* — and on that basis we removed the workaround that had been hiding it.
+So this one may be partly ours, and that is set out below rather than buried.
+
+**What we need to act, and cannot get from here.** For each error, the browser's
+Network tab → the failing request → the **Response** body. That JSON carries
+`exc_type` and the traceback, and it is the difference between a fix and a
+sixth guess at a field name. A screenshot of the red message on screen is not
+enough: the portal deliberately does not print server internals to partners any
+more, so the sentence they see is ours, not the bench's.
+
+#### 19.a — moods on save
+
+Expected symptom from §00 is a **partial** save: we catch the child-table
+`TypeError`, drop `moods`, retry, and the rest of the edit lands with *"couldn't
+update the moods"*. **"Unable to save" is different from that**, so one of:
+
+1. the retry is not firing — the error text changed and no longer matches
+   `does not support item assignment|_init_child`, so nothing is stripped;
+2. it is firing and the partner reads *"couldn't update the moods"* as a
+   failure, in which case the edit did save and our wording is the bug;
+3. `update_venue` is now refusing moods a different way — the *"Cannot update
+   field(s)"* path — which strips and retries separately.
+
+All three are one response body away from being decided. **We are still not
+guessing the child-row field name** — `[{mood: id}]` writes empty rows and
+reports success if the field is called anything else, silently erasing a venue's
+moods, which is strictly worse than not saving them. §00's ask is unchanged:
+**tell us the field name, or make `update_venue` take the same shape
+`create_venue` already accepts.**
+
+#### 19.b — attaching images
+
+**This one has a change of ours in it.** When the permission was reported done
+we deleted the unattached-upload fallback, deliberately: it had been producing
+photos that uploaded, appeared in the uploader, and were attached to nothing —
+the partner saw success, the moderator opened the Venue and saw no pictures.
+A quiet wrong result. We made a refusal loud on purpose.
+
+**If attaching is still refused, that decision is now the visible failure.** We
+think loud is still right — an orphaned photo is worse than a reported one — but
+it means "images throw an error" is the expected behaviour of a permission that
+is not actually in place, not a new fault. Worth being explicit about, because
+it changes what the fix is.
+
+Three things to check on the bench, in order:
+
+1. **Is the `Venue` attach permission actually live in this environment?** It
+   was confirmed on 28 Jul. If the change was applied to one bench and the
+   portal is pointed at another, this is the whole answer.
+2. **Does the error name `Venue` or `File`?** They are different permissions and
+   different fixes. Attaching is `Venue` write; anything reading the photos back
+   is `File` read, which is the open half of §14.
+3. **Is it a permission at all?** A 413 (file too large), a 417 from a validation
+   hook, or a CORS failure on `/api/method/upload_file` all surface to a partner
+   as "it threw an error" and none of them are the role permission.
+
+The standing ask from §14 if the permission cannot stay: **a whitelisted
+`upload_venue_photo(venue_name, file)` that elevates internally**, the same way
+every other `shotright.api.*` method does. That removes the dependency on stock
+Frappe endpoints for good, and it is the shape the rest of this app already has.
+
+#### Related and still open
+
+- **§0c** — uploaded photos rendering as broken links. Different failure
+  (reading, not attaching) and not resolved by anything above.
+- **§14** — can the Vendor role list `File` rows for its own venue?
+
 ### 00. `update_venue` crashes on `moods` — every venue edit, 28 Jul
 
 ```

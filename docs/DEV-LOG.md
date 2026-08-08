@@ -17,7 +17,61 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 28 Jul 2026 (latest) — asking for what we already had
+## 8 Aug 2026 (latest) — two reports logged, deliberately not fixed
+
+Two issues reported from the live portal. **Both logged to BACKEND-ASKS §19 and
+neither fixed**, which is the decision worth recording.
+
+- **19.a — moods block a venue edit.** This is §00, filed 28 Jul, still open.
+- **19.b — images still cannot be attached.** This is §14, which we marked
+  **RESOLVED on 28 Jul** on the strength of "the backend photo permission is
+  done".
+
+### Why nothing was changed
+
+Neither report came with the response body, and every plausible fix for 19.a
+contradicts one of the others. The expected §00 behaviour is a PARTIAL save —
+catch the child-table `TypeError`, drop `moods`, retry, keep the rest — so
+"unable to save" is either the retry not matching a changed error string, or the
+retry working and our warning copy reading as a failure, or a different refusal
+path entirely. Those need opposite fixes. Guessing between them is precisely how
+this project accumulated six name mismatches, and the tie-breaker is one JSON
+response nobody has had to look at yet.
+
+### The part that is ours
+
+19.b is downstream of a change we made on purpose. When the permission was
+reported done we deleted the unattached-upload fallback — it had been producing
+photos that uploaded, showed in the uploader, and attached to nothing, so the
+partner saw success and the moderator saw an empty venue. We made the refusal
+loud.
+
+**If attaching is still refused, that decision is now the visible failure.** It
+is still the right call — an orphaned photo is worse than a reported one — but
+"images throw an error" is now the correct behaviour of a permission that is not
+in place, rather than a new fault. Restoring the fallback would make the symptom
+disappear and put the silent data loss back, so it stays.
+
+Which puts a sharper point on §14's standing ask: a whitelisted
+`upload_venue_photo(venue_name, file)` that elevates internally, like every
+other method in this app, ends the dependency on stock Frappe endpoints and the
+role permissions they need. Three separate symptoms have now come from that one
+dependency.
+
+### Also shipped today
+
+- **Bookings read live** off `get_venue_bookings`, which landed with a full
+  contract. Grouped by day, phone numbers dial, "today" computed in local time
+  because `toISOString()` is UTC and would show tomorrow's book to anyone
+  opening the portal before 02:00 SAST.
+- **Legal document acceptance**, built against a guessed contract — see §18.
+  Stricter than anything else here: the acceptance is read back before the
+  screen claims it, because a tick shown over an unwritten row is a
+  manufactured record of agreement rather than an inconvenience.
+
+---
+
+## 28 Jul 2026 — asking for what we already had
 
 Two corrections today, both in the same direction, and the direction is the
 lesson: **check what you are already holding before you ask whether you may
