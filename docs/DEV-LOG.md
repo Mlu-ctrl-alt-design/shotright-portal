@@ -99,6 +99,28 @@ other method in this app, ends the dependency on stock Frappe endpoints and the
 role permissions they need. Three separate symptoms have now come from that one
 dependency.
 
+### 19.c — the discard button, same shape again
+
+Third report, same day, same lesson twice over: **be generous about the shape of
+what you read.**
+
+`normalise` took the draft id as `draft_id || id`. A `frappe.get_all` listing
+returns the docname as `name`, so on that bench the id was undefined and
+`discardDraft` returned early on its own `if (!id)` guard. The button did
+nothing at all.
+
+The fix is one `|| raw.name`. What took longer, and matters more, is that the
+button could fail **silently at all**. It awaited, invalidated the query, and
+returned nothing — so a discard that deleted nothing looked exactly like one
+that worked, and a partner pressing it twice learns the portal ignores them.
+Discard now re-reads the listing, confirms the draft is gone, and the card
+reports a failure it can prove rather than disappearing on faith.
+
+The regression test was checked against the OLD code before being kept. It
+fails there and passes here; a test that passes both ways proves nothing, and
+this session had already shipped three "no banner" assertions that fired before
+their data arrived.
+
 ### Also shipped today
 
 - **Bookings read live** off `get_venue_bookings`, which landed with a full

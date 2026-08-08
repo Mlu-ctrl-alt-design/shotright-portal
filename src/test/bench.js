@@ -131,6 +131,29 @@ const initial = () => ({
    */
   moodReadShape: 'ids',
 
+  /**
+   * Which field `list_venue_drafts` names the draft with.
+   *
+   * Reported 8 Aug: *"on the dashboard 'discard this draft' button is not
+   * working."* A `frappe.get_all`-shaped listing returns the docname as `name`
+   * and nothing called `draft_id` — and the portal read `draft_id || id`, so
+   * the id came back **undefined**, `discardDraft` returned early on its own
+   * `if (!id)` guard, and the button did nothing at all. Silently.
+   *
+   *   'draft_id' — what the contract in docs/RESUME-SETUP.md asks for
+   *   'name'     — what Frappe gives you if nobody aliases it
+   */
+  draftIdField: 'draft_id',
+
+  /**
+   * `discard_venue_draft` answers 200 and deletes nothing.
+   *
+   * The other way that button can appear dead, and the house speciality: a
+   * kwarg the method does not declare is dropped at 200, so the call
+   * "succeeds", the list refetches, and the card is still there.
+   */
+  draftDiscardSilentlyFails: false,
+
   /** `update_venue` throws on unrecognised fields rather than dropping them. */
   venueWritable: [
     'venue_name',

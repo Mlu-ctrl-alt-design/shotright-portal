@@ -455,7 +455,17 @@ const apiHandlers = [
   }),
 
   method('shotright.api.list_venue_drafts', () =>
-    ok(bench.drafts.filter((d) => !d.completed).map((d) => ({ ...d }))),
+    ok(
+      bench.drafts
+        .filter((d) => !d.completed)
+        .map((d) => {
+          const row = { ...d }
+          /* A listing that never says `draft_id` is not hypothetical — it is
+             what `frappe.get_all` returns unless someone aliases the field. */
+          if (bench.draftIdField === 'name') delete row.draft_id
+          return row
+        }),
+    ),
   ),
 
   method('shotright.api.get_venue_draft', ({ draft_id }) => {
@@ -464,6 +474,7 @@ const apiHandlers = [
   }),
 
   method('shotright.api.discard_venue_draft', ({ draft_id }) => {
+    if (bench.draftDiscardSilentlyFails) return ok({ ok: true })
     bench.drafts = bench.drafts.filter((d) => d.draft_id !== draft_id)
     return ok({ ok: true })
   }),

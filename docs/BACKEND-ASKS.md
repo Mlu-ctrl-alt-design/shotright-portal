@@ -26,11 +26,12 @@ and will save nothing, and nobody finds out until a partner loses their work.
 
 ## P0 — a partner is hitting this now
 
-### 19. Reported 8 Aug — both of these were previously reported fixed
+### 19. Reported 8 Aug — three issues, two of them ours
 
 > **19.a** *"When a user edits a venue they are unable to save because the moods
 > are throwing an error."*
 > **19.b** *"Images still cannot be attached, they also throw an error."*
+> **19.c** *"On the dashboard 'discard this draft' button is not working."*
 
 Logged together, and they turned out to be different in kind. **19.a was ours
 and is fixed** — no server error was ever involved, and it was the same incident
@@ -120,6 +121,27 @@ The standing ask from §14 if the permission cannot stay: **a whitelisted
 `upload_venue_photo(venue_name, file)` that elevates internally**, the same way
 every other `shotright.api.*` method does. That removes the dependency on stock
 Frappe endpoints for good, and it is the shape the rest of this app already has.
+
+#### 19.c — "discard this draft is not working" — ✅ FIXED, also ours
+
+Reported the same day. Two silent failure modes, and it was the first:
+
+1. **The id was undefined.** We read `draft_id || id`. A listing built with
+   `frappe.get_all` returns the docname as **`name`** and nothing called
+   `draft_id` unless someone aliased it — so the id came back undefined and
+   `discardDraft` returned early on its own guard. The button did nothing, said
+   nothing, and looked broken because it was. Now reads
+   `draft_id || name || id`.
+2. **A 200 that deletes nothing** was indistinguishable from success. Discard
+   now re-reads the listing and confirms the draft is gone; if it is still
+   there the partner is told so and the card stays, because the card is the
+   truth.
+
+**Worth confirming on your side:** does `list_venue_drafts` return `draft_id`,
+per the contract in `docs/RESUME-SETUP.md`, or only `name`? We now handle both,
+so this is not blocking — but if it is `name`, the same question applies to
+`get_venue_draft` and `discard_venue_draft`, which we call with `draft_id`. We
+send **both** `draft_id` and `name` on discard for that reason.
 
 #### Related and still open
 
