@@ -106,6 +106,21 @@ const parse = (value, fallback) => {
   }
 }
 
+/**
+ * Serialise a venue's moods the way `bench.moodReadShape` says.
+ *
+ * The portal must survive all three, because which one it gets depends on which
+ * endpoint answered — and after a `get_venue_detail` 404 it is reading the
+ * dashboard row instead, which is a different serialiser again.
+ */
+const shapeMoods = (moods) => {
+  const ids = Array.isArray(moods) ? moods : []
+  if (bench.moodReadShape === 'rows') return ids.map((id) => ({ mood: id }))
+  if (bench.moodReadShape === 'labels')
+    return ids.map((id) => bench.moods.find((m) => m.name === id)?.mood_name || id)
+  return ids
+}
+
 /** Built as a list so order is explicit and easy to read. */
 const apiHandlers = [
   method('shotright.api.login', ({ email, password }) => {
@@ -201,7 +216,7 @@ const apiHandlers = [
   method('shotright.api.get_venue_detail', ({ venue_name }) => {
     const venue = venueById(venue_name)
     if (!venue) return docMissing()
-    const out = { ...venue }
+    const out = { ...venue, moods: shapeMoods(venue.moods) }
     for (const field of bench.detailOmits || []) delete out[field]
     return ok(out)
   }),

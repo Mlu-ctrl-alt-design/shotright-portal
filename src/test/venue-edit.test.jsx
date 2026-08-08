@@ -218,3 +218,132 @@ describe('edit a venue', () => {
     ).toHaveValue('Corner Kitchen & Bar')
   })
 })
+
+/* ============================================================================
+   REPORTED 8 AUG — "unable to save because the moods are throwing an error"
+
+   There was no server error. `moods` is a child table, so a read can hand it
+   back as ids, as child rows, or as labels depending on which endpoint answered
+   — and after a `get_venue_detail` 404 (§0, reported the same day for
+   VEN-00008) it comes from the dashboard row, which is a different serialiser
+   again. The form seeded straight from that and matched with
+   `.includes(mood.name)`, so any shape but a flat list of docnames selected
+   NOTHING, and the form's own "select at least one mood" rule then refused to
+   submit a venue whose moods the partner had never touched.
+
+   Being generous on the READ is safe and is what these cover. Being generous on
+   the WRITE is not, and is deliberately not done: a guessed child-row shape
+   makes Frappe write empty rows and report success, silently erasing a venue's
+   moods. See §00.
+   ========================================================================= */
+describe('moods that arrive in an unexpected shape', () => {
+  for (const shape of ['rows', 'labels']) {
+    it(`shows the venue's moods as selected when they arrive as ${shape}`, async () => {
+      bench.moodReadShape = shape
+      renderApp({ route: EDIT, signedIn: true })
+
+      /* Toggle pills, not checkboxes — `aria-pressed` carries the state. */
+      const chilled = await screen.findByRole('button', { name: /^chilled$/i })
+      expect(chilled).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it(`saves an ordinary edit when moods arrive as ${shape}`, async () => {
+      /* THE REPORTED BUG. Nothing here touches a mood — this is someone fixing
+         an address — and before the fix it could not be saved at all. */
+      bench.moodReadShape = shape
+      const { user } = renderApp({ route: EDIT, signedIn: true })
+
+      const address = await screen.findByLabelText(/^address/i)
+      await user.clear(address)
+      await user.type(address, '9 Bree St, Cape Town')
+      await user.click(screen.getByRole('button', { name: /save and resubmit|^save/i }))
+
+      await waitFor(() =>
+        expect(venueById('VEN-00001').address).toBe('9 Bree St, Cape Town'),
+      )
+      expect(screen.queryByText(/select at least one mood/i)).not.toBeInTheDocument()
+    })
+  }
+
+  it('does not send moods when the selection has not changed', async () => {
+    /* The other half of the fix, and the one that keeps ordinary edits away
+       from §00 entirely: `moods` is the one field `update_venue` cannot take,
+       so an edit to an address has no business carrying it. */
+    bench.moodReadShape = 'rows'
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const address = await screen.findByLabelText(/^address/i)
+    await user.clear(address)
+    await user.type(address, '9 Bree St, Cape Town')
+    await user.click(screen.getByRole('button', { name: /save and resubmit|^save/i }))
+
+    await waitFor(() => expect(venueById('VEN-00001').address).toBe('9 Bree St, Cape Town'))
+    const write = bench.calls.filter((c) => c.method === 'update_venue').at(-1)
+    expect(write.args.moods).toBeUndefined()
+  })
+
+  it('treats re-ticking a mood as no change, rather than as an edit', async () => {
+    /* Moods are a SET. Un-ticking one and putting it back used to reorder the
+       array, which read as a change, which sent `moods`, which is the one field
+       that crashes. A partner who changed their mind got a crash for it. */
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const lively = await screen.findByRole('button', { name: /^lively$/i })
+    await user.click(lively)
+    await user.click(lively)
+    await user.click(screen.getByRole('button', { name: /save and resubmit|^save/i }))
+
+    await waitFor(() => expect(bench.calls.some((c) => c.method === 'update_venue')).toBe(true))
+    const write = bench.calls.filter((c) => c.method === 'update_venue').at(-1)
+    expect(write.args.moods).toBeUndefined()
+  })
+
+  it('still sends moods when the partner genuinely changes them', async () => {
+    /* The fix must not become a way of never saving moods at all. */
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /^lively$/i }))
+    await user.click(screen.getByRole('button', { name: /save and resubmit|^save/i }))
+
+    await waitFor(() => expect(bench.calls.some((c) => c.method === 'update_venue')).toBe(true))
+    const write = bench.calls.filter((c) => c.method === 'update_venue').at(-1)
+    expect(write.args.moods).toBeDefined()
+  })
+
+  it('keeps a mood it cannot resolve, rather than proposing to delete it', async () => {
+    /* An unknown key is a mood we do not understand, not a mood the venue does
+       not have. Dropping it on seed would quietly remove it on the next save. */
+    bench.venues[0].moods = ['MOOD-CHILLED', 'MOOD-RETIRED']
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /^lively$/i }))
+    await user.click(screen.getByRole('button', { name: /save and resubmit|^save/i }))
+
+    await waitFor(() => expect(bench.calls.some((c) => c.method === 'update_venue')).toBe(true))
+    const write = bench.calls.filter((c) => c.method === 'update_venue').at(-1)
+    expect(write.args.moods).toContain('MOOD-RETIRED')
+  })
+})
+
+  it('saves when detail 404s AND the dashboard row describes moods differently', async () => {
+    /* THE PRODUCTION COMBINATION, reported the same day for VEN-00008:
+
+         GET …get_venue_detail?venue_name=VEN-00008  404
+
+       With detail gone we read the dashboard row instead — a different
+       serialiser over the same child table, under no obligation to agree with
+       the one the form was written against. That is what makes the shape
+       mismatch likely rather than theoretical, and the two reports are one
+       incident. */
+    bench.deploy.get_venue_detail = false
+    bench.moodReadShape = 'rows'
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const address = await screen.findByLabelText(/^address/i)
+    await user.clear(address)
+    await user.type(address, '9 Bree St, Cape Town')
+    await user.click(screen.getByRole('button', { name: /save and resubmit|^save/i }))
+
+    await waitFor(() => expect(venueById('VEN-00001').address).toBe('9 Bree St, Cape Town'))
+    expect(screen.queryByText(/select at least one mood/i)).not.toBeInTheDocument()
+  })

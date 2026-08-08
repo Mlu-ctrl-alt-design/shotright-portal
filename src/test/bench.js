@@ -116,6 +116,21 @@ const initial = () => ({
   /** Fields `get_venue_detail` leaves out that `get_vendor_dashboard` returns. */
   detailOmits: [],
 
+  /**
+   * How a venue's `moods` come back on a READ.
+   *
+   * `moods` is a child table, so what a serialiser hands back is a choice, not
+   * a fact — and the two endpoints that describe a Venue need not make the same
+   * one. Reported 8 Aug: an edit that could not be saved because the form
+   * matched child rows against docnames, selected nothing, and then refused to
+   * submit on its own "select at least one mood" rule.
+   *
+   *   'ids'    ['MOOD-CHILLED']                — what the form always assumed
+   *   'rows'   [{mood: 'MOOD-CHILLED'}]        — child rows, as Frappe holds them
+   *   'labels' ['Chilled']                     — serialised for humans
+   */
+  moodReadShape: 'ids',
+
   /** `update_venue` throws on unrecognised fields rather than dropping them. */
   venueWritable: [
     'venue_name',

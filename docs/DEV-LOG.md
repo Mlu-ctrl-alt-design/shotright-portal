@@ -17,30 +17,71 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 8 Aug 2026 (latest) — two reports logged, deliberately not fixed
+## 8 Aug 2026 (latest) — one report was ours all along
 
-Two issues reported from the live portal. **Both logged to BACKEND-ASKS §19 and
-neither fixed**, which is the decision worth recording.
+Two issues reported from the live portal, logged to BACKEND-ASKS §19. They were
+logged as a matched pair of backend recurrences. **One of them wasn't a backend
+issue at all**, and finding that out took a third report that looked unrelated.
 
 - **19.a — moods block a venue edit.** This is §00, filed 28 Jul, still open.
 - **19.b — images still cannot be attached.** This is §14, which we marked
   **RESOLVED on 28 Jul** on the strength of "the backend photo permission is
   done".
 
-### Why nothing was changed
+### 19.a was not §00. It was the edit form refusing to submit.
 
-Neither report came with the response body, and every plausible fix for 19.a
-contradicts one of the others. The expected §00 behaviour is a PARTIAL save —
-catch the child-table `TypeError`, drop `moods`, retry, keep the rest — so
-"unable to save" is either the retry not matching a changed error string, or the
-retry working and our warning copy reading as a failure, or a different refusal
-path entirely. Those need opposite fixes. Guessing between them is precisely how
-this project accumulated six name mismatches, and the tie-breaker is one JSON
-response nobody has had to look at yet.
+The first instinct was right — don't guess between three contradictory fixes,
+ask for the response body. The body never arrived; a third report did:
 
-### The part that is ours
+```
+GET …get_venue_detail?venue_name=VEN-00008   404
+```
 
-19.b is downstream of a change we made on purpose. When the permission was
+Filed as §0, known, survivable, and apparently unrelated. It is the cause.
+
+`moods` is a child table, so a read hands it back as ids, as child rows, or as
+labels depending on which serialiser answered. **When `get_venue_detail` 404s we
+fall back to the dashboard row — a different serialiser over the same child
+table.** The edit form seeded straight from whatever arrived and matched with
+`.includes(mood.name)`, so any shape but a flat list of docnames selected
+nothing. Then the form's own *"select at least one mood"* rule refused to submit
+a venue whose moods the partner had never touched.
+
+So: no server error, no `TypeError`, no retry, no §00. A client-side validation
+rule firing on a client-side seeding bug, reported as "the moods are throwing an
+error" — which is exactly what it looks like from the outside.
+
+**The lesson is about the report, not the code.** Two reports arrived as
+separate issues and were logged as separate issues. They were one. The 404 was
+dismissed on the reasonable grounds that the portal already survives it — and
+"we survive it" turned out to mean "we take a different code path that nothing
+had tested the mood shapes against".
+
+Fixed on the read side only. `moodKeysOf()` accepts every shape and the form
+resolves keys against the Mood list by docname or label; an unresolvable key is
+KEPT, because an unknown mood is one we don't understand rather than one the
+venue doesn't have. And moods are now compared as a **set**, so un-ticking a
+mood and putting it back is no longer an edit — that used to send `moods`, which
+is the one field `update_venue` cannot take, so a partner who changed their mind
+got §00 for it.
+
+**The write shape is still not guessed**, and §00 is still open. Reading a shape
+wrong shows the wrong checkboxes, which a partner can see. Writing a guessed
+child-row shape makes Frappe write empty rows and report success, silently
+erasing a venue's moods.
+
+### 19.b — still open, and the IP was worth chasing
+
+The 403 is reported against `64.29.17.3`. That is **Vercel's edge, not the
+bench** — `shotright.thedaystar.co.za` is `194.163.168.19`, and every `/api/*`
+call is proxied server-side by the rewrite in `vercel.json`. So the browser
+names Vercel for a response that almost certainly came from Frappe, and a 403
+from the edge is indistinguishable from a 403 from the bench on the status line
+alone. The response body separates them: a Frappe refusal carries `exc_type` and
+`_server_messages`, an edge refusal doesn't. (Couldn't probe it from here — this
+environment's egress policy blocks the host.)
+
+19.b is otherwise downstream of a change we made on purpose. When the permission was
 reported done we deleted the unattached-upload fallback — it had been producing
 photos that uploaded, showed in the uploader, and attached to nothing, so the
 partner saw success and the moderator saw an empty venue. We made the refusal

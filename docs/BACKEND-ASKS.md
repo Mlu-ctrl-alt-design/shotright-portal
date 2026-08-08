@@ -32,38 +32,54 @@ and will save nothing, and nobody finds out until a partner loses their work.
 > are throwing an error."*
 > **19.b** *"Images still cannot be attached, they also throw an error."*
 
-Logging these together because the important fact is shared: **both are
-recurrences.** 19.a is §00, filed 28 Jul and still open. 19.b is §14, which was
-marked **RESOLVED on 28 Jul** on the strength of *"the backend photo permission
-is done"* — and on that basis we removed the workaround that had been hiding it.
-So this one may be partly ours, and that is set out below rather than buried.
+Logged together, and they turned out to be different in kind. **19.a was ours
+and is fixed** — no server error was ever involved, and it was the same incident
+as the `get_venue_detail` 404 reported minutes later. **19.b still needs you.**
 
-**What we need to act, and cannot get from here.** For each error, the browser's
-Network tab → the failing request → the **Response** body. That JSON carries
-`exc_type` and the traceback, and it is the difference between a fix and a
-sixth guess at a field name. A screenshot of the red message on screen is not
-enough: the portal deliberately does not print server internals to partners any
-more, so the sentence they see is ours, not the bench's.
+**What we need for 19.b, and cannot get from here.** The browser's Network tab →
+the failing `upload_file` → the **Response body**. The status line alone cannot
+tell us who refused (see below); the body can. A screenshot of the red message
+on screen is not enough either — the portal deliberately no longer prints server
+internals to partners, so that sentence is ours, not the bench's.
 
-#### 19.a — moods on save
+#### 19.a — moods on save — ✅ FIXED, and it was ours, not yours
 
-Expected symptom from §00 is a **partial** save: we catch the child-table
-`TypeError`, drop `moods`, retry, and the rest of the edit lands with *"couldn't
-update the moods"*. **"Unable to save" is different from that**, so one of:
+**No server error was involved.** Please take this one off your list.
 
-1. the retry is not firing — the error text changed and no longer matches
-   `does not support item assignment|_init_child`, so nothing is stripped;
-2. it is firing and the partner reads *"couldn't update the moods"* as a
-   failure, in which case the edit did save and our wording is the bug;
-3. `update_venue` is now refusing moods a different way — the *"Cannot update
-   field(s)"* path — which strips and retries separately.
+`moods` is a child table, so a READ hands it back as ids, as child rows
+(`{mood: 'MOOD-CHILLED'}`), or as labels depending on which endpoint answered.
+The edit form seeded straight from that and matched with `.includes(mood.name)`
+— so any shape but a flat list of docnames selected **nothing**, and the form's
+own *"select at least one mood"* rule then refused to submit a venue whose moods
+the partner had never touched. That is the "unable to save".
 
-All three are one response body away from being decided. **We are still not
-guessing the child-row field name** — `[{mood: id}]` writes empty rows and
-reports success if the field is called anything else, silently erasing a venue's
-moods, which is strictly worse than not saving them. §00's ask is unchanged:
-**tell us the field name, or make `update_venue` take the same shape
-`create_venue` already accepts.**
+**The `get_venue_detail` 404 you reported minutes later for VEN-00008 is the
+same incident.** When detail 404s we fall back to the dashboard row — a
+different serialiser over the same child table, under no obligation to describe
+it the way the form was written against. That is what turned a latent shape
+assumption into a blocked save.
+
+Two fixes, both frontend, both shipped:
+
+1. **Read every shape.** `moodKeysOf()` accepts ids, child rows and labels, and
+   the form resolves them against the Mood list by docname or by label. A key we
+   can't resolve is **kept**, not dropped — an unknown mood is one we don't
+   understand, not one the venue doesn't have, and dropping it would quietly
+   propose deleting it on the next save.
+2. **Compare moods as a SET.** They were compared as ordered JSON, so un-ticking
+   a mood and putting it back counted as an edit — which sent `moods` — which is
+   the one field `update_venue` cannot accept. A partner who changed their mind
+   got §00 for it. Ordinary edits now never carry the mood list at all.
+
+**We are still not guessing the write shape.** Being generous on a read is safe:
+the wrong checkboxes are visible and correctable. Writing a guessed child-row
+shape makes Frappe create empty rows and report success, silently erasing a
+venue's moods. **§00 is unchanged and still needs you** — the moment a partner
+genuinely changes their moods, we have to send them, and it still crashes.
+
+**Still open on your side:** §00 (the write), and §0 (why `get_venue_detail`
+404s on VEN-00008 while the dashboard lists it — the portal survives it, but it
+is a real 404 and it is what exposed this).
 
 #### 19.b — attaching images
 
@@ -78,6 +94,15 @@ think loud is still right — an orphaned photo is worse than a reported one —
 it means "images throw an error" is the expected behaviour of a permission that
 is not actually in place, not a new fault. Worth being explicit about, because
 it changes what the fix is.
+
+**First, where the 403 comes from — the request is not hitting the bench
+directly.** `shotright-portal.vercel.app` resolves to `64.29.17.3`, which is
+Vercel's edge; the bench is `194.163.168.19`. Every `/api/*` call is proxied
+server-side by the rewrite in `vercel.json`. The browser therefore reports
+Vercel's address for a response that (almost certainly) originated on the bench,
+and a 403 raised by the edge and a 403 raised by Frappe are indistinguishable
+from the status line alone. **The response body separates them**: a Frappe
+refusal carries `exc_type` and `_server_messages`; an edge refusal does not.
 
 Three things to check on the bench, in order:
 
