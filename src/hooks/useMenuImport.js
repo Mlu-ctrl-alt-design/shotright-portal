@@ -38,6 +38,18 @@ export function useMenuImport(venueId, { onComplete } = {}) {
   const [uploadPercent, setUploadPercent] = useState(0)
   const [job, setJob] = useState(null)
   const [error, setError] = useState(null)
+  /**
+   * WHY it failed, not just that it did.
+   *
+   * 'upload'     the file never reached the server — permission, size, network.
+   *              Nothing is wrong with the partner's file, so nothing we say
+   *              may suggest there is.
+   * 'permission' an upload refusal we can name as ours. Another file will fail
+   *              exactly the same way, so "try another file" is not an action.
+   * 'parse'      the file arrived and could not be read. THIS is the one where
+   *              a different file is genuinely the answer.
+   */
+  const [failure, setFailure] = useState(null)
   const [elapsed, setElapsed] = useState(0)
   // True only when the work genuinely outlives the page — the UI keys its
   // "you can leave" copy off this and must never assume it.
@@ -128,6 +140,7 @@ export function useMenuImport(venueId, { onComplete } = {}) {
   const start = useCallback(
     async (file) => {
       setError(null)
+      setFailure(null)
       setJob(null)
       setElapsed(0)
       setUploadPercent(0)
@@ -150,6 +163,16 @@ export function useMenuImport(venueId, { onComplete } = {}) {
       } catch (err) {
         setPhase('failed')
         setError(err.message)
+        /* A 403 on the upload is ours, and saying "we couldn't read that file"
+           over it sends a partner off to fix a spreadsheet that was never
+           broken. See `uploadMenuFile`, which tags the stage. */
+        const refused =
+          err?.status === 403 ||
+          /PermissionError/i.test(err?.excType || '') ||
+          /doctype access|not permitted|no permission|role permission/i.test(
+            `${err?.message || ''} ${err?.detail || ''}`,
+          )
+        setFailure(err?.stage === 'upload' ? (refused ? 'permission' : 'upload') : 'parse')
       }
     },
     [venueId, finish, watch],
@@ -186,12 +209,14 @@ export function useMenuImport(venueId, { onComplete } = {}) {
     setPhase('idle')
     setJob(null)
     setError(null)
+    setFailure(null)
   }, [venueId])
 
   return {
     phase,
     job,
     error,
+    failure,
     elapsed,
     estimate,
     slowAfter,

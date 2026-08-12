@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useCreateVenue } from '../../../hooks/useVendor'
 import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
 import { useDraft, useSetupDraft } from '../../../hooks/useSetupDraft'
+import { useLegalStanding } from '../../../hooks/useLegalStanding'
 import { WIZARD_STEPS, stepIndex } from '../../../services/wizardSteps'
 import {
   FIELD_STEP,
@@ -98,6 +99,17 @@ function Wizard({ resumeId, draft, draftError }) {
   const [photos, setPhotos] = useState(() => saved.photos || [])
 
   /**
+   * Which detail fields came from a Google listing rather than from the partner.
+   *
+   * Held HERE, not in the step, for the same reason the smart-default dirty
+   * flags are: the step unmounts when you walk to operating hours and back, and
+   * a provenance marker that resets on re-entry is a field that quietly stops
+   * saying "we filled this in, check it". Also survives into the draft, so a
+   * partner resuming tomorrow still sees which values were not theirs.
+   */
+  const [fromPlace, setFromPlace] = useState(() => saved.fromPlace || [])
+
+  /**
    * Smart defaults live HERE, not in the step.
    *
    * Steps unmount when you navigate between them, so dirty flags held inside
@@ -134,6 +146,10 @@ function Wizard({ resumeId, draft, draftError }) {
   const [submitError, setSubmitError] = useState(null)
   const [created, setCreated] = useState(null)
   const createVenue = useCreateVenue()
+  /* Submitting is where a listing enters our review queue and starts heading
+     for real customers, so it is where the agreement has to be in place. See
+     `ENFORCE_AT` in services/legal.js for why here and not at login. */
+  const legal = useLegalStanding()
 
   const step = STEPS[currentIndex]
   const isLast = currentIndex === STEPS.length - 1
@@ -151,7 +167,7 @@ function Wizard({ resumeId, draft, draftError }) {
     step: step.key,
     completed: completed.map((i) => STEPS[i]?.key).filter(Boolean),
     venueName: details.venue_name,
-    payload: { moods, details, hours, menu, photos },
+    payload: { moods, details, hours, menu, photos, fromPlace },
     enabled: !created,
   })
 
@@ -195,6 +211,17 @@ function Wizard({ resumeId, draft, draftError }) {
     dress_code: details.dress_code,
     atmosphere: details.atmosphere,
     summary: details.summary,
+    /**
+     * The one piece of Google data we are allowed to keep, and the only one
+     * sent. It is what lets the bench spot a second partner claiming a
+     * restaurant that is already listed — which is the whole anti-duplicate
+     * story, and it splits a venue's bookings in two when it goes wrong.
+     *
+     * ⚠️ If `create_venue` does not declare `place_id`, Frappe drops it at 200
+     * and nothing here will say so. Filed as §20; the portal works either way
+     * and simply loses the dedupe until the field exists.
+     */
+    place_id: details.place_id || undefined,
     // Order is data, not decoration: photo one is what a customer sees when
     // this venue comes back from a mood search.
     photos: photos.map((p, index) => ({ ...p, idx: index + 1 })),
@@ -227,6 +254,27 @@ function Wizard({ resumeId, draft, draftError }) {
         [s.key]: new Set([...(prev[s.key] || []), ...Object.keys(errors)]),
       }))
       setSubmitError(errors[field])
+      return
+    }
+
+    /**
+     * THE LEGAL GATE — and the reason it is placed AFTER validation.
+     *
+     * By this point the partner has filled in five steps. Sending them away
+     * from that without their work being safe would be the single most
+     * expensive thing this wizard could do, so the draft is written first and
+     * only then do we navigate. They come back to `/venues/new?resume=…` with
+     * everything where they left it.
+     *
+     * `legal.blocks` is false while the answer is still loading and false when
+     * the bench cannot answer at all — a venue reaching review unaccepted is
+     * something a human catches, and a partner blocked from submitting by an
+     * endpoint that is simply absent is not.
+     */
+    if (legal.blocks) {
+      setSubmitError(null)
+      await draftState.saveNow?.()
+      navigate(`/legal?from=submit&resume=${draftState.id || ''}`)
       return
     }
 
@@ -372,6 +420,18 @@ function Wizard({ resumeId, draft, draftError }) {
       case 'details':
         return (
           <VenueDetailsStep
+          fromPlace={fromPlace}
+          onPlacePicked={(next, filled) => {
+            setDetails(next)
+            setFromPlace(filled)
+            /* Everything a place fills is a value the partner did not type, so
+               none of it may be treated as a confirmed smart default. Marking
+               them dirty stops the defaults engine reapplying over the top. */
+            filled.forEach((field) => defaults.markDirty?.(field))
+          }}
+          onClearPlaceField={(field) =>
+            setFromPlace((prev) => prev.filter((f) => f !== field))
+          }
             value={details}
             onChange={setDetails}
             defaults={defaults}
@@ -436,6 +496,27 @@ function Wizard({ resumeId, draft, draftError }) {
           <Alert variant="warning">
             We couldn’t save your progress: {draftState.error} Don’t close this tab — press Next to
             try again, or finish and submit.
+          </Alert>
+        </div>
+      )}
+
+      {/* Said on the last step, BEFORE the button is pressed. Being redirected
+          off a finished form is a bad surprise however carefully the work is
+          preserved — and a partner who knows what is coming can accept first
+          and submit once. */}
+      {isLast && legal.blocks && (
+        <div className="mb-5">
+          <Alert variant="warning">
+            <p className="font-bold">One thing before you submit</p>
+            <p className="mt-1">
+              There{legal.outstanding.length === 1 ? ' is a document' : ' are documents'} to accept
+              before a venue can go to our reviewers. Everything here is saved — press Submit and
+              we’ll take you there, or{' '}
+              <Link className="underline" to="/legal?from=submit">
+                read {legal.outstanding.length === 1 ? 'it' : 'them'} now
+              </Link>
+              .
+            </p>
           </Alert>
         </div>
       )}

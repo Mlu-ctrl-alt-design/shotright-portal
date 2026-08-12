@@ -69,6 +69,23 @@ export async function withFallback(method, real, whenMissing) {
   } catch (err) {
     if (err?.status === 404) {
       capabilities.set(method, false)
+      /**
+       * The method name goes to the CONSOLE, not to the partner.
+       *
+       * It used to be printed on screen — "the portal is asking for
+       * shotright.api.update_venue, and it isn't there" — on the reasoning that
+       * naming it got it fixed faster. It did, and it was still wrong: a
+       * restaurant owner reading a dotted Python path has been handed our
+       * problem to hold.
+       *
+       * Logged once per method per tab (the capability cache guarantees that),
+       * so a screenshot of the console still answers "which endpoint?" without
+       * a single partner-facing screen mentioning one.
+       */
+      console.warn(
+        `[shotright] endpoint not available on this server: ${method}`,
+        '— the portal has fallen back. This is a deployment gap, not a user error.',
+      )
       return whenMissing()
     }
     throw err
@@ -471,6 +488,43 @@ export const VENUE_DETAIL_METHOD = 'shotright.api.get_venue_detail'
  */
 const VENUE_ESSENTIALS = ['address', 'latitude', 'longitude', 'moods', 'operating_hours']
 
+/**
+ * Pull mood keys out of whatever shape a venue's `moods` arrived in.
+ *
+ * ⚠️ Reported 8 Aug: *"when a user edits a venue they are unable to save
+ * because the moods are throwing an error."* This is that bug, and it was never
+ * a server error — it was ours.
+ *
+ * `moods` is a CHILD TABLE on `Venue` (§00). Depending on which endpoint
+ * answers, it comes back as plain ids, as child rows (`{mood: 'MOOD-CHILLED'}`),
+ * or as labels. The edit form seeded itself straight from it and matched with
+ * `.includes(mood.name)` — so the moment the shape was anything but a list of
+ * docnames, **nothing matched, zero moods showed as selected, and the form's
+ * own "select at least one mood" rule refused to submit.** A partner could not
+ * save a venue they had changed nothing about.
+ *
+ * The `get_venue_detail` 404 (§0) makes it far more likely, not less: when
+ * detail 404s we fall back to the dashboard row, and the two endpoints have no
+ * obligation to describe a child table the same way.
+ *
+ * BEING GENEROUS HERE IS SAFE, and it is worth saying why, because §00 says the
+ * opposite about writing. Reading a shape wrong shows a partner the wrong
+ * checkboxes, which they can see and correct. WRITING a guessed child-row shape
+ * makes Frappe create empty rows and report success, silently erasing a venue's
+ * moods with nothing on screen to show for it. So: read every shape, write only
+ * what we were given.
+ */
+export const moodKeysOf = (moods) => {
+  if (!Array.isArray(moods)) return []
+  return moods
+    .map((m) => {
+      if (typeof m === 'string') return m.trim()
+      if (!m || typeof m !== 'object') return ''
+      return String(m.mood || m.name || m.mood_name || m.label || m.value || '').trim()
+    })
+    .filter(Boolean)
+}
+
 const missingFrom = (venue) =>
   VENUE_ESSENTIALS.filter((f) => venue?.[f] === undefined || venue?.[f] === null)
 
@@ -622,6 +676,21 @@ export const createVenue = (payload) =>
         atmosphere_desc: payload.atmosphere,
         moods: [...canonical.map((m) => m.label), ...suggested.map((m) => m.mood)],
         operating_hours: rows,
+        /**
+         * The only thing from a Google listing that reaches the database.
+         *
+         * Storable indefinitely, unlike every other Places field, and it is
+         * what lets the bench notice that two partners have claimed the same
+         * restaurant — a duplicate splits one venue's bookings across two
+         * listings, and neither owner sees the halves.
+         *
+         * Sent as `undefined` when absent so it does not overwrite anything,
+         * and if `create_venue` does not declare it Frappe drops it at 200 with
+         * no complaint. That is survivable — the venue saves and the dedupe is
+         * simply not available — but it is invisible, so it is filed as §20
+         * rather than left to be discovered.
+         */
+        place_id: payload.place_id || undefined,
       })
 
       // Menu is a separate set of calls; create_venue takes none of it.
@@ -662,7 +731,7 @@ export const createVenue = (payload) =>
                 // this one is a live mismatch somebody has to look at today.
                 `${uploaded}, but the app only kept ${result.mismatch.stored} of ` +
                   `${result.mismatch.sent}. Nothing has been lost from your device or ours — ` +
-                  `we’ve reported it and we’ll get the rest attached.`
+                  `nothing has been lost — we’re getting the rest attached.`
               : `${uploaded} and ` +
                   `${result?.attached ? 'attached to this venue for our reviewers' : 'stored safely'}, ` +
                   `but they won’t appear to customers yet — the app has no field for a venue’s ` +
@@ -869,7 +938,7 @@ const warnAboutRefused = (refused) => {
 
   return [
     `Everything else was saved, but this app couldn’t update ${list} — the server won’t ` +
-      `accept ${labels.length === 1 ? 'that change' : 'those changes'} yet. We’ve reported it.`,
+      `accept ${labels.length === 1 ? 'that change' : 'those changes'} yet.`,
   ]
 }
 
@@ -882,12 +951,37 @@ const warnAboutRefused = (refused) => {
  * that didn't change is a wasted key; NOT sending one that did is data loss, so
  * the comparison leans the safe way.
  */
-const same = (a, b) => {
+/**
+ * Fields where ORDER IS NOT A CHANGE.
+ *
+ * Moods are a set — "Chilled and Lively" is the same venue as "Lively and
+ * Chilled". Comparing them as ordered JSON meant that un-ticking a mood and
+ * re-ticking it counted as an edit, which sent `moods` to `update_venue`, which
+ * is the one field it cannot accept (§00). A partner who touched the mood
+ * checkboxes and changed their mind back was handed a crash for it.
+ *
+ * `operating_hours` is deliberately NOT here: those rows are per-day and their
+ * order carries meaning we should not be second-guessing.
+ */
+const UNORDERED_FIELDS = new Set(['moods'])
+
+const sameSet = (a, b) => {
+  const left = [...moodKeysOf(a)].sort()
+  const right = [...moodKeysOf(b)].sort()
+  return left.length === right.length && left.every((v, i) => v === right[i])
+}
+
+const same = (a, b, field) => {
   if (a === b) return true
   if (a == null && b == null) return true
   if (a === '' && b == null) return true
   if (b === '' && a == null) return true
   if (Array.isArray(a) && Array.isArray(b)) {
+    /* Compared as sets AND across shapes, so a list of ids and the same list as
+       child rows do not read as a change. Both halves matter: without the
+       shape-blindness, every save of a venue whose moods came back as objects
+       would send `moods` and hit §00. */
+    if (UNORDERED_FIELDS.has(field)) return sameSet(a, b)
     try {
       return JSON.stringify(a) === JSON.stringify(b)
     } catch {
@@ -946,7 +1040,7 @@ export const updateVenue = async (venueId, payload, existing) => {
   const body = {}
   for (const field of VENUE_WRITE_FIELDS) {
     if (payload[field] === undefined) continue
-    if (current && same(payload[field], current[field])) continue
+    if (current && same(payload[field], current[field], field)) continue
     body[field] = payload[field]
   }
   if (renaming) {
@@ -996,7 +1090,7 @@ export const updateVenue = async (venueId, payload, existing) => {
       // two problems doesn't read "everything else was saved" twice and have to
       // work out which "everything else" each one meant.
       (refusedWarnings.length ? '' : 'Everything else you changed was saved — but ') +
-      `this app can’t rename a venue yet, so that part didn’t take. We’ve reported it.`
+      `we can’t rename a venue just yet, so that part didn’t take.`
 
   return {
     venue,

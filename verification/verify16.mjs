@@ -174,14 +174,24 @@ const review = async (page) => {
   const { page, context } = await open({ detail: 'method-missing', inList: false })
   const body = await review(page)
 
+  /* UPDATED 28 Jul. These used to assert that the METHOD NAME appeared on
+     screen, on the reasoning that naming it got it fixed faster. It did, and it
+     was still wrong: a restaurant owner reading a dotted Python path has been
+     handed our problem to hold. The name now goes to the console instead — see
+     `withFallback` — so a screenshot still answers "which endpoint?" and no
+     partner-facing screen mentions one.
+
+     What survives unchanged is the requirement underneath: their data is
+     intact, and they are told so in words they can act on. */
   check(
-    /isn’t on your server yet/i.test(body),
-    'when Frappe names the method, we say the portal is ahead of the bench',
+    /can’t open this venue right now/i.test(body),
+    'a missing method reads as a temporary problem, not as a lost venue',
   )
   check(
-    /your venue is fine/i.test(body),
-    'and explicitly reassure them about their own data',
+    /Nothing has happened to it/i.test(body),
+    'and explicitly reassures them about their own data',
   )
+  check(!/shotright\.api|server yet/i.test(body), 'without naming a method or a server')
   check(
     !/has been removed/i.test(body),
     'rather than reporting our deployment gap as their venue being deleted',

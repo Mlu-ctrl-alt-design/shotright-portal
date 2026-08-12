@@ -17,7 +17,155 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 28 Jul 2026 (latest) — asking for what we already had
+## 8 Aug 2026 (latest) — one report was ours all along
+
+Two issues reported from the live portal, logged to BACKEND-ASKS §19. They were
+logged as a matched pair of backend recurrences. **One of them wasn't a backend
+issue at all**, and finding that out took a third report that looked unrelated.
+
+- **19.a — moods block a venue edit.** This is §00, filed 28 Jul, still open.
+- **19.b — images still cannot be attached.** This is §14, which we marked
+  **RESOLVED on 28 Jul** on the strength of "the backend photo permission is
+  done".
+
+### 19.a was not §00. It was the edit form refusing to submit.
+
+The first instinct was right — don't guess between three contradictory fixes,
+ask for the response body. The body never arrived; a third report did:
+
+```
+GET …get_venue_detail?venue_name=VEN-00008   404
+```
+
+Filed as §0, known, survivable, and apparently unrelated. It is the cause.
+
+`moods` is a child table, so a read hands it back as ids, as child rows, or as
+labels depending on which serialiser answered. **When `get_venue_detail` 404s we
+fall back to the dashboard row — a different serialiser over the same child
+table.** The edit form seeded straight from whatever arrived and matched with
+`.includes(mood.name)`, so any shape but a flat list of docnames selected
+nothing. Then the form's own *"select at least one mood"* rule refused to submit
+a venue whose moods the partner had never touched.
+
+So: no server error, no `TypeError`, no retry, no §00. A client-side validation
+rule firing on a client-side seeding bug, reported as "the moods are throwing an
+error" — which is exactly what it looks like from the outside.
+
+**The lesson is about the report, not the code.** Two reports arrived as
+separate issues and were logged as separate issues. They were one. The 404 was
+dismissed on the reasonable grounds that the portal already survives it — and
+"we survive it" turned out to mean "we take a different code path that nothing
+had tested the mood shapes against".
+
+Fixed on the read side only. `moodKeysOf()` accepts every shape and the form
+resolves keys against the Mood list by docname or label; an unresolvable key is
+KEPT, because an unknown mood is one we don't understand rather than one the
+venue doesn't have. And moods are now compared as a **set**, so un-ticking a
+mood and putting it back is no longer an edit — that used to send `moods`, which
+is the one field `update_venue` cannot take, so a partner who changed their mind
+got §00 for it.
+
+**The write shape is still not guessed**, and §00 is still open. Reading a shape
+wrong shows the wrong checkboxes, which a partner can see. Writing a guessed
+child-row shape makes Frappe write empty rows and report success, silently
+erasing a venue's moods.
+
+### 19.b — still open, and the IP was worth chasing
+
+The 403 is reported against `64.29.17.3`. That is **Vercel's edge, not the
+bench** — `shotright.thedaystar.co.za` is `194.163.168.19`, and every `/api/*`
+call is proxied server-side by the rewrite in `vercel.json`. So the browser
+names Vercel for a response that almost certainly came from Frappe, and a 403
+from the edge is indistinguishable from a 403 from the bench on the status line
+alone. The response body separates them: a Frappe refusal carries `exc_type` and
+`_server_messages`, an edge refusal doesn't. (Couldn't probe it from here — this
+environment's egress policy blocks the host.)
+
+19.b is otherwise downstream of a change we made on purpose. When the permission was
+reported done we deleted the unattached-upload fallback — it had been producing
+photos that uploaded, showed in the uploader, and attached to nothing, so the
+partner saw success and the moderator saw an empty venue. We made the refusal
+loud.
+
+**If attaching is still refused, that decision is now the visible failure.** It
+is still the right call — an orphaned photo is worse than a reported one — but
+"images throw an error" is now the correct behaviour of a permission that is not
+in place, rather than a new fault. Restoring the fallback would make the symptom
+disappear and put the silent data loss back, so it stays.
+
+Which puts a sharper point on §14's standing ask: a whitelisted
+`upload_venue_photo(venue_name, file)` that elevates internally, like every
+other method in this app, ends the dependency on stock Frappe endpoints and the
+role permissions they need. Three separate symptoms have now come from that one
+dependency.
+
+### 19.c — the discard button, same shape again
+
+Third report, same day, same lesson twice over: **be generous about the shape of
+what you read.**
+
+`normalise` took the draft id as `draft_id || id`. A `frappe.get_all` listing
+returns the docname as `name`, so on that bench the id was undefined and
+`discardDraft` returned early on its own `if (!id)` guard. The button did
+nothing at all.
+
+The fix is one `|| raw.name`. What took longer, and matters more, is that the
+button could fail **silently at all**. It awaited, invalidated the query, and
+returned nothing — so a discard that deleted nothing looked exactly like one
+that worked, and a partner pressing it twice learns the portal ignores them.
+Discard now re-reads the listing, confirms the draft is gone, and the card
+reports a failure it can prove rather than disappearing on faith.
+
+The regression test was checked against the OLD code before being kept. It
+fails there and passes here; a test that passes both ways proves nothing, and
+this session had already shipped three "no banner" assertions that fired before
+their data arrived.
+
+### The menu upload was the photo upload
+
+Fourth report: "in the edit menu the menu upload is not working." It posts to
+`/api/method/upload_file` — the same endpoint 403ing on venue photos. One
+issue, reported twice, from two screens that look unrelated.
+
+**The diagnostic value is in the difference between the two calls.** Photos send
+`doctype: 'Venue'` and a docname; the menu import sends neither. So a missing
+**Venue** attach permission cannot explain a refused menu upload, and if both
+are refused the missing permission is create on **`File`** itself. That fits
+§14's finding that the Vendor role has no doctype access at all — which is why
+`upload_file`, `frappe.client.get_list` on File and `attachOrphans` all failed
+together and were reported as three separate bugs.
+
+**What was ours: the copy blamed the partner's file.** The failure branch said
+*"We couldn't read that file"* for every failure, including one where the file
+never left their machine. A partner reading that tries another file, then a CSV
+instead of an Excel, then a shorter one — all refused identically. Sending
+someone to fix work that was never broken is worse than saying nothing.
+
+Three failures now, three different things to do: a permission refusal is named
+as ours and does **not** offer "try another file" (the tenth is refused like the
+first — the same rule the photo uploader already follows), a dropped upload
+offers a retry, and a genuine parse error still says the file is the problem,
+because sometimes it is.
+
+That last one needed the fake bench to fail an ASYNC job rather than the
+synchronous endpoint — the first attempt flagged `import_products_from_excel`,
+which the portal never reaches when the background import is deployed. The test
+passed for the wrong reason until that was fixed.
+
+### Also shipped today
+
+- **Bookings read live** off `get_venue_bookings`, which landed with a full
+  contract. Grouped by day, phone numbers dial, "today" computed in local time
+  because `toISOString()` is UTC and would show tomorrow's book to anyone
+  opening the portal before 02:00 SAST.
+- **Legal document acceptance**, built against a guessed contract — see §18.
+  Stricter than anything else here: the acceptance is read back before the
+  screen claims it, because a tick shown over an unwritten row is a
+  manufactured record of agreement rather than an inconvenience.
+
+---
+
+## 28 Jul 2026 — asking for what we already had
 
 Two corrections today, both in the same direction, and the direction is the
 lesson: **check what you are already holding before you ask whether you may

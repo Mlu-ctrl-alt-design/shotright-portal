@@ -106,6 +106,21 @@ const parse = (value, fallback) => {
   }
 }
 
+/**
+ * Serialise a venue's moods the way `bench.moodReadShape` says.
+ *
+ * The portal must survive all three, because which one it gets depends on which
+ * endpoint answered — and after a `get_venue_detail` 404 it is reading the
+ * dashboard row instead, which is a different serialiser again.
+ */
+const shapeMoods = (moods) => {
+  const ids = Array.isArray(moods) ? moods : []
+  if (bench.moodReadShape === 'rows') return ids.map((id) => ({ mood: id }))
+  if (bench.moodReadShape === 'labels')
+    return ids.map((id) => bench.moods.find((m) => m.name === id)?.mood_name || id)
+  return ids
+}
+
 /** Built as a list so order is explicit and easy to read. */
 const apiHandlers = [
   method('shotright.api.login', ({ email, password }) => {
@@ -201,7 +216,7 @@ const apiHandlers = [
   method('shotright.api.get_venue_detail', ({ venue_name }) => {
     const venue = venueById(venue_name)
     if (!venue) return docMissing()
-    const out = { ...venue }
+    const out = { ...venue, moods: shapeMoods(venue.moods) }
     for (const field of bench.detailOmits || []) delete out[field]
     return ok(out)
   }),
@@ -332,9 +347,131 @@ const apiHandlers = [
     return before === bench.items.length ? docMissing() : ok({ ok: true })
   }),
 
-  method('shotright.api.get_venue_bookings', ({ venue_name }) =>
-    ok(bench.bookings[venue_name] || []),
+  /**
+   * SHIPPED 7 Aug, and modelled to the real contract rather than to what is
+   * convenient to assert against:
+   *
+   * - **ownership is checked before anything is read**, against `Venue.vendor`,
+   *   so `venue_name` alone is never enough — a venue that isn't ours throws
+   *   rather than returning an empty list, which would read as "no bookings".
+   * - **`from_date`/`to_date` are inclusive and independent** — either, both or
+   *   neither.
+   * - **`limit` arrives as a string** because form encoding makes it one. The
+   *   real service runs it through `cint`; this drops it through `Number` for
+   *   the same reason, and caps at 500 so a test can prove we never ask for
+   *   more than the server will give.
+   * - **not gated on `workflow_state`** — a Pending venue still has guests
+   *   arriving, so bench state about the venue's review does not filter this.
+   */
+  method('shotright.api.get_venue_bookings', (args) => {
+    const venue = bench.venues.find((v) => v.name === args.venue_name)
+    if (!venue) return validationError('Not permitted')
+
+    const from = args.from_date || ''
+    const to = args.to_date || ''
+    const limit = Math.min(Number(args.limit) || 20, 500)
+
+    const rows = (bench.bookings[args.venue_name] || [])
+      .filter((b) => (!from || String(b.arrival_date) >= from) && (!to || String(b.arrival_date) <= to))
+      .sort((a, b) =>
+        `${a.arrival_date} ${a.arrival_time}`.localeCompare(`${b.arrival_date} ${b.arrival_time}`),
+      )
+      .slice(0, limit)
+
+    /* party_size is computed server-side — `booking_register.py` does the same,
+       and two surfaces disagreeing about whether children are covers is the bug
+       this models away. */
+    return ok(
+      rows.map((b) => ({
+        name: b.name,
+        arrival_date: b.arrival_date,
+        arrival_time: b.arrival_time,
+        adults: b.adults ?? 0,
+        children: b.children ?? 0,
+        party_size: (b.adults ?? 0) + (b.children ?? 0),
+        contact_name: b.contact_name,
+        contact_cell_phone: b.contact_cell_phone,
+        creation: b.creation || '2026-08-01 09:00:00',
+      })),
+    )
+  }),
+
+  /* -------------------------------------------------------------- places */
+
+  /**
+   * The proxy. Note what it does NOT return: no rating, no reviews, no photos,
+   * no atmosphere attributes. Those may not be stored, so the portal must never
+   * be in a position to receive them by accident — a double that handed them
+   * over would let a `...place` spread put them in the database and the suite
+   * would call it a pass.
+   */
+  method('shotright.api.search_places', ({ query }) =>
+    ok(
+      bench.places
+        .filter((p) => !query || p.display_name.toLowerCase().includes(String(query).toLowerCase()))
+        .map((p) => ({
+          place_id: p.place_id,
+          display_name: p.display_name,
+          formatted_address: p.formatted_address,
+          claimed: Boolean(p.claimed),
+        })),
+    ),
   ),
+
+  method('shotright.api.get_place_details', ({ place_id }) => {
+    const place = bench.places.find((p) => p.place_id === place_id)
+    if (!place) return docMissing()
+    if (bench.placeClaimed || place.claimed)
+      return validationError('That venue is <strong>already claimed</strong> by another account')
+    return ok({
+      place_id: place.place_id,
+      display_name: place.display_name,
+      formatted_address: place.formatted_address,
+      location: { latitude: place.latitude, longitude: place.longitude },
+      national_phone_number: place.phone || '',
+      attribution: 'Powered by Google',
+    })
+  }),
+
+  /* --------------------------------------------------------------- legal */
+
+  method('shotright.api.get_legal_documents', () =>
+    ok(
+      bench.legal.map((d) => ({
+        name: d.name,
+        title: d.title,
+        document_type: d.document_type || '',
+        version: d.version || '',
+        effective_date: d.effective_date || '',
+        content: d.content ?? '',
+        required: d.required === undefined ? 1 : d.required,
+        accepted: d.accepted ? 1 : 0,
+        accepted_on: d.accepted_on || '',
+      })),
+    ),
+  ),
+
+  /**
+   * Accept, with the silent-no-op switch built in.
+   *
+   * `legalAcceptSilentlyFails` returns a perfectly ordinary 200 and writes
+   * nothing — the shape of a kwarg the handler never declared. The portal is
+   * required to catch this by reading back, and to say "we couldn't record
+   * that" rather than showing a tick. A test double that cannot reproduce the
+   * bug cannot prove the fix.
+   */
+  method('shotright.api.accept_legal_document', (args) => {
+    const id = args.document || args.legal_document || args.name || args.document_name
+    const doc = bench.legal.find((d) => d.name === id)
+    if (!doc) return docMissing()
+    if (bench.legalAcceptSilentlyFails) return ok({ ok: true })
+    doc.accepted = 1
+    doc.accepted_on = '2026-08-07 10:15:00'
+    /* What they agreed to, not just that they agreed. A record that cannot name
+       a version cannot answer the only question anyone will ever ask of it. */
+    doc.accepted_version = args.version || doc.version || ''
+    return ok({ ok: true })
+  }),
 
   /* -------------------------------------------------------------- drafts */
   method('shotright.api.save_venue_draft', (args) => {
@@ -355,7 +492,17 @@ const apiHandlers = [
   }),
 
   method('shotright.api.list_venue_drafts', () =>
-    ok(bench.drafts.filter((d) => !d.completed).map((d) => ({ ...d }))),
+    ok(
+      bench.drafts
+        .filter((d) => !d.completed)
+        .map((d) => {
+          const row = { ...d }
+          /* A listing that never says `draft_id` is not hypothetical — it is
+             what `frappe.get_all` returns unless someone aliases the field. */
+          if (bench.draftIdField === 'name') delete row.draft_id
+          return row
+        }),
+    ),
   ),
 
   method('shotright.api.get_venue_draft', ({ draft_id }) => {
@@ -364,6 +511,7 @@ const apiHandlers = [
   }),
 
   method('shotright.api.discard_venue_draft', ({ draft_id }) => {
+    if (bench.draftDiscardSilentlyFails) return ok({ ok: true })
     bench.drafts = bench.drafts.filter((d) => d.draft_id !== draft_id)
     return ok({ ok: true })
   }),
@@ -413,10 +561,21 @@ const apiHandlers = [
   /* ------------------------------------------------------ menu import job */
   method('shotright.api.start_menu_import', () => ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })),
   method('shotright.api.get_menu_import_status', () =>
-    ok({ name: 'MI-1', status: 'Completed', stage: 'done', total: 0, processed: 0 }),
+    bench.importFails
+      ? ok({
+          name: 'MI-1',
+          status: 'Failed',
+          stage: 'reading',
+          error_message: 'Row 4: Price is not a number',
+        })
+      : ok({ name: 'MI-1', status: 'Completed', stage: 'done', total: 0, processed: 0 }),
   ),
   method('shotright.api.cancel_menu_import', () => ok({ ok: true })),
-  method('shotright.api.import_products_from_excel', () => ok({ created: 0 })),
+  method('shotright.api.import_products_from_excel', () =>
+    bench.importFails
+      ? validationError('Row 4: <strong>Price</strong> is not a number')
+      : ok({ created: 0 }),
+  ),
   method('shotright.api.bulk_import_products', () => ok({ created: 0 })),
 
   /* ------------------------------------------------------ review screens */
@@ -460,6 +619,16 @@ const apiHandlers = [
     const doctype = form.get('doctype')
     const docname = form.get('docname')
     record('upload_file', { doctype, docname, fileName: file?.name })
+
+    if (
+      bench.uploadRefused === 'always' ||
+      bench.uploadRefused === true ||
+      (bench.uploadRefused === 'attached' && docname)
+    ) {
+      return permissionError(
+        `User <strong>thabo@cornerkitchen.co.za</strong> does not have doctype access via role permission for document ${doctype || 'File'}`,
+      )
+    }
 
     const row = {
       name: `FILE-${bench.files.length + 1}`,

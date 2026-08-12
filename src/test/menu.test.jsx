@@ -191,3 +191,93 @@ describe('delete a menu item', () => {
     expect(bench.items[0].item_name).toBe('Chakalaka')
   })
 })
+
+/* ============================================================================
+   REPORTED 8 AUG — "in the edit menu the menu upload is not working"
+
+   It goes through `/api/method/upload_file`, the same endpoint that was 403ing
+   on venue photos the same day. One report, not two.
+
+   What the partner saw was "We couldn't read that file" — a sentence about
+   their spreadsheet, over a request in which their spreadsheet never left the
+   building. So they try another file, and a CSV instead of an Excel, and a
+   shorter one, and every attempt fails identically. Sending someone off to fix
+   work that was never broken is worse than saying nothing.
+   ========================================================================= */
+describe('when the menu upload is refused', () => {
+  const pickFile = async (user) => {
+    const file = new File(['Heading,Item,Price\nMains,Lamb curry,450'], 'menu.csv', {
+      type: 'text/csv',
+    })
+    await user.upload(await screen.findByLabelText(/menu file/i), file)
+  }
+
+  it('does not blame the partner’s file for our permission problem', async () => {
+    bench.uploadRefused = 'always'
+    const { user } = renderApp({ route: '/venues/VEN-00001/menu', signedIn: true })
+    await pickFile(user)
+
+    expect(await screen.findByText(/couldn’t upload your menu/i)).toBeInTheDocument()
+    expect(screen.getByText(/problem on our side, not with your file/i)).toBeInTheDocument()
+    expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
+  })
+
+  it('does not offer another file, because the tenth is refused like the first', async () => {
+    /* The same rule the photo uploader already follows. A retry that cannot
+       work is an afternoon of someone's time. */
+    bench.uploadRefused = 'always'
+    const { user } = renderApp({ route: '/venues/VEN-00001/menu', signedIn: true })
+    await pickFile(user)
+
+    await screen.findByText(/couldn’t upload your menu/i)
+    expect(screen.queryByRole('button', { name: /try another file/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add items by hand/i })).toBeInTheDocument()
+  })
+
+  it('never puts a role permission on a restaurant owner’s screen', async () => {
+    bench.uploadRefused = 'always'
+    const { user } = renderApp({ route: '/venues/VEN-00001/menu', signedIn: true })
+    await pickFile(user)
+
+    await screen.findByText(/couldn’t upload your menu/i)
+    expect(document.body.textContent).not.toMatch(/doctype|role permission|upload_file|403/i)
+  })
+
+  it('says the menu is untouched, so nobody goes hunting for damage', async () => {
+    bench.uploadRefused = 'always'
+    const { user } = renderApp({ route: '/venues/VEN-00001/menu', signedIn: true })
+    await pickFile(user)
+
+    await screen.findByText(/couldn’t upload your menu/i)
+    expect(screen.getByText(/nothing wrong with it and nothing to fix/i)).toBeInTheDocument()
+    expect(screen.getByText(/adding items by hand works normally/i)).toBeInTheDocument()
+  })
+
+  it('still blames the file when the file really is the problem', async () => {
+    /* The fix must not become a way of never telling someone their CSV is
+       broken. An upload that ARRIVED and could not be parsed is the one case
+       where a different file is genuinely the answer. */
+    bench.uploadRefused = false
+    bench.importFails = 'parse'
+    const { user } = renderApp({ route: '/venues/VEN-00001/menu', signedIn: true })
+    await pickFile(user)
+
+    expect(await screen.findByText(/couldn’t read that file/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /try another file/i })).toBeInTheDocument()
+  })
+
+  it('the menu upload does not send a doctype — so it needs no Venue permission', async () => {
+    /* Worth pinning: this upload carries no `doctype`/`docname`, so a missing
+       VENUE attach permission cannot explain it. If this path is refused too,
+       the missing permission is on `File` itself — which is a different fix,
+       and the distinction is filed as §19.b. */
+    bench.uploadRefused = false
+    const { user } = renderApp({ route: '/venues/VEN-00001/menu', signedIn: true })
+    await pickFile(user)
+
+    await waitFor(() => expect(bench.calls.some((c) => c.method === 'upload_file')).toBe(true))
+    const upload = bench.calls.find((c) => c.method === 'upload_file')
+    expect(upload.args.doctype).toBeFalsy()
+    expect(upload.args.docname).toBeFalsy()
+  })
+})

@@ -217,8 +217,8 @@ const text = (page, sel = 'main') => page.locator(sel).evaluate((n) => n.textCon
   )
   check(/isn’t good enough/i.test(body), 'it owns the failure instead of implying the partner caused it')
   check(
-    /can’t read review notes from this server yet/i.test(body),
-    'and separately notes the endpoint is missing, so this reaches whoever owns the bench',
+    /can’t load the reviewer’s note right now/i.test(body),
+    'and separately says the note could not be loaded — without naming an endpoint',
   )
 
   /* With nothing to act on, editing is a guess — so asking a human leads. */

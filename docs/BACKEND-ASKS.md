@@ -26,6 +26,172 @@ and will save nothing, and nobody finds out until a partner loses their work.
 
 ## P0 — a partner is hitting this now
 
+### 19. Reported 8 Aug — four reports, three distinct issues, two of them ours
+
+> **19.a** *"When a user edits a venue they are unable to save because the moods
+> are throwing an error."*
+> **19.b** *"Images still cannot be attached, they also throw an error."*
+> **19.c** *"On the dashboard 'discard this draft' button is not working."*
+> **19.d** *"In the edit menu the menu upload is not working."* — same issue as
+> 19.b; both go through `/api/method/upload_file`.
+
+Logged together, and they turned out to be different in kind.
+
+- **19.a — ours, fixed.** No server error was involved, and it was the same
+  incident as the `get_venue_detail` 404 reported minutes later.
+- **19.c — ours, fixed.** The draft id was read under the wrong field name.
+- **19.b / 19.d — yours, still open**, and they are one issue: the menu importer
+  and the photo uploader both post to `/api/method/upload_file`. That the menu
+  path is *also* refused is the most useful fact we have, because it sends no
+  `doctype` — see the table below.
+
+**Three of the four reports arrived as separate issues and were logged as
+separate issues. They were two.** Worth saying because it changed the diagnosis
+twice: the 404 explained the moods, and the menu upload narrowed the 403.
+
+**What we need for 19.b, and cannot get from here.** The browser's Network tab →
+the failing `upload_file` → the **Response body**. The status line alone cannot
+tell us who refused (see below); the body can. A screenshot of the red message
+on screen is not enough either — the portal deliberately no longer prints server
+internals to partners, so that sentence is ours, not the bench's.
+
+#### 19.a — moods on save — ✅ FIXED, and it was ours, not yours
+
+**No server error was involved.** Please take this one off your list.
+
+`moods` is a child table, so a READ hands it back as ids, as child rows
+(`{mood: 'MOOD-CHILLED'}`), or as labels depending on which endpoint answered.
+The edit form seeded straight from that and matched with `.includes(mood.name)`
+— so any shape but a flat list of docnames selected **nothing**, and the form's
+own *"select at least one mood"* rule then refused to submit a venue whose moods
+the partner had never touched. That is the "unable to save".
+
+**The `get_venue_detail` 404 you reported minutes later for VEN-00008 is the
+same incident.** When detail 404s we fall back to the dashboard row — a
+different serialiser over the same child table, under no obligation to describe
+it the way the form was written against. That is what turned a latent shape
+assumption into a blocked save.
+
+Two fixes, both frontend, both shipped:
+
+1. **Read every shape.** `moodKeysOf()` accepts ids, child rows and labels, and
+   the form resolves them against the Mood list by docname or by label. A key we
+   can't resolve is **kept**, not dropped — an unknown mood is one we don't
+   understand, not one the venue doesn't have, and dropping it would quietly
+   propose deleting it on the next save.
+2. **Compare moods as a SET.** They were compared as ordered JSON, so un-ticking
+   a mood and putting it back counted as an edit — which sent `moods` — which is
+   the one field `update_venue` cannot accept. A partner who changed their mind
+   got §00 for it. Ordinary edits now never carry the mood list at all.
+
+**We are still not guessing the write shape.** Being generous on a read is safe:
+the wrong checkboxes are visible and correctable. Writing a guessed child-row
+shape makes Frappe create empty rows and report success, silently erasing a
+venue's moods. **§00 is unchanged and still needs you** — the moment a partner
+genuinely changes their moods, we have to send them, and it still crashes.
+
+**Still open on your side:** §00 (the write), and §0 (why `get_venue_detail`
+404s on VEN-00008 while the dashboard lists it — the portal survives it, but it
+is a real 404 and it is what exposed this).
+
+#### 19.b — uploads: images AND the menu importer, one endpoint
+
+> **Also reported 8 Aug:** *"in the edit menu the menu upload is not working."*
+> **It is the same issue.** The menu importer posts to
+> `/api/method/upload_file`, exactly as the photo uploader does.
+
+**AND THAT NARROWS IT USEFULLY.** The two calls are not identical:
+
+| | photos | menu import |
+|---|---|---|
+| `doctype` / `docname` | **`Venue` / `VEN-…`** | *not sent* |
+| `is_private` | `0` | `1` |
+| permission needed | write on that **Venue**, plus create on `File` | create on **`File`** only |
+
+So if **both** are refused, the missing permission cannot be the Venue attach
+grant you added on 28 Jul — the menu upload never asks for it. It would mean the
+Vendor role cannot create a `File` **at all**, which fits everything we already
+know: §14 established that the role has *no* doctype access, and that is exactly
+why `upload_file`, `frappe.client.get_list` on File and `attachOrphans` all
+failed together.
+
+**If only the photo upload is refused**, it is the Venue grant and the menu
+importer should still work. Whichever it is, the answer is one test upload away
+and it decides the fix.
+
+We've also stopped the portal blaming the partner for it — the menu importer was
+saying *"We couldn't read that file"* over a request in which the file never
+left their machine, which sends someone off to re-export a spreadsheet that was
+never broken. It now separates a refused upload from an unreadable file, and
+only offers "try another file" where another file could actually help.
+
+##### The photo half has a change of ours in it
+
+**This one has a change of ours in it.** When the permission was reported done
+we deleted the unattached-upload fallback, deliberately: it had been producing
+photos that uploaded, appeared in the uploader, and were attached to nothing —
+the partner saw success, the moderator opened the Venue and saw no pictures.
+A quiet wrong result. We made a refusal loud on purpose.
+
+**If attaching is still refused, that decision is now the visible failure.** We
+think loud is still right — an orphaned photo is worse than a reported one — but
+it means "images throw an error" is the expected behaviour of a permission that
+is not actually in place, not a new fault. Worth being explicit about, because
+it changes what the fix is.
+
+**First, where the 403 comes from — the request is not hitting the bench
+directly.** `shotright-portal.vercel.app` resolves to `64.29.17.3`, which is
+Vercel's edge; the bench is `194.163.168.19`. Every `/api/*` call is proxied
+server-side by the rewrite in `vercel.json`. The browser therefore reports
+Vercel's address for a response that (almost certainly) originated on the bench,
+and a 403 raised by the edge and a 403 raised by Frappe are indistinguishable
+from the status line alone. **The response body separates them**: a Frappe
+refusal carries `exc_type` and `_server_messages`; an edge refusal does not.
+
+Three things to check on the bench, in order:
+
+1. **Is the `Venue` attach permission actually live in this environment?** It
+   was confirmed on 28 Jul. If the change was applied to one bench and the
+   portal is pointed at another, this is the whole answer.
+2. **Does the error name `Venue` or `File`?** They are different permissions and
+   different fixes. Attaching is `Venue` write; anything reading the photos back
+   is `File` read, which is the open half of §14.
+3. **Is it a permission at all?** A 413 (file too large), a 417 from a validation
+   hook, or a CORS failure on `/api/method/upload_file` all surface to a partner
+   as "it threw an error" and none of them are the role permission.
+
+The standing ask from §14 if the permission cannot stay: **a whitelisted
+`upload_venue_photo(venue_name, file)` that elevates internally**, the same way
+every other `shotright.api.*` method does. That removes the dependency on stock
+Frappe endpoints for good, and it is the shape the rest of this app already has.
+
+#### 19.c — "discard this draft is not working" — ✅ FIXED, also ours
+
+Reported the same day. Two silent failure modes, and it was the first:
+
+1. **The id was undefined.** We read `draft_id || id`. A listing built with
+   `frappe.get_all` returns the docname as **`name`** and nothing called
+   `draft_id` unless someone aliased it — so the id came back undefined and
+   `discardDraft` returned early on its own guard. The button did nothing, said
+   nothing, and looked broken because it was. Now reads
+   `draft_id || name || id`.
+2. **A 200 that deletes nothing** was indistinguishable from success. Discard
+   now re-reads the listing and confirms the draft is gone; if it is still
+   there the partner is told so and the card stays, because the card is the
+   truth.
+
+**Worth confirming on your side:** does `list_venue_drafts` return `draft_id`,
+per the contract in `docs/RESUME-SETUP.md`, or only `name`? We now handle both,
+so this is not blocking — but if it is `name`, the same question applies to
+`get_venue_draft` and `discard_venue_draft`, which we call with `draft_id`. We
+send **both** `draft_id` and `name` on discard for that reason.
+
+#### Related and still open
+
+- **§0c** — uploaded photos rendering as broken links. Different failure
+  (reading, not attaching) and not resolved by anything above.
+- **§14** — can the Vendor role list `File` rows for its own venue?
+
 ### 00. `update_venue` crashes on `moods` — every venue edit, 28 Jul
 
 ```
@@ -638,41 +804,252 @@ new item.
 on `Product Item`.** If it can, "Remove" works today and only edit is missing;
 if it can't, both are blocked and a partner's menu is currently append-only.
 
-### 17. Bookings — nothing exists, and the PRD says it shouldn't
+### 17. Bookings — ✅ SHIPPED 7 Aug, reading live
 
 > **Asked for 28 Jul: "we also need to see bookings within each venue."**
-
-Flagging one thing before the ask: the PRD lists **"bookings management"** under
-*Out of scope*, so there is no design, no doctype and no endpoint. Treating the
-request as a deliberate scope change rather than an oversight — but it is worth
-someone confirming that, because it is the difference between a tab and a
-product area.
-
-The venue page now has a **Bookings** tab. It says, in as many words, that the
-app cannot read bookings and that the partner should keep taking them however
-they do now. It does **not** show an empty table: "no bookings yet" and "we
-can't see your bookings" are completely different sentences to a restaurant
-owner — one is a quiet Tuesday, the other is a reason to stop trusting the
-portal on a Friday night.
-
-What would make it real:
+> **Answered 7 Aug: `shotright.api.get_venue_bookings`.**
 
 ```
-get_venue_bookings(venue_name) -> [ {name, customer_name, booking_datetime,
-                                     party_size, phone, status, notes} ]
+get_venue_bookings(vendor_email, venue_name, from_date, to_date, limit)
+  -> [ {name, arrival_date, arrival_time, adults, children, party_size,
+        contact_name, contact_cell_phone, creation} ]
 ```
 
-We read a generous set of aliases for each field, so near-misses are fine. The
-portal tries `get_venue_bookings`, `list_venue_bookings` and `get_bookings`.
+Identity from `get_current_vendor_email()`, ownership checked against
+`Venue.vendor` before a row is read, no email parameter — so ADR-0004 holds and
+nothing about how we authenticate changed. The tab reads live; the only frontend
+change was the field mapping.
 
-Two questions that decide how much more there is to build:
+**Four backend decisions, and what the portal does with each.** All four are
+right, and all four are load-bearing on this screen:
 
-1. **Is a booking a doctype yet?** If bookings live somewhere else entirely, or
-   are only in the customer app, this is a bigger conversation than an endpoint.
-2. **Does a partner ACT on a booking** — confirm, decline, mark as arrived — or
-   only read it? We have written the shape for `confirm_booking` /
-   `decline_booking` but wired nothing to a screen, because a button that
-   cannot do anything is worse than no button.
+| Decision | What the screen does |
+| --- | --- |
+| `contact_email` withheld — the customer got their own confirmation from `create_booking` | Nothing shows an email. Name + cell is what running a door needs, and there's a `tel:` link on the number so it dials |
+| `party_size` computed server-side, matching `booking_register.py` | We render the server's number and never re-derive it. Adults/children are split out **only when there are children**, because a high chair is a different table — but the total is always yours |
+| Not gated on `workflow_state` | Correct, and invisible on our side by design: a venue back in Pending on Thursday still shows Friday's arrivals |
+| `from_date`/`to_date` inclusive and independent; `limit` cint'd and capped at 500 | Upcoming sends `from_date = today` computed in **local** time (`toISOString()` is UTC and would show tomorrow's book to anyone opening the portal before 02:00 SAST). "Earlier" sends `to_date = yesterday`. We ask for 100 and say "showing the first 100" when a page comes back full, rather than implying the list ends |
+
+**No status field, so nothing is badged.** The endpoint returns no state and
+isn't gated on one, so a "Confirmed" pill would be the portal making a promise
+the server never made. If a status ever appears we'll render it; we won't invent
+one. Same rule as everywhere else on this project.
+
+**The blind state is kept and still tested.** `bench.deploy.get_venue_bookings`
+can go back to false and the tab returns to saying it cannot see bookings at
+all. Partners' benches update at different times, and an empty diary drawn over
+a missing method is the worst outcome on this screen. There is now a third
+state as well: deployed and throwing reads as *"We couldn't load your bookings
+just now"* with a Try again — a bad minute and an unbuilt feature need different
+actions from the partner and different actions from us.
+
+Covered by `verification/verify22.mjs` (31 checks) and eleven RTL checks.
+
+**One question left open, unchanged from 28 Jul:**
+
+**Does a partner ACT on a booking** — confirm, decline, mark as arrived — or
+only read it? `get_venue_bookings` is read-only, which is a complete answer for
+a diary. The shapes for `confirm_booking` / `decline_booking` are written in
+`services/bookings.js` and deliberately wired to nothing, because a confirm
+button that reaches nobody is worse than no button. If the answer is "read
+only", say so and we'll delete them.
+
+Worth a decision separately: the PRD still lists **"bookings management"** under
+*Out of scope*. Reading a diary is now shipped and clearly in. Acting on one is
+the line, and it's the difference between a tab and a product area.
+
+### 18. Legal documents — built, guessing at the contract
+
+> **Told 7 Aug: "we've added legal documents in the backend, vendors need to
+> accept these too."** No method name, no shape, no doctype came with it — so
+> everything below is the portal's best guess, and the four questions at the
+> end are the ones that decide whether it works on the first deploy.
+
+**The names we try, in order.** First match wins; the rest are never called:
+
+```
+list    get_legal_documents · get_vendor_legal_documents
+        list_legal_documents · get_terms
+accept  accept_legal_document · accept_legal_documents
+        record_legal_acceptance · accept_terms
+```
+
+**The shape we read**, with aliases so near-misses land:
+
+```
+{ name, title|document_name|document_type, version|document_version|revision,
+  effective_date, content|body|document_html, url|file_url,
+  required, accepted|is_accepted, accepted_on }
+```
+
+`required` defaults to **true** when absent and `accepted` defaults to
+**false** — both default to the cautious reading, because the cost of being
+wrong that way is asking someone to accept twice and the cost the other way is
+a venue going live under an agreement nobody made.
+
+**What we send on accept:** every alias for the document id at once
+(`document`, `legal_document`, `name`, `document_name`), plus `version` and
+`accepted: 1`. Frappe drops what the handler doesn't declare, so this costs
+nothing and removes a whole class of silent no-op.
+
+#### The one thing we need you to know we're doing
+
+**We read the acceptance back before we tell the partner it was recorded.** A
+200 from Frappe means the request routed, not that anything was written — and
+this project has shipped six bugs of exactly that shape. On a menu price that
+costs a retype. On a consent record it would put *"Accepted 7 August 2026"* on
+screen over an empty table, and nobody would find out until there was a dispute
+and nothing to produce. If `get_legal_documents` doesn't come back showing the
+document accepted, the partner is told it didn't save. Please don't optimise
+that read-back away by making accept return the document — actually, **do**:
+if `accept_legal_document` returns the updated document, say so and we'll trust
+its response instead of making a second call.
+
+#### Where it's enforced — a product decision we made, flag it if it's wrong
+
+A partner can sign in, read their dashboard, edit venues and answer a decline
+with a banner up. **A venue cannot be submitted for approval until the
+outstanding documents are accepted** — that's the moment a listing enters your
+review queue and starts heading for real customers.
+
+The alternative is blocking the whole portal at login. Stronger legal position,
+and it's one constant to change (`ENFORCE_AT` in `services/legal.js`). We
+didn't, because a misconfigured document or a flaky accept endpoint would lock
+every partner out of their own data at once, and the portal can't tell that
+apart from a legitimate block from the inside.
+
+**We never enforce what we can't ask.** If the list endpoint is absent we can
+neither show a partner what they're agreeing to nor record that they did, so we
+don't hold them to it — a venue reaching review unaccepted gets caught by a
+human, a partner who can't submit because an endpoint is missing gets caught by
+nobody. Same for the wizard: the draft is saved server-side *before* the
+redirect, so five steps of work survive being sent to the legal screen.
+
+#### Four questions
+
+1. **What are the real method names and the real field names?** One reply and
+   the list above collapses to the truth. If one of our guesses is already
+   right, nothing changes at all.
+2. **Is acceptance versioned?** We send `version` and display it, on the
+   principle that *"they accepted"* is a much weaker record than *"they
+   accepted v2.1 on this date"*. If you publish a new version of the Terms,
+   does `accepted` go back to false for everyone? We assume yes and will show
+   the banner again — confirm, because the alternative (a silent update nobody
+   re-accepts) is worth knowing about deliberately rather than by accident.
+3. **Is the document body HTML, and is it sanitised on save?** We render it
+   with `dangerouslySetInnerHTML`, the same as the wizard renders a partner's
+   own summary. That's fine for staff-authored copy off our own bench and not
+   fine if the field can be edited by anyone else.
+4. **What about registration?** Right now nothing on the register screen
+   mentions terms, deliberately: `register_vendor` would silently drop an
+   `accepted_terms` kwarg it doesn't declare, and a tickbox whose state we
+   can't record is worse than no tickbox. If you want acceptance captured at
+   sign-up, it needs either a declared field on `register_vendor` or a
+   guest-readable list endpoint — tell us which and we'll wire it.
+
+Covered by `src/test/legal.test.jsx` (24 checks) and
+`verification/verify23.mjs` (37 checks), including a fake bench that reproduces
+the silent-200 write so the read-back is provably wired.
+
+### 20. Google Places proxy — "find my venue" onboarding
+
+> **Asked 8 Aug: onboard an existing venue by searching Google, then confirm or
+> edit.** Built and merged behind capability detection. It renders **nothing at
+> all** until the two methods below exist, so this is not blocking anything —
+> but it does nothing until you build it either.
+
+#### Why there has to be a proxy
+
+**A Places REST key cannot be restricted to an app.** Only by IP or HTTP
+referrer. A key in a JS bundle is a key anyone can lift and spend against your
+billing account, so there is no `VITE_GOOGLE_*` variable in this repo and there
+must never be one. The bench holds the key; the portal asks the bench.
+
+#### The two methods
+
+```
+search_places(query, latitude=None, longitude=None)
+  -> [ {place_id, display_name, formatted_address, claimed} ]
+
+get_place_details(place_id)
+  -> {place_id, display_name, formatted_address,
+      location: {latitude, longitude},
+      national_phone_number, attribution}
+```
+
+Candidates tried in order, first match wins: `search_places` ·
+`find_places` · `google_place_search`, then `get_place_details` ·
+`google_place_details`.
+
+**An empty `query` must return `[]`, not an error.** The portal sends one on
+mount to decide whether to render the search box at all — rendering it and
+hiding it after the first failed search means a partner types their venue name
+into something that was never going to work.
+
+**`claimed: true`** on a row where that `place_id` is already on another
+account's Venue. The portal greys it out. `get_place_details` on a claimed
+place should throw with "already claimed" in the message — a second listing for
+one restaurant splits its bookings across two records and neither owner sees
+the other half.
+
+#### What the proxy must NOT return
+
+`rating`, `userRatingCount`, `reviews`, `photos`, `generativeSummary`,
+`reviewSummary`, and the atmosphere attributes. Those may not be stored, and
+the cheapest way to guarantee we never store them is to never receive them. The
+field mask should ask for identity fields only — which also keeps this on the
+cheaper SKU.
+
+#### One field on `Venue`
+
+**`place_id` (Data, unique, indexed.)** It is the *only* piece of Google data
+that may be kept indefinitely, and it is what makes `claimed` answerable. The
+portal already sends it to `create_venue`; if the method doesn't declare it,
+Frappe drops it at 200 and nothing will say so — the flow still works, it just
+silently loses duplicate detection.
+
+#### The cost argument, because the research says "reviews are expensive"
+
+That is right, and it is about a **different screen**. Customer-facing venue
+detail — reviews and photos, uncacheable, re-fetched per view, per customer,
+for ever — is an unbounded recurring cost for content you may not rank or sort.
+
+**This is the opposite shape.** It fires once per venue, ever, started by the
+owner, and asks for identity fields rather than reviews. Text search returning
+ids is the free unlimited tier; the billable detail call happens on one
+deliberate pick, not on a render. A first cohort of a few hundred venues makes
+fewer calls in a month than one customer browsing for an evening — comfortably
+inside the free monthly allowance on the tier this needs.
+
+**So they should be approved separately.** Onboarding is cheap and bounded;
+customer-facing Places content is neither, and it is the one that needs a
+budget conversation.
+
+#### Three constraints we've designed around, for the record
+
+1. **No storage.** Only `place_id` is kept. Everything else fills a form the
+   partner then reads, corrects and submits — so what lands in `Venue` is the
+   owner's own statement about their own business. Google is a keyboard here,
+   not a database. Every prefilled field is marked, editable and clearable.
+2. **Places content on a map must be on a Google map.** This portal draws
+   Leaflet over OSM tiles, so results are a **list** and never pins. After a
+   pick, the coordinate is the partner's confirmed location and our pin is ours.
+   *This applies to the customer app too — `flutter_map` plus Google Places pins
+   would be a policy breach, and it is worth settling before that screen is
+   designed.*
+3. **Attribution.** `get_place_details` should return whatever attribution
+   string is required; the portal renders it verbatim. Right now the flow shows
+   no Google-owned content after the pick, which is the cheapest way to stay
+   inside the rule.
+
+#### One thing worth deciding out loud
+
+Opening hours are the most valuable prefill left on the table, and the portal
+deliberately does **not** parse Google's format — writing subtly wrong trading
+hours onto a real business is worse than asking for them, because a partner who
+trusts the prefill will not re-read all seven days. If the proxy maps them into
+our `operating_hours` row shape server-side, the portal will use them. Ours to
+get right once, on your side, rather than approximately, on ours.
 
 ### 13. Do drafts expire?
 

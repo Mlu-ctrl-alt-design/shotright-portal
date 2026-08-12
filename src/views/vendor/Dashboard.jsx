@@ -25,8 +25,11 @@ export default function Dashboard() {
   const resumable = drafts[0] || null
 
   const dropDraft = async (draft) => {
-    await discardDraft(draft.id)
+    const result = await discardDraft(draft.id)
     qc.invalidateQueries({ queryKey: ['venue-drafts'] })
+    // Handed back so the card can say so. It used to swallow this, which is
+    // how a button that deleted nothing looked exactly like one that worked.
+    return result
   }
 
   if (isLoading) return <Spinner label="Loading dashboard…" />

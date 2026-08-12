@@ -12,7 +12,12 @@ import { Button, Input, Textarea, Card, Alert, Badge } from '../../components/ui
 import Spinner from '../../components/ui/Spinner'
 import { OperatingHoursEditor } from '../../components/ui/OperatingHours'
 import PhotoUploader from '../../components/ui/PhotoUploader'
-import { MAX_VENUE_PHOTOS, UPDATE_VENUE_METHOD, uploadVenuePhoto } from '../../services/vendor'
+import {
+  MAX_VENUE_PHOTOS,
+  UPDATE_VENUE_METHOD,
+  moodKeysOf,
+  uploadVenuePhoto,
+} from '../../services/vendor'
 import { isMethodMissing } from '../../services/api'
 import { clsx } from '../../utils/clsx'
 
@@ -83,16 +88,45 @@ export default function VenueForm() {
     setPhotos(photoData.photos || [])
   }, [photoData])
 
+  /**
+   * Seed the form from the venue — and resolve its moods to the ids the
+   * checkboxes are keyed on.
+   *
+   * ⚠️ Reported 8 Aug: "unable to save because the moods are throwing an
+   * error." This was it, and there was no server error involved.
+   *
+   * `moods` is a child table, so it arrives as ids, as child rows, or as
+   * labels depending on which endpoint answered — and after a
+   * `get_venue_detail` 404 (§0) it arrives from the dashboard row instead,
+   * which need not match either. This line used to be `existing.moods || []`
+   * and the checkboxes matched on `includes(mood.name)`, so any shape but a
+   * flat list of docnames selected NOTHING. The partner then hit the form's own
+   * "select at least one mood" rule and could not save a venue they had not
+   * touched the moods of.
+   *
+   * Matching is by docname first, then by label, case-insensitively. A key we
+   * cannot resolve is KEPT rather than dropped: an unknown mood is a mood we
+   * do not understand, not a mood the venue does not have, and dropping it here
+   * would quietly propose deleting it on the next save.
+   */
   useEffect(() => {
-    if (existing) {
-      setForm({
-        ...EMPTY,
-        ...existing,
-        moods: existing.moods || [],
-        operating_hours: existing.operating_hours?.length ? existing.operating_hours : blankHours(),
-      })
+    if (!existing) return
+    const byKey = new Map()
+    for (const mood of moods) {
+      if (mood?.name) byKey.set(String(mood.name).toLowerCase(), mood.name)
+      if (mood?.mood_name) byKey.set(String(mood.mood_name).toLowerCase(), mood.name)
     }
-  }, [existing])
+    const resolved = moodKeysOf(existing.moods).map(
+      (key) => byKey.get(String(key).toLowerCase()) || key,
+    )
+
+    setForm({
+      ...EMPTY,
+      ...existing,
+      moods: [...new Set(resolved)],
+      operating_hours: existing.operating_hours?.length ? existing.operating_hours : blankHours(),
+    })
+  }, [existing, moods])
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
@@ -159,7 +193,7 @@ export default function VenueForm() {
             photoWarnings.push(
               outcome.mismatch
                 ? `Your photos uploaded, but the app only kept ${outcome.mismatch.stored} of ` +
-                    `${outcome.mismatch.sent}. Nothing has been lost — we’ve reported it.`
+                    `${outcome.mismatch.sent}. Nothing has been lost.`
                 : `Your photos uploaded and are attached to this venue, but the order you put ` +
                     `them in isn’t saved yet — the app has nowhere to keep it. Nothing has been ` +
                     `lost, and it’ll stick as soon as that lands.`,
@@ -197,9 +231,8 @@ export default function VenueForm() {
     } catch (err) {
       setError(
         isMethodMissing(err, UPDATE_VENUE_METHOD)
-          ? `We can’t save changes to a venue on this server yet — the portal is asking for ` +
-            `${UPDATE_VENUE_METHOD}, and it isn’t there. Nothing has been lost or changed. ` +
-            `We’ve flagged it.`
+          ? `We can’t save changes to this venue just yet. Nothing you typed has been lost, ` +
+            `and your venue is exactly as it was. Please try again a bit later.`
           : err.message,
       )
     }
@@ -334,7 +367,7 @@ export default function VenueForm() {
                     They aren’t lost — the app just can’t read them back from the server yet, so
                     this box starts empty even if you’ve added photos before.{' '}
                     <strong>Anything you add here is uploaded and kept.</strong> If you’d rather
-                    not risk duplicates, leave this until we’ve fixed it. We’ve reported it.
+                    not risk duplicates, come back to this a bit later.
                   </p>
                 </Alert>
               )}
@@ -344,7 +377,7 @@ export default function VenueForm() {
                   <p className="mt-1">
                     Photos you add here upload properly and attach to this venue, so our reviewers
                     see them. The app has no place to show a venue’s pictures yet, so they won’t
-                    appear in search, and the order below isn’t saved. We’ve asked for it.
+                    appear in search, and the order below isn’t saved yet.
                   </p>
                 </Alert>
               )}

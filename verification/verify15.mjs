@@ -154,7 +154,7 @@ async function open({ detail, dashboard = detail, endpoint = null } = {}) {
 
   check(/No reason was recorded/i.test(body), 'an empty note reads as no reason recorded')
   check(
-    !/can’t read review notes from this server/i.test(body),
+    !/can’t load the reviewer’s note right now/i.test(body),
     'but NOT as a portal fault — we read the field fine, nobody wrote in it',
   )
   check(
@@ -176,9 +176,19 @@ async function open({ detail, dashboard = detail, endpoint = null } = {}) {
   const { context, body } = await open({ detail: bare(), dashboard: bare() })
 
   check(/No reason was recorded/i.test(body), 'still no invented reason')
+  /* UPDATED 28 Jul. The wording used to be "The portal can't read review notes
+     from this server yet. We've flagged it." — which told a restaurant owner
+     about our deployment and our internal ticket, neither of which is theirs to
+     carry. The distinction this case exists to protect is unchanged and still
+     load-bearing: a note we could not READ must never render the same as a note
+     nobody WROTE. It is now drawn in words the partner can use. */
   check(
-    /can’t read review notes from this server/i.test(body),
+    /can’t load the reviewer’s note right now/i.test(body),
     'and this time we do own it — nothing on the wire carried the field',
+  )
+  check(
+    !/shotright\.api|this server|flagged it/i.test(body),
+    'without handing them our deployment to think about',
   )
 
   await context.close()

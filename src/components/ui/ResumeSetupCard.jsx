@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from './index'
 import { clsx } from '../../utils/clsx'
@@ -62,6 +63,20 @@ function StepPill({ label, status, number }) {
 }
 
 export default function ResumeSetupCard({ draft, onDiscard }) {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  const discard = async () => {
+    setBusy(true)
+    setFailed(false)
+    const result = await onDiscard(draft)
+    setBusy(false)
+    /* Only an explicit refusal raises the notice. A handler that returns
+       nothing is an older call site, not a failure — and the card unmounting
+       on success means this state is usually never read at all. */
+    if (result && result.discarded === false) setFailed(true)
+  }
+
   if (!draft) return null
 
   const current = draft.stepIndex ?? 0
@@ -144,13 +159,26 @@ export default function ResumeSetupCard({ draft, onDiscard }) {
         {onDiscard && (
           <button
             type="button"
-            onClick={() => onDiscard(draft)}
-            className="ml-auto text-sm font-medium text-ink-500 underline underline-offset-2 hover:text-ink-900"
+            onClick={discard}
+            disabled={busy}
+            className="ml-auto text-sm font-medium text-ink-500 underline underline-offset-2 hover:text-ink-900 disabled:no-underline disabled:opacity-60"
           >
-            Discard this draft
+            {busy ? 'Discarding…' : 'Discard this draft'}
           </button>
         )}
       </div>
+
+      {/* Reported 8 Aug: this button "is not working". It was not working, and
+          worse, it was not SAYING so — a dead control that stays silent is
+          indistinguishable from a slow one, so the partner presses it again and
+          learns the portal ignores them. It now reports a failure it can prove,
+          and never claims a deletion the listing still shows. */}
+      {failed && (
+        <p role="alert" className="mt-3 text-sm text-red-700">
+          We couldn’t discard this draft. It’s still here and nothing has been
+          lost — please try again.
+        </p>
+      )}
     </section>
   )
 }

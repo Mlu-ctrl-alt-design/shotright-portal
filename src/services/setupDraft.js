@@ -117,7 +117,20 @@ const reviveJson = (value, fallback) => {
 }
 
 const normalise = (raw, isPortable) => ({
-  id: raw.draft_id || raw.id,
+  /**
+   * ⚠️ `name` matters as much as `draft_id`. Reported 8 Aug: "discard this
+   * draft is not working."
+   *
+   * A Frappe listing built with `frappe.get_all` returns the docname as `name`
+   * and nothing called `draft_id` unless someone aliased it. This read
+   * `draft_id || id`, so on such a bench the id was **undefined** — and
+   * `discardDraft` bails on its own `if (!id) return`. The button did nothing,
+   * reported nothing, and looked broken because it was.
+   *
+   * Same lesson as the moods a few hours earlier: be generous about the shape
+   * of what you READ. The write still sends the id it was given.
+   */
+  id: raw.draft_id || raw.name || raw.id,
   step: raw.step || WIZARD_STEPS[0].key,
   stepIndex: stepIndex(raw.step),
   completed: reviveJson(raw.completed, []) || [],
@@ -131,7 +144,7 @@ const normalise = (raw, isPortable) => ({
 
 export async function listDrafts() {
   return withFallback(
-    'list_venue_drafts',
+    'shotright.api.list_venue_drafts',
     async () => {
       const rows = await callGet('shotright.api.list_venue_drafts')
       portable = true
@@ -149,7 +162,7 @@ export async function listDrafts() {
 export async function getDraft(id) {
   if (!id) return null
   return withFallback(
-    'get_venue_draft',
+    'shotright.api.get_venue_draft',
     async () => {
       const row = await callGet('shotright.api.get_venue_draft', { draft_id: id })
       portable = true
@@ -175,7 +188,7 @@ export async function getDraft(id) {
  */
 export async function saveDraft({ id, step, completed = [], payload, venue_name = '' }) {
   return withFallback(
-    'save_venue_draft',
+    'shotright.api.save_venue_draft',
     async () => {
       const row = await call('shotright.api.save_venue_draft', {
         draft_id: id || undefined,
@@ -210,12 +223,27 @@ export async function saveDraft({ id, step, completed = [], payload, venue_name 
   )
 }
 
+/**
+ * Throw the draft away — and confirm it is actually gone.
+ *
+ * @returns `{discarded, reason}`. NEVER a bare success: this button was
+ *          reported dead on 8 Aug and there were two ways for it to be dead,
+ *          both silent. The id could be undefined (see `normalise`), or the
+ *          call could return 200 having deleted nothing — Frappe drops kwargs
+ *          it does not declare, so `draft_id` reaching a method that expects
+ *          `name` is a cheerful no-op.
+ *
+ * A button that does nothing and says nothing is the worst kind, because the
+ * partner cannot tell it from a slow one and keeps pressing it. So the result
+ * is checked against the listing and the caller is given something to say.
+ */
 export async function discardDraft(id) {
-  if (!id) return
-  return withFallback(
-    'discard_venue_draft',
+  if (!id) return { discarded: false, reason: 'no-id' }
+
+  await withFallback(
+    'shotright.api.discard_venue_draft',
     async () => {
-      await call('shotright.api.discard_venue_draft', { draft_id: id })
+      await call('shotright.api.discard_venue_draft', { draft_id: id, name: id })
       portable = true
     },
     async () => {
@@ -225,6 +253,12 @@ export async function discardDraft(id) {
       writeAll(all)
     },
   )
+
+  /* The proof. One extra read on an action a partner takes once. */
+  const remaining = await listDrafts().catch(() => null)
+  if (remaining === null) return { discarded: true, unverified: true }
+  if (remaining.some((d) => d.id === id)) return { discarded: false, reason: 'still-there' }
+  return { discarded: true }
 }
 
 /* ----------------------------------------------------------------- helpers */

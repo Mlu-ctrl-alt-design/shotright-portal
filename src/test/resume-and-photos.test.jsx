@@ -239,3 +239,78 @@ describe('upload venue images', () => {
     expect(screen.queryByAltText('front-bar.jpg')).not.toBeInTheDocument()
   })
 })
+
+/* ============================================================================
+   REPORTED 8 AUG — "on the dashboard 'discard this draft' button is not working"
+
+   Two ways for it to be dead, both silent, and the fake bench can now produce
+   each one. The point of these is less the fix than the SAYING: a control that
+   does nothing and reports nothing is indistinguishable from a slow one, so a
+   partner presses it again and concludes the portal ignores them.
+   ========================================================================= */
+describe('discarding a draft', () => {
+  const seedDraft = () => {
+    bench.drafts.push({
+      draft_id: 'DRAFT-1',
+      name: 'DRAFT-1',
+      venue_name: 'Half-finished venue',
+      step: 1,
+      completed: 0,
+      payload: JSON.stringify({ details: { venue_name: 'Half-finished venue' } }),
+      modified: '2026-08-07 10:00:00',
+    })
+  }
+
+  it('discards it, and the card goes', async () => {
+    seedDraft()
+    const { user } = renderApp({ route: '/', signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /discard this draft/i }))
+
+    await waitFor(() => expect(bench.drafts).toHaveLength(0))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /discard this draft/i })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('works when the listing names the draft `name`, not `draft_id`', async () => {
+    /* THE REPORTED BUG. `frappe.get_all` returns the docname as `name` and
+       nothing called `draft_id` unless someone aliased it. The id came back
+       undefined, `discardDraft` bailed on its own `if (!id)` guard, and the
+       button did nothing whatsoever. */
+    bench.draftIdField = 'name'
+    seedDraft()
+    const { user } = renderApp({ route: '/', signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /discard this draft/i }))
+
+    await waitFor(() => expect(bench.drafts).toHaveLength(0))
+  })
+
+  it('says so when the server takes the call and deletes nothing', async () => {
+    /* The house speciality: an undeclared kwarg is dropped at 200, so the call
+       "succeeds", the list refetches, and the card is still sitting there. */
+    bench.draftDiscardSilentlyFails = true
+    seedDraft()
+    const { user } = renderApp({ route: '/', signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /discard this draft/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn’t discard this draft/i)
+    expect(screen.getByText(/still here and nothing has been lost/i)).toBeInTheDocument()
+    /* And the card stays, which is the truth — the draft is still there. */
+    expect(screen.getByRole('button', { name: /discard this draft/i })).toBeInTheDocument()
+  })
+
+  it('never claims a deletion the listing still shows', async () => {
+    bench.draftDiscardSilentlyFails = true
+    seedDraft()
+    const { user } = renderApp({ route: '/', signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /discard this draft/i }))
+    await screen.findByRole('alert')
+
+    expect(bench.drafts).toHaveLength(1)
+    expect(screen.getByText(/Half-finished venue/i)).toBeInTheDocument()
+  })
+})
