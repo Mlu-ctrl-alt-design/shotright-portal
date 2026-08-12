@@ -676,6 +676,21 @@ export const createVenue = (payload) =>
         atmosphere_desc: payload.atmosphere,
         moods: [...canonical.map((m) => m.label), ...suggested.map((m) => m.mood)],
         operating_hours: rows,
+        /**
+         * The only thing from a Google listing that reaches the database.
+         *
+         * Storable indefinitely, unlike every other Places field, and it is
+         * what lets the bench notice that two partners have claimed the same
+         * restaurant — a duplicate splits one venue's bookings across two
+         * listings, and neither owner sees the halves.
+         *
+         * Sent as `undefined` when absent so it does not overwrite anything,
+         * and if `create_venue` does not declare it Frappe drops it at 200 with
+         * no complaint. That is survivable — the venue saves and the dedupe is
+         * simply not available — but it is invisible, so it is filed as §20
+         * rather than left to be discovered.
+         */
+        place_id: payload.place_id || undefined,
       })
 
       // Menu is a separate set of calls; create_venue takes none of it.

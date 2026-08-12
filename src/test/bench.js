@@ -93,6 +93,11 @@ const initial = () => ({
        and both are covered. */
     get_legal_documents: true,
     accept_legal_document: true,
+
+    /* The Places proxy. No method name has been agreed, so this models the
+       guess landing; tests that want the wizard without it set them false. */
+    search_places: true,
+    get_place_details: true,
   },
 
   /** Registration path: true makes register_vendor return otp_required. */
@@ -177,6 +182,20 @@ const initial = () => ({
    * telling someone their CSV is broken.
    */
   importFails: false,
+
+  /**
+   * Google Places, proxied through the bench.
+   *
+   * `places` is what a search returns. `placesDeployed` false models the whole
+   * accelerator being absent, which must leave the wizard exactly as it is
+   * today — no dead search box, nothing to explain.
+   *
+   * `placeClaimed` models the listing already belonging to another account:
+   * a real answer, not an error, and the one that stops a restaurant's bookings
+   * being split across two listings.
+   */
+  places: [],
+  placeClaimed: false,
 
   /** `update_venue` throws on unrecognised fields rather than dropping them. */
   venueWritable: [

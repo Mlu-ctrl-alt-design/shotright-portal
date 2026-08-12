@@ -99,6 +99,17 @@ function Wizard({ resumeId, draft, draftError }) {
   const [photos, setPhotos] = useState(() => saved.photos || [])
 
   /**
+   * Which detail fields came from a Google listing rather than from the partner.
+   *
+   * Held HERE, not in the step, for the same reason the smart-default dirty
+   * flags are: the step unmounts when you walk to operating hours and back, and
+   * a provenance marker that resets on re-entry is a field that quietly stops
+   * saying "we filled this in, check it". Also survives into the draft, so a
+   * partner resuming tomorrow still sees which values were not theirs.
+   */
+  const [fromPlace, setFromPlace] = useState(() => saved.fromPlace || [])
+
+  /**
    * Smart defaults live HERE, not in the step.
    *
    * Steps unmount when you navigate between them, so dirty flags held inside
@@ -156,7 +167,7 @@ function Wizard({ resumeId, draft, draftError }) {
     step: step.key,
     completed: completed.map((i) => STEPS[i]?.key).filter(Boolean),
     venueName: details.venue_name,
-    payload: { moods, details, hours, menu, photos },
+    payload: { moods, details, hours, menu, photos, fromPlace },
     enabled: !created,
   })
 
@@ -200,6 +211,17 @@ function Wizard({ resumeId, draft, draftError }) {
     dress_code: details.dress_code,
     atmosphere: details.atmosphere,
     summary: details.summary,
+    /**
+     * The one piece of Google data we are allowed to keep, and the only one
+     * sent. It is what lets the bench spot a second partner claiming a
+     * restaurant that is already listed — which is the whole anti-duplicate
+     * story, and it splits a venue's bookings in two when it goes wrong.
+     *
+     * ⚠️ If `create_venue` does not declare `place_id`, Frappe drops it at 200
+     * and nothing here will say so. Filed as §20; the portal works either way
+     * and simply loses the dedupe until the field exists.
+     */
+    place_id: details.place_id || undefined,
     // Order is data, not decoration: photo one is what a customer sees when
     // this venue comes back from a mood search.
     photos: photos.map((p, index) => ({ ...p, idx: index + 1 })),
@@ -398,6 +420,18 @@ function Wizard({ resumeId, draft, draftError }) {
       case 'details':
         return (
           <VenueDetailsStep
+          fromPlace={fromPlace}
+          onPlacePicked={(next, filled) => {
+            setDetails(next)
+            setFromPlace(filled)
+            /* Everything a place fills is a value the partner did not type, so
+               none of it may be treated as a confirmed smart default. Marking
+               them dirty stops the defaults engine reapplying over the top. */
+            filled.forEach((field) => defaults.markDirty?.(field))
+          }}
+          onClearPlaceField={(field) =>
+            setFromPlace((prev) => prev.filter((f) => f !== field))
+          }
             value={details}
             onChange={setDetails}
             defaults={defaults}

@@ -396,6 +396,43 @@ const apiHandlers = [
     )
   }),
 
+  /* -------------------------------------------------------------- places */
+
+  /**
+   * The proxy. Note what it does NOT return: no rating, no reviews, no photos,
+   * no atmosphere attributes. Those may not be stored, so the portal must never
+   * be in a position to receive them by accident — a double that handed them
+   * over would let a `...place` spread put them in the database and the suite
+   * would call it a pass.
+   */
+  method('shotright.api.search_places', ({ query }) =>
+    ok(
+      bench.places
+        .filter((p) => !query || p.display_name.toLowerCase().includes(String(query).toLowerCase()))
+        .map((p) => ({
+          place_id: p.place_id,
+          display_name: p.display_name,
+          formatted_address: p.formatted_address,
+          claimed: Boolean(p.claimed),
+        })),
+    ),
+  ),
+
+  method('shotright.api.get_place_details', ({ place_id }) => {
+    const place = bench.places.find((p) => p.place_id === place_id)
+    if (!place) return docMissing()
+    if (bench.placeClaimed || place.claimed)
+      return validationError('That venue is <strong>already claimed</strong> by another account')
+    return ok({
+      place_id: place.place_id,
+      display_name: place.display_name,
+      formatted_address: place.formatted_address,
+      location: { latitude: place.latitude, longitude: place.longitude },
+      national_phone_number: place.phone || '',
+      attribution: 'Powered by Google',
+    })
+  }),
+
   /* --------------------------------------------------------------- legal */
 
   method('shotright.api.get_legal_documents', () =>

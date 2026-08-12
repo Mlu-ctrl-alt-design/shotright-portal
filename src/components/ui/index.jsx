@@ -84,6 +84,9 @@ export function Button({
  * warm background, brand-edge border. Both clear the instant it goes dirty,
  * with a 250ms colour fade so the change is noticed rather than blinked past.
  */
+/* `data-prefilled` mirrors the visual marker as an attribute. The colour says
+   "we filled this in" to people who can see it; the attribute says it to
+   anything else that needs to know, tests included. */
 export function Input({
   label,
   error,
@@ -126,6 +129,7 @@ export function Input({
           id={inputId}
           aria-invalid={error ? true : undefined}
           {...props}
+          data-prefilled={prefilled ? 'true' : undefined}
           aria-describedby={describedBy}
           className={clsx(
             'block w-full rounded-full border-2 px-5 py-2.5 text-sm text-ink-900',

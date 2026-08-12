@@ -951,6 +951,106 @@ Covered by `src/test/legal.test.jsx` (24 checks) and
 `verification/verify23.mjs` (37 checks), including a fake bench that reproduces
 the silent-200 write so the read-back is provably wired.
 
+### 20. Google Places proxy — "find my venue" onboarding
+
+> **Asked 8 Aug: onboard an existing venue by searching Google, then confirm or
+> edit.** Built and merged behind capability detection. It renders **nothing at
+> all** until the two methods below exist, so this is not blocking anything —
+> but it does nothing until you build it either.
+
+#### Why there has to be a proxy
+
+**A Places REST key cannot be restricted to an app.** Only by IP or HTTP
+referrer. A key in a JS bundle is a key anyone can lift and spend against your
+billing account, so there is no `VITE_GOOGLE_*` variable in this repo and there
+must never be one. The bench holds the key; the portal asks the bench.
+
+#### The two methods
+
+```
+search_places(query, latitude=None, longitude=None)
+  -> [ {place_id, display_name, formatted_address, claimed} ]
+
+get_place_details(place_id)
+  -> {place_id, display_name, formatted_address,
+      location: {latitude, longitude},
+      national_phone_number, attribution}
+```
+
+Candidates tried in order, first match wins: `search_places` ·
+`find_places` · `google_place_search`, then `get_place_details` ·
+`google_place_details`.
+
+**An empty `query` must return `[]`, not an error.** The portal sends one on
+mount to decide whether to render the search box at all — rendering it and
+hiding it after the first failed search means a partner types their venue name
+into something that was never going to work.
+
+**`claimed: true`** on a row where that `place_id` is already on another
+account's Venue. The portal greys it out. `get_place_details` on a claimed
+place should throw with "already claimed" in the message — a second listing for
+one restaurant splits its bookings across two records and neither owner sees
+the other half.
+
+#### What the proxy must NOT return
+
+`rating`, `userRatingCount`, `reviews`, `photos`, `generativeSummary`,
+`reviewSummary`, and the atmosphere attributes. Those may not be stored, and
+the cheapest way to guarantee we never store them is to never receive them. The
+field mask should ask for identity fields only — which also keeps this on the
+cheaper SKU.
+
+#### One field on `Venue`
+
+**`place_id` (Data, unique, indexed.)** It is the *only* piece of Google data
+that may be kept indefinitely, and it is what makes `claimed` answerable. The
+portal already sends it to `create_venue`; if the method doesn't declare it,
+Frappe drops it at 200 and nothing will say so — the flow still works, it just
+silently loses duplicate detection.
+
+#### The cost argument, because the research says "reviews are expensive"
+
+That is right, and it is about a **different screen**. Customer-facing venue
+detail — reviews and photos, uncacheable, re-fetched per view, per customer,
+for ever — is an unbounded recurring cost for content you may not rank or sort.
+
+**This is the opposite shape.** It fires once per venue, ever, started by the
+owner, and asks for identity fields rather than reviews. Text search returning
+ids is the free unlimited tier; the billable detail call happens on one
+deliberate pick, not on a render. A first cohort of a few hundred venues makes
+fewer calls in a month than one customer browsing for an evening — comfortably
+inside the free monthly allowance on the tier this needs.
+
+**So they should be approved separately.** Onboarding is cheap and bounded;
+customer-facing Places content is neither, and it is the one that needs a
+budget conversation.
+
+#### Three constraints we've designed around, for the record
+
+1. **No storage.** Only `place_id` is kept. Everything else fills a form the
+   partner then reads, corrects and submits — so what lands in `Venue` is the
+   owner's own statement about their own business. Google is a keyboard here,
+   not a database. Every prefilled field is marked, editable and clearable.
+2. **Places content on a map must be on a Google map.** This portal draws
+   Leaflet over OSM tiles, so results are a **list** and never pins. After a
+   pick, the coordinate is the partner's confirmed location and our pin is ours.
+   *This applies to the customer app too — `flutter_map` plus Google Places pins
+   would be a policy breach, and it is worth settling before that screen is
+   designed.*
+3. **Attribution.** `get_place_details` should return whatever attribution
+   string is required; the portal renders it verbatim. Right now the flow shows
+   no Google-owned content after the pick, which is the cheapest way to stay
+   inside the rule.
+
+#### One thing worth deciding out loud
+
+Opening hours are the most valuable prefill left on the table, and the portal
+deliberately does **not** parse Google's format — writing subtly wrong trading
+hours onto a real business is worse than asking for them, because a partner who
+trusts the prefill will not re-read all seven days. If the proxy maps them into
+our `operating_hours` row shape server-side, the portal will use them. Ours to
+get right once, on your side, rather than approximately, on ours.
+
 ### 13. Do drafts expire?
 
 The resume card currently says **"nothing expires"**. If there is a cleanup job,

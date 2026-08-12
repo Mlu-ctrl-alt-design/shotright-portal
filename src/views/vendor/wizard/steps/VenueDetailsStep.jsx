@@ -5,6 +5,8 @@ import Spinner from '../../../../components/ui/Spinner'
 import AddressAutocomplete from '../../../../components/ui/AddressAutocomplete'
 import DefaultChip, { ChipRow } from '../../../../components/ui/DefaultChip'
 import PhotoUploader from '../../../../components/ui/PhotoUploader'
+import PlaceSearch from '../../../../components/ui/PlaceSearch'
+import { applyPlace } from '../../../../services/places'
 import { CHIP_COPY, SOURCE, TIER } from '../../../../services/smartDefaults'
 import { MAX_VENUE_PHOTOS, uploadVenuePhoto } from '../../../../services/vendor'
 
@@ -37,6 +39,10 @@ export default function VenueDetailsStep({
   onBlurField = () => {},
   photos = [],
   onPhotosChange = () => {},
+  /** Detail fields whose value came from a Google listing, not the partner. */
+  fromPlace = [],
+  onPlacePicked = () => {},
+  onClearPlaceField = () => {},
 }) {
   const { data: lookups, isLoading } = useVenueLookups()
   const { data: photosSupported } = useVenuePhotoSupport()
@@ -53,6 +59,10 @@ export default function VenueDetailsStep({
    */
   const set = (key) => (e) => {
     defaults.markDirty(key)
+    /* Typing over a prefilled value makes it the partner's own, so the "we
+       filled this in" marker has to go with it — a chip that outlives the value
+       it describes teaches people to ignore chips. */
+    if (fromPlace.includes(key)) onClearPlaceField(key)
     onChange({ ...value, [key]: e.target.value })
   }
 
@@ -137,11 +147,12 @@ export default function VenueDetailsStep({
     // see the note in `Input`. Without it, blurring a field while clicking Next
     // moves the button between mousedown and mouseup and swallows the click.
     reserveMessage: true,
-    prefilled: defaults.isDefaulted(field),
+    prefilled: defaults.isDefaulted(field) || fromPlace.includes(field),
     // §11 — the chip text is the field's description, so a screen reader
     // announces where the value came from instead of presenting a mysteriously
     // populated field.
-    'aria-describedby': defaults.isDefaulted(field) ? chipIdFor(field) : undefined,
+    'aria-describedby':
+      defaults.isDefaulted(field) || fromPlace.includes(field) ? chipIdFor(field) : undefined,
     'data-default-source': defaults.applied[field]?.source,
     'data-field': field,
   })
@@ -154,6 +165,35 @@ export default function VenueDetailsStep({
         {defaults.announcement}
       </p>
 
+      {/* Above the form, because someone who has traded for six years should
+          not have to type six years of information back in. It renders nothing
+          at all when the bench has no search endpoint — see PlaceSearch. */}
+      <PlaceSearch
+        near={
+          value.latitude && value.longitude
+            ? { latitude: value.latitude, longitude: value.longitude }
+            : undefined
+        }
+        onPick={(place) => {
+          const { values, filled } = applyPlace(value, place)
+          onPlacePicked(values, filled)
+        }}
+      />
+
+      {fromPlace.length > 0 && (
+        /* Said once, plainly, and it is the whole ethical load of this feature:
+           they are publishing this, so they have to have read it. Marked fields
+           carry the same one-tap clear as a smart default. */
+        <Alert variant="info">
+          <p className="font-bold">We’ve filled in what we found — please check it</p>
+          <p className="mt-1">
+            Marked fields came from the listing you picked. They’re often slightly out of date, and
+            what you submit is what customers will see, so give each one a look. Edit anything and
+            it becomes yours.
+          </p>
+        </Alert>
+      )}
+
       <div className="sm:w-1/2 sm:pr-3">
         <Input
           ref={nameRef}
@@ -165,6 +205,7 @@ export default function VenueDetailsStep({
           onBlur={() => onBlurField('venue_name')}
           error={errors.venue_name}
           reserveMessage
+          prefilled={fromPlace.includes('venue_name')}
           data-field="venue_name"
         />
         {/* Tier D — never defaulted, but the row still reserves its height so
