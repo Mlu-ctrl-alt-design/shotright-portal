@@ -83,6 +83,45 @@ const field = (page, name) =>
     : page.getByRole('textbox', { name, exact: true })
 const select = (page, name) => page.getByRole('combobox', { name, exact: true })
 
+/**
+ * Set the venue's location the way a partner now does — by picking an address.
+ *
+ * ⚠️ THE LATITUDE AND LONGITUDE FIELDS ARE GONE. Changed 13 Aug: a partner
+ * reads a street name, not `-26.204100`. These suites used to type the numbers
+ * straight in, which was convenient and skipped the entire address→coordinates
+ * handoff — the one part of this screen that decides whether a venue is
+ * findable at all. Picking the suggestion tests more than the old version did.
+ *
+ * The geocoder is stubbed per-page rather than left to reach the real
+ * OpenStreetMap service: these run offline in CI, and a suite that silently
+ * depends on a third party is a suite that goes red for reasons nobody owns.
+ */
+async function setLocation(page, label = '70 Juta') {
+  await page.route('**/nominatim.openstreetmap.org/**', (r) =>
+    r.fulfill({
+      json: [
+        {
+          place_id: 1,
+          display_name: '70 Juta St, Braamfontein, Johannesburg',
+          lat: '-26.2041',
+          lon: '28.0473',
+        },
+      ],
+    }),
+  )
+  const address = page.getByRole('combobox', { name: 'Address', exact: true })
+  await address.fill(label)
+  await page.getByRole('option').first().waitFor({ timeout: 10000 })
+  await page.getByRole('option').first().click()
+  // The pin lands with the pick; wait for it, or the next step validates a
+  // venue that has an address and no point.
+  await page.locator('[data-field="latitude"][data-latitude]').waitFor({ timeout: 10000 })
+}
+
+/** What the map is holding, now that no input displays it. */
+const pinLatitude = (page) =>
+  page.locator('[data-field="latitude"]').getAttribute('data-latitude')
+
 /* ============ Tier A + D: the core payoff ============ */
 {
   const { page, context } = await open({ profile: PROFILE })
@@ -152,8 +191,7 @@ const select = (page, name) => page.getByRole('combobox', { name, exact: true })
   // are filled first, because validation runs BEFORE the Tier B check — a
   // missing required value outranks an unconfirmed guess.
   await field(page, 'Venue name').fill('Test Venue')
-  await field(page, 'Latitude').fill('-26.2041')
-  await field(page, 'Longitude').fill('28.0473')
+  await setLocation(page)
   const n0 = page.getByRole('button', { name: /^Next$/i })
   await n0.scrollIntoViewIfNeeded()
   await n0.click()
@@ -185,8 +223,7 @@ const select = (page, name) => page.getByRole('combobox', { name, exact: true })
   const { page, context } = await open({ profile: { ...PROFILE, phone_verified: 1 } })
   await field(page, 'Contact number').fill('+27 11 000 1111')
   await field(page, 'Venue name').fill('Test Venue')
-  await field(page, 'Latitude').fill('-26.2041')
-  await field(page, 'Longitude').fill('28.0473')
+  await setLocation(page)
   const n2 = page.getByRole('button', { name: /^Next$/i })
   await n2.scrollIntoViewIfNeeded()
   await n2.click()
@@ -284,8 +321,7 @@ const select = (page, name) => page.getByRole('combobox', { name, exact: true })
   const { page, context } = await open({ profile: PROFILE })
   await field(page, 'Manager name').fill('Lerato')
   await field(page, 'Venue name').fill('Test Venue')
-  await field(page, 'Latitude').fill('-26.2041')
-  await field(page, 'Longitude').fill('28.0473')
+  await setLocation(page)
 
   // Step away and back — the classic regression.
   const nx = page.getByRole('button', { name: /^Next$/i })
@@ -366,7 +402,7 @@ const select = (page, name) => page.getByRole('combobox', { name, exact: true })
     (await address.inputValue()) === addressBefore,
     'dismissing that chip removes the NOTICE ONLY — the address stays (§6)',
   )
-  const lat = await field(page, 'Latitude').inputValue()
+  const lat = (await pinLatitude(page)) || ''
   check(lat.startsWith('-26.19'), `and the pin stays too (lat ${lat})`)
   await context.close()
 }
@@ -379,7 +415,7 @@ const select = (page, name) => page.getByRole('combobox', { name, exact: true })
   })
   await page.waitForTimeout(1200)
 
-  const lat = await field(page, 'Latitude').inputValue()
+  const lat = (await pinLatitude(page)) || ''
   check(lat.startsWith('-26.20'), `a provisional pin drops from the device (lat ${lat})`)
 
   const body = await page.locator('main').innerText()
@@ -415,8 +451,7 @@ const select = (page, name) => page.getByRole('combobox', { name, exact: true })
   // No device signal, so the location has to be entered by hand — which is
   // exactly the path this case is about being usable.
   await field(page, 'Venue name').fill('Test')
-  await field(page, 'Latitude').fill('-26.2041')
-  await field(page, 'Longitude').fill('28.0473')
+  await setLocation(page)
   const nz = page.getByRole('button', { name: /^Next$/i })
   await nz.scrollIntoViewIfNeeded()
   await nz.click()

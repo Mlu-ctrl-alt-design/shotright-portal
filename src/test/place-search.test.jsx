@@ -86,9 +86,13 @@ describe('finding a venue that already exists', () => {
     await search(user, 'Corner')
     await user.click(await screen.findByRole('button', { name: /Corner Kitchen & Bar/i }))
 
-    await waitFor(() =>
-      expect(screen.getByLabelText(/latitude/i, { selector: 'input' })).toHaveValue('-33.9249'),
-    )
+    /* Read off the map wrapper — the coordinate fields are gone. What matters
+       is unchanged and is the whole reason this test exists: a venue without a
+       point is invisible to every customer, because search is a radius query. */
+    await waitFor(() => {
+      const node = document.querySelector('[data-field="latitude"]')
+      expect(node?.getAttribute('data-latitude')).toBe('-33.9249')
+    })
   })
 
   it('does not search on the first keystroke', async () => {

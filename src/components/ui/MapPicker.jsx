@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { Button, Input, Alert } from './index'
+import { Button, Alert } from './index'
 import { clsx } from '../../utils/clsx'
+import { loadGoogleMaps } from '../../services/googleMaps'
 
 /**
  * Pick a venue's coordinates.
@@ -14,19 +15,36 @@ import { clsx } from '../../utils/clsx'
  * Leaflet + OpenStreetMap: no API key to provision, no per-request billing.
  * Geocoding uses Nominatim, OSM's free service.
  *
+ * TWO SURFACES, ONE COMPONENT. Google Maps when a key is configured, Leaflet
+ * over OpenStreetMap when it is not. Everything around the map — the copy, the
+ * badge, the keyboard nudge, the warnings — is shared, because those were the
+ * expensive parts to get right and neither engine should own them.
+ *
+ * WHY GOOGLE, AND WHY IT IS NOT OPTIONAL ONCE ADDRESSES COME FROM PLACES.
+ * Places content shown on a map must be shown on a Google map. The moment the
+ * address field is Google-backed, this pin IS Places content, and a Leaflet map
+ * carrying it is a policy breach — a quiet one, of the kind nobody notices
+ * until an account review. See `services/googleMaps.js`.
+ *
  * THREE WAYS IN, deliberately:
- *   1. Picking a suggestion in the Address field above (which geocodes it)
+ *   1. Picking a suggestion in the Address field above
  *   2. Clicking or dragging on the map
- *   3. Typing the numbers directly
+ *   3. "Use my current location"
  *
- * (3) is not a fallback for the impatient — it is the accessible path. A map is
- * irreducibly visual and drag-to-place cannot be done from a keyboard, so the
- * numeric inputs are the only route for some partners and are labelled as real
- * fields rather than hidden behind a toggle.
+ * ⚠️ THERE USED TO BE A FOURTH — typing latitude and longitude into two number
+ * fields — and it was the ACCESSIBLE one: a map is irreducibly visual and
+ * drag-to-place cannot be done from a keyboard. Those fields are gone (a
+ * partner should be reading a street name, not a decimal), so the keyboard path
+ * is now (1) the address combobox, which is fully keyboard-operable, and the
+ * arrow-key nudge below once a pin exists. That is a real trade and it is worth
+ * naming: the numbers were precise and universal, the address is friendlier and
+ * depends on the venue being geocodable. `Drop a pin here` covers the gap for
+ * an address no geocoder knows — informal and new addresses in SA, which the
+ * old copy on this component was already careful about.
  *
- * NETWORK: tiles and geocoding are fetched from openstreetmap.org at runtime. If
- * a CSP is ever added to the portal it must allow those hosts, or the map goes
- * blank while the rest of the page looks fine.
+ * NETWORK: whichever surface loads, it is fetched at runtime. A CSP added to
+ * this portal must allow maps.googleapis.com AND openstreetmap.org, or the map
+ * goes blank while the rest of the page looks fine.
  */
 
 // Leaflet's default marker icons resolve to files it expects to find next to its
@@ -55,8 +73,18 @@ const DEFAULT_CENTER = [-26.2041, 28.0473]
  */
 const NUDGE_DEG = 10 / 111_320
 
-export default function MapPicker({ latitude, longitude, onChange, provisional = false, error }) {
+export default function MapPicker({
+  latitude,
+  longitude,
+  onChange,
+  provisional = false,
+  error,
+  /** The street address this pin came from. Shown INSTEAD of coordinates. */
+  address = '',
+}) {
   const containerRef = useRef(null)
+  /** null = still deciding. Prevents both engines racing to own the div. */
+  const [engine, setEngine] = useState(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
   const [status, setStatus] = useState(null)
@@ -73,8 +101,66 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
     onChangeRef.current = onChange
   }, [onChange])
 
+  /**
+   * Which surface? Asked once, before either engine touches the container.
+   *
+   * `loadGoogleMaps()` resolves to null with no key, on a bad key, or offline —
+   * it never throws — so "Google failed" and "Google was never configured" land
+   * in the same place, which is the same fallback either way.
+   */
   useEffect(() => {
-    if (mapRef.current || !containerRef.current) return
+    let alive = true
+    loadGoogleMaps().then((maps) => {
+      if (alive) setEngine(maps ? 'google' : 'leaflet')
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  /* ------------------------------------------------------------- Google */
+  useEffect(() => {
+    if (engine !== 'google' || mapRef.current || !containerRef.current) return
+    const maps = window.google?.maps
+    if (!maps) return
+
+    const centre = hasPoint
+      ? { lat: latitude, lng: longitude }
+      : { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] }
+
+    const map = new maps.Map(containerRef.current, {
+      center: centre,
+      zoom: hasPoint ? 16 : 11,
+      scrollwheel: false,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: false,
+      /* Required for AdvancedMarkerElement. Falls back to the classic marker
+         below if it is unavailable, so a missing map id degrades the pin
+         rather than the map. */
+      mapId: 'DEMO_MAP_ID',
+    })
+
+    map.addListener('click', (e) => {
+      if (!e.latLng) return
+      onChangeRef.current({
+        latitude: Number(e.latLng.lat().toFixed(6)),
+        longitude: Number(e.latLng.lng().toFixed(6)),
+      })
+    })
+
+    mapRef.current = { kind: 'google', map }
+    return () => {
+      mapRef.current = null
+      markerRef.current = null
+      if (containerRef.current) containerRef.current.innerHTML = ''
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine])
+
+  /* ------------------------------------------------------------ Leaflet */
+  useEffect(() => {
+    if (engine !== 'leaflet' || mapRef.current || !containerRef.current) return
 
     const map = L.map(containerRef.current, { scrollWheelZoom: false }).setView(
       hasPoint ? [latitude, longitude] : DEFAULT_CENTER,
@@ -92,7 +178,7 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
       })
     })
 
-    mapRef.current = map
+    mapRef.current = { kind: 'leaflet', map }
     // Leaflet mis-measures if its container was hidden or resized during mount.
     //
     // The handle is kept and cleared below. Unmounting inside that tick — which
@@ -109,23 +195,57 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
       mapRef.current = null
       markerRef.current = null
     }
-    // Runs once: later coordinate changes are handled by the marker effect.
+    // Later coordinate changes are handled by the marker effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [engine])
 
-  // Reflect the current coordinates onto the map.
+  // Reflect the current coordinates onto whichever map is mounted.
   useEffect(() => {
-    const map = mapRef.current
-    if (!map) return
+    const handle = mapRef.current
+    if (!handle) return
 
     if (!hasPoint) {
       if (markerRef.current) {
-        markerRef.current.remove()
+        // Two APIs for "take this off the map", and neither forgives the other.
+        if (handle.kind === 'google') markerRef.current.map = null
+        else markerRef.current.remove()
         markerRef.current = null
       }
       return
     }
 
+    if (handle.kind === 'google') {
+      const maps = window.google?.maps
+      if (!maps) return
+      const position = { lat: latitude, lng: longitude }
+
+      if (markerRef.current) {
+        markerRef.current.position = position
+      } else {
+        const marker = new maps.marker.AdvancedMarkerElement({
+          map: handle.map,
+          position,
+          gmpDraggable: true,
+        })
+        marker.addListener('dragstart', () => setPinState('adjusting'))
+        marker.addListener('dragend', (e) => {
+          const p = e.latLng || marker.position
+          const lat = typeof p.lat === 'function' ? p.lat() : p.lat
+          const lng = typeof p.lng === 'function' ? p.lng() : p.lng
+          setPinState('adjusted')
+          onChangeRef.current({
+            latitude: Number(lat.toFixed(6)),
+            longitude: Number(lng.toFixed(6)),
+            provisional: false,
+          })
+        })
+        markerRef.current = marker
+      }
+      handle.map.panTo(position)
+      return
+    }
+
+    const map = handle.map
     const latlng = [latitude, longitude]
     if (markerRef.current) {
       markerRef.current.setLatLng(latlng)
@@ -175,67 +295,22 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
   }
 
   /**
-   * ⚠️ THE COORDINATE FIELDS COULD NOT BE TYPED INTO. Found 28 Jul by a UI test.
+   * ⚠️ REMOVED WITH THE LATITUDE / LONGITUDE FIELDS — the lesson outlives them.
    *
-   * These are CONTROLLED inputs whose value comes from the parsed number. The
-   * handler used to drop any keystroke that didn't parse:
+   * Those inputs were CONTROLLED and bound to a parsed number, and the handler
+   * dropped any keystroke that did not parse. Typing "-25.7069" therefore lost
+   * the "-" and the ".", because `Number("-")` and `Number("25.")` produce no
+   * new value and React re-rendered the field with its previous one. Every
+   * latitude in South Africa is negative and every useful coordinate has a
+   * decimal point, so the two characters that could not be typed were the two
+   * always needed — on the one field deciding whether a venue is findable at
+   * all. The fix was to hold the raw text ALONGSIDE the parsed number rather
+   * than instead of it.
    *
-   *     const n = Number(raw)
-   *     if (Number.isFinite(n)) onChange(...)      // else: nothing happens
-   *
-   * With no state change, React re-renders the input with its previous value —
-   * so the character the partner just typed vanishes. Type "-25.7069" and watch
-   * it happen:
-   *
-   *     "-"      Number("-")   → NaN  → rejected, field snaps back to empty
-   *     "2"      → 2                  → field shows "2"
-   *     "5"      → 25                 → "25"
-   *     "."      Number("25.") → 25   → state unchanged, the "." is discarded
-   *     "7"      → 257                → and now the digits are running together
-   *
-   * You end up at 257069, which fails validation as "Latitude must be between
-   * -90 and 90" — a message about a number the partner never typed.
-   *
-   * **Every latitude in South Africa is negative and every useful coordinate
-   * has a decimal point.** So the minus sign and the point were the two
-   * characters that could not be entered, on the one field that decides whether
-   * a venue is findable at all. Only dragging the pin or the geolocation button
-   * worked, and neither is available to someone reading coordinates off a
-   * screen.
-   *
-   * THE FIX: hold what they typed as a string, and parse alongside rather than
-   * instead. `draft` is the in-progress text; the number still flows to the
-   * parent exactly as before, only now the field stops fighting the keyboard.
+   * **A controlled numeric input must never decide what the partner is allowed
+   * to have typed so far.** If a number field is ever added to this portal
+   * again, it starts from here.
    */
-  const [draft, setDraft] = useState({})
-
-  const setCoord = (key) => (e) => {
-    const raw = e.target.value
-    setPinState('adjusted')
-    setDraft((d) => ({ ...d, [key]: raw }))
-
-    if (raw === '') return onChange({ latitude, longitude, [key]: undefined, provisional: false })
-    const n = Number(raw)
-    if (Number.isFinite(n)) onChange({ latitude, longitude, [key]: n, provisional: false })
-  }
-
-  /**
-   * What the field shows.
-   *
-   * The draft wins while it is still being typed — either it doesn't parse yet
-   * ("-", "-25.") or it parses to exactly the value we already hold, meaning
-   * nothing else has changed it. If the number arrives from somewhere else —
-   * the pin being dragged, geolocation, a resumed draft — that wins instead,
-   * because the partner's stale keystrokes are no longer what the venue says.
-   */
-  const shown = (key, value) => {
-    const typed = draft[key]
-    if (typed === undefined) return value ?? ''
-    const n = Number(typed)
-    if (typed !== '' && !Number.isFinite(n)) return typed // mid-typing: "-", "."
-    if (typed !== '' && n === value) return typed // "-25." while value is -25
-    return value ?? ''
-  }
 
   /**
    * Keyboard path to the same outcome as dragging (§11).
@@ -348,29 +423,44 @@ export default function MapPicker({ latitude, longitude, onChange, provisional =
         )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* `data-field` so the wizard's "take me to the problem" can find these
-            — they are the only editable surface for a required value whose
-            primary control is a map. */}
-        <Input
-          label="Latitude"
-          inputMode="decimal"
-          placeholder="-26.204100"
-          value={shown('latitude', latitude)}
-          onChange={setCoord('latitude')}
-          error={error}
-          reserveMessage
-          data-field="latitude"
-        />
-        <Input
-          label="Longitude"
-          inputMode="decimal"
-          placeholder="28.047300"
-          value={shown('longitude', longitude)}
-          onChange={setCoord('longitude')}
-          reserveMessage
-          data-field="longitude"
-        />
+      {/**
+        * WHERE THE PIN IS, IN WORDS.
+        *
+        * This replaced two number fields showing latitude and longitude to six
+        * decimal places. Nobody running a restaurant checks their venue is
+        * correctly placed by reading -26.204100 — they read the street name, and
+        * the numbers were noise dressed up as precision. The coordinates are
+        * still what gets saved, because radius search needs them; they are just
+        * no longer the partner's problem.
+        *
+        * `data-field` stays on the wrapper so the wizard's "take me to the
+        * problem" can still bring someone here when no location is set.
+        */}
+      <div data-field="latitude" data-latitude={latitude} data-longitude={longitude}>
+        <p className="text-sm font-semibold text-ink-900">Where the pin is</p>
+        {hasPoint ? (
+          <p className="mt-1 text-sm text-ink-700">
+            {address && pinState !== 'adjusted' ? (
+              address
+            ) : address ? (
+              <>
+                Just off <span className="font-medium">{address}</span> — you moved the pin, which
+                is fine if that is where your door is.
+              </>
+            ) : (
+              'Dropped on the map. Pick your address above if you want it exact.'
+            )}
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-ink-700">
+            Nothing set yet — pick your address above, or drop a pin on the map.
+          </p>
+        )}
+        {error && (
+          <p className="mt-1 text-sm text-red-700" role="alert">
+            {error}
+          </p>
+        )}
       </div>
 
       {!hasPoint && (

@@ -123,37 +123,80 @@ export default function Dashboard() {
             }
           />
         ) : (
-          <ul className="divide-y divide-gray-200">
-            {venues.map((venue) => (
-              <li key={venue.name} className="flex items-center justify-between gap-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-ink-900">{venue.venue_name}</p>
-                  <p className="truncate text-xs text-ink-500">{venue.address}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <Badge tone={stateTone(venue.workflow_state)}>
-                    {stateLabel(venue.workflow_state)}
-                  </Badge>
-                  {/* A Declined badge with only "Edit" next to it asks someone
-                      to fix something without telling them what. */}
-                  {inBucket(venue, 'declined') && (
-                    <Link
-                      to={`/venues/${venue.name}/review`}
-                      aria-label={`Why ${venue.venue_name} was declined`}
-                      className="text-sm font-bold text-red-700 hover:underline"
-                    >
-                      See why
-                    </Link>
-                  )}
-                  <Link
-                    to={`/venues/${venue.name}/edit`}
-                    className="text-sm font-medium text-brand-600 hover:underline"
-                  >
-                    Edit
-                  </Link>
-                </div>
-              </li>
-            ))}
+          <ul className="-mx-2 divide-y divide-gray-200">
+            {venues.map((venue) => {
+              const declined = inBucket(venue, 'declined')
+              return (
+                /**
+                 * THE ROW IS THE LINK.
+                 *
+                 * It used to be a name on the far left and three separate
+                 * controls on the far right — a badge, sometimes "See why", and
+                 * an "Edit" on every single row. Three problems came out of
+                 * that, and they compounded:
+                 *
+                 *  1. The badges never lined up. A declined row carries an extra
+                 *     control, so it pushed its badge left and the column read
+                 *     as ragged rather than as a column.
+                 *  2. "Edit" repeated down every row is a wall of identical
+                 *     links — unusable with a screen reader without an
+                 *     aria-label per row, and visual noise with one.
+                 *  3. On a wide screen there was a thousand pixels of nothing
+                 *     between the name and its status, so the eye had to track
+                 *     across empty space to answer "is this one live?".
+                 *
+                 * Making the whole row the target fixes all three: one hit area
+                 * instead of a small link, the badge sits in a fixed column that
+                 * cannot be pushed, and the row is scannable because name and
+                 * status are the only two things in it.
+                 *
+                 * It goes to the venue hub rather than the edit form — that page
+                 * has the menu, hours, photos and bookings, and "open my venue"
+                 * is the intent behind the click far more often than "edit the
+                 * name of my venue".
+                 */
+                <li key={venue.name} className="relative">
+                  <div className="flex items-center gap-4 rounded-xl px-2 py-2.5 transition-colors hover:bg-canvas">
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/venues/${venue.name}`}
+                        /* Stretched link: the anchor is the row's hit area, and
+                           anything that must stay separately clickable sits
+                           above it in the stacking order. An <a> inside an <a>
+                           is invalid HTML and the browser will silently
+                           un-nest it. */
+                        className="text-sm font-semibold text-ink-900 before:absolute before:inset-0 before:content-[''] hover:underline"
+                      >
+                        {venue.venue_name}
+                      </Link>
+                      <p className="mt-0.5 truncate text-xs text-ink-500">
+                        {venue.address || 'No address yet'}
+                      </p>
+                    </div>
+
+                    {/* Fixed column, so every badge on the list starts at the
+                        same x whatever else the row contains. */}
+                    <Badge tone={stateTone(venue.workflow_state)}>
+                      {stateLabel(venue.workflow_state)}
+                    </Badge>
+
+                    {/* The ONLY explicit action, and only where it means
+                        something. It used to be bold red, which shouted louder
+                        than the venue's own name — the badge beside it already
+                        carries the alarm, so this just has to be reachable. */}
+                    {declined && (
+                      <Link
+                        to={`/venues/${venue.name}/review`}
+                        aria-label={`Why ${venue.venue_name} was declined`}
+                        className="relative z-10 shrink-0 text-sm font-semibold text-red-700 underline underline-offset-2 hover:text-red-800"
+                      >
+                        Why?
+                      </Link>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         )}
       </Card>

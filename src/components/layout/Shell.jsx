@@ -40,17 +40,67 @@ import LegalBanner from './LegalBanner'
  * claims otherwise is lying about where you are.
  */
 const NAV = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/venues', label: 'My Venues', end: true },
-  { to: '/venues/new', label: 'Add New' },
-  { to: '/profile', label: 'Settings' },
+  { to: '/', label: 'Dashboard', end: true, icon: GaugeIcon },
+  { to: '/venues', label: 'My Venues', end: true, icon: StorefrontIcon },
+  { to: '/venues/new', label: 'Add New', icon: PlusIcon },
+  { to: '/profile', label: 'Settings', icon: GearIcon },
 ]
+
+/**
+ * One icon per destination — and one of them is still the plus.
+ *
+ * Every item in this nav used to carry the SAME plus-in-a-circle. Four
+ * identical glyphs are not icons, they are four bullet points: they cost
+ * rendering and vertical space and carry no information, and the one place the
+ * plus was actually right ("Add New") lost its meaning by repetition. A person
+ * navigating by shape had nothing to navigate by.
+ *
+ * Drawn inline rather than pulled from a set: it is four small paths, and a
+ * dependency for four paths is a dependency to keep patched for ever. All four
+ * share the geometry the original had — 20×20, stroked not filled, 1.75 weight,
+ * `currentColor` — so they inherit the active/inactive colour without knowing
+ * anything about it.
+ */
+const iconClass = 'size-4 shrink-0 fill-none stroke-current stroke-[1.75]'
 
 function PlusIcon() {
   return (
-    <svg viewBox="0 0 20 20" className="size-4 shrink-0 fill-none stroke-current stroke-[1.75]">
+    <svg viewBox="0 0 20 20" className={iconClass} aria-hidden="true">
       <circle cx="10" cy="10" r="8.25" />
       <path d="M10 6.5v7M6.5 10h7" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** Dashboard — a dial, for "how are things doing". */
+function GaugeIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className={iconClass} aria-hidden="true">
+      <path d="M2.5 14.5a8 8 0 1 1 15 0" strokeLinecap="round" />
+      <path d="M10 14.5 13.5 8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** My Venues — an awning over a door. A place, not a document. */
+function StorefrontIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className={iconClass} aria-hidden="true">
+      <path d="M3 8.5v8.25h14V8.5" strokeLinejoin="round" />
+      <path d="M2.25 8.5 4 3.25h12L17.75 8.5" strokeLinejoin="round" />
+      <path d="M8 16.75v-4.5h4v4.5" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** Settings — sliders rather than a cog. A cog reads as "system settings"; this
+    screen is the partner's own details, and sliders read as "your preferences". */
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className={iconClass} aria-hidden="true">
+      <path d="M3 6h14M3 14h14" strokeLinecap="round" />
+      <circle cx="7.5" cy="6" r="2" />
+      <circle cx="12.5" cy="14" r="2" />
     </svg>
   )
 }
@@ -123,7 +173,7 @@ export default function Shell() {
           )
         }
       >
-        <PlusIcon />
+        {item.icon ? <item.icon /> : <PlusIcon />}
         {item.label}
       </NavLink>
     ))

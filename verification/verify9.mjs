@@ -70,6 +70,45 @@ async function open({ draftEndpoints = false, store = {} } = {}) {
 
 const card = (page) => page.getByRole('region', { name: 'Pick up where you left off' })
 
+/**
+ * Set the venue's location the way a partner now does — by picking an address.
+ *
+ * ⚠️ THE LATITUDE AND LONGITUDE FIELDS ARE GONE. Changed 13 Aug: a partner
+ * reads a street name, not `-26.204100`. These suites used to type the numbers
+ * straight in, which was convenient and skipped the entire address→coordinates
+ * handoff — the one part of this screen that decides whether a venue is
+ * findable at all. Picking the suggestion tests more than the old version did.
+ *
+ * The geocoder is stubbed per-page rather than left to reach the real
+ * OpenStreetMap service: these run offline in CI, and a suite that silently
+ * depends on a third party is a suite that goes red for reasons nobody owns.
+ */
+async function setLocation(page, label = '70 Juta') {
+  await page.route('**/nominatim.openstreetmap.org/**', (r) =>
+    r.fulfill({
+      json: [
+        {
+          place_id: 1,
+          display_name: '70 Juta St, Braamfontein, Johannesburg',
+          lat: '-26.2041',
+          lon: '28.0473',
+        },
+      ],
+    }),
+  )
+  const address = page.getByRole('combobox', { name: 'Address', exact: true })
+  await address.fill(label)
+  await page.getByRole('option').first().waitFor({ timeout: 10000 })
+  await page.getByRole('option').first().click()
+  // The pin lands with the pick; wait for it, or the next step validates a
+  // venue that has an address and no point.
+  await page.locator('[data-field="latitude"][data-latitude]').waitFor({ timeout: 10000 })
+}
+
+/** What the map is holding, now that no input displays it. */
+const pinLatitude = (page) =>
+  page.locator('[data-field="latitude"]').getAttribute('data-latitude')
+
 /* ============================================================================
    1. AUTOSAVE + RESUME, on the local fallback (today's world)
    ========================================================================= */
@@ -184,8 +223,7 @@ const card = (page) => page.getByRole('region', { name: 'Pick up where you left 
 
   // Step 2 — name and a pin (typed, so no geolocation is involved).
   await page.getByRole('textbox', { name: 'Venue name', exact: true }).fill('Corner Kitchen & Bar')
-  await page.getByRole('textbox', { name: 'Latitude', exact: true }).fill('-26.2041')
-  await page.getByRole('textbox', { name: 'Longitude', exact: true }).fill('28.0473')
+  await setLocation(page)
   const next2 = page.getByRole('button', { name: /^Next$/i })
   await next2.scrollIntoViewIfNeeded()
   await next2.click()
@@ -285,8 +323,7 @@ const card = (page) => page.getByRole('region', { name: 'Pick up where you left 
   await page.getByRole('button', { name: /^Next$/i }).click()
   await page.waitForTimeout(300)
   await page.getByRole('textbox', { name: 'Venue name', exact: true }).fill('X')
-  await page.getByRole('textbox', { name: 'Latitude', exact: true }).fill('-26.2')
-  await page.getByRole('textbox', { name: 'Longitude', exact: true }).fill('28.0')
+  await setLocation(page)
   for (const _ of [1, 2]) {
     const n = page.getByRole('button', { name: /^Next$/i })
     await n.scrollIntoViewIfNeeded()
