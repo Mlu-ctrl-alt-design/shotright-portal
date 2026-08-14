@@ -36,6 +36,30 @@ const chooseFirst = async (user, name) => {
   return option?.value
 }
 
+/**
+ * Choose the first address suggestion, which sets the address AND its point.
+ *
+ * The combobox is the ARIA pattern, so the suggestion is an `option` — clicking
+ * it is what a partner does and it is the only remaining keyboard-reachable way
+ * to place a first pin.
+ */
+async function pickAddress(user) {
+  /* The option is an <li role="option"> wrapping the real <button>. Clicking
+     the li does nothing — the handler is on the button, which is also what a
+     partner's pointer and a keyboard both land on. */
+  await user.click(await screen.findByRole('button', { name: /Gauteng, South Africa/i }))
+  /* Wait for the POINT, not for the map's heading — that heading renders with
+     or without a location, so waiting on it waits for nothing. The coordinate
+     is on the map wrapper, which is the only place it is exposed now that the
+     numeric fields are gone. Without this the next step validates a venue that
+     has an address and no location, which is the exact silent-invisibility
+     failure the map warns about. */
+  await waitFor(() => {
+    const node = document.querySelector('[data-field="latitude"]')
+    expect(node?.getAttribute('data-latitude')).toBeTruthy()
+  })
+}
+
 /** Step 1 — the vibe. */
 async function pickMood(user, mood = 'Chilled') {
   await user.type(await screen.findByRole('textbox', { name: /^mood$/i }), mood)
@@ -53,15 +77,19 @@ async function fillDetails(user, { name = NAME, coords = true } = {}) {
   await chooseFirst(user, /atmosphere/i)
 
   if (coords) {
-    // Plain text inputs associated by <label htmlFor>, not number spinners —
-    // so getByLabelText is the right query here and there is no ambiguity to
-    // dodge, unlike the fields above that carry an aria-label as well.
-    const lat = screen.getByLabelText(/latitude/i, { selector: 'input' })
-    const lng = screen.getByLabelText(/longitude/i, { selector: 'input' })
-    await user.clear(lat)
-    await user.type(lat, '-25.7069')
-    await user.clear(lng)
-    await user.type(lng, '28.2294')
+    /**
+     * ⚠️ THE COORDINATES ARE NO LONGER TYPED. Changed 13 Aug.
+     *
+     * There used to be latitude and longitude inputs and this filled them in
+     * directly. They are gone — a partner reads a street name, not
+     * `-25.706900` — so the only ways to set a point are picking an address,
+     * clicking the map, or geolocation.
+     *
+     * Picking the suggestion is what a partner actually does, which makes this
+     * a better test than it was: it exercises the address→coordinates handoff
+     * that the old version skipped entirely by writing the numbers by hand.
+     */
+    await pickAddress(user)
   }
   return name
 }
@@ -145,7 +173,14 @@ describe('add a venue', () => {
     await user.click(screen.getByRole('button', { name: /back|previous/i }))
 
     expect(await screen.findByRole('textbox', { name: /venue name/i })).toHaveValue(name)
-    expect(screen.getByRole('combobox', { name: /^address/i })).toHaveValue('4th Ave, Mamelodi')
+    /* The CANONICAL address, not the typed fragment. Picking a suggestion
+       replaces what you typed with the address the geocoder recognises — which
+       is the address the pin belongs to, and the one a customer will be
+       navigating to. Asserting the fragment would be asserting that we ignored
+       the thing the partner picked. */
+    expect(screen.getByRole('combobox', { name: /^address/i })).toHaveValue(
+      '4th Ave, Mamelodi, Gauteng, South Africa',
+    )
   })
 
   it('sends the moods the partner actually chose', async () => {
@@ -220,6 +255,13 @@ describe('set a venue location', () => {
     await next(user)
     await user.click(screen.getByRole('button', { name: /back|previous/i }))
 
-    expect(await screen.findByLabelText(/latitude/i, { selector: 'input' })).toHaveValue('-25.7069')
+    /* The pin survives, read off the map wrapper rather than a coordinate
+       field — those are gone. What is being protected is unchanged: stepping
+       away and back must not quietly drop the one value that decides whether
+       customers can find this venue. */
+    await waitFor(() => {
+      const node = document.querySelector('[data-field="latitude"]')
+      expect(node?.getAttribute('data-latitude')).toBe('-25.7069')
+    })
   })
 })

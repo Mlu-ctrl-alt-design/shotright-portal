@@ -81,6 +81,45 @@ const onSoon = async (page, text, timeout = 5000) => {
   return false
 }
 
+/**
+ * Set the venue's location the way a partner now does — by picking an address.
+ *
+ * ⚠️ THE LATITUDE AND LONGITUDE FIELDS ARE GONE. Changed 13 Aug: a partner
+ * reads a street name, not `-26.204100`. These suites used to type the numbers
+ * straight in, which was convenient and skipped the entire address→coordinates
+ * handoff — the one part of this screen that decides whether a venue is
+ * findable at all. Picking the suggestion tests more than the old version did.
+ *
+ * The geocoder is stubbed per-page rather than left to reach the real
+ * OpenStreetMap service: these run offline in CI, and a suite that silently
+ * depends on a third party is a suite that goes red for reasons nobody owns.
+ */
+async function setLocation(page, label = '70 Juta') {
+  await page.route('**/nominatim.openstreetmap.org/**', (r) =>
+    r.fulfill({
+      json: [
+        {
+          place_id: 1,
+          display_name: '70 Juta St, Braamfontein, Johannesburg',
+          lat: '-26.2041',
+          lon: '28.0473',
+        },
+      ],
+    }),
+  )
+  const address = page.getByRole('combobox', { name: 'Address', exact: true })
+  await address.fill(label)
+  await page.getByRole('option').first().waitFor({ timeout: 10000 })
+  await page.getByRole('option').first().click()
+  // The pin lands with the pick; wait for it, or the next step validates a
+  // venue that has an address and no point.
+  await page.locator('[data-field="latitude"][data-latitude]').waitFor({ timeout: 10000 })
+}
+
+/** What the map is holding, now that no input displays it. */
+const pinLatitude = (page) =>
+  page.locator('[data-field="latitude"]').getAttribute('data-latitude')
+
 /* ============ step 1 gates before you can leave it ============ */
 {
   const { page, context } = await wizard()
@@ -203,8 +242,7 @@ const onSoon = async (page, text, timeout = 5000) => {
     'a venue with no coordinates still cannot proceed — it would be invisible',
   )
 
-  await field(page, 'Latitude').fill('-26.2041')
-  await field(page, 'Longitude').fill('28.0473')
+  await setLocation(page)
   await page.waitForTimeout(300)
   await next(page)
   await page.getByText('Enter your operating hours').waitFor({ timeout: 10000 })
@@ -220,8 +258,7 @@ const onSoon = async (page, text, timeout = 5000) => {
   await page.waitForTimeout(500)
   await next(page)
   await field(page, 'Venue name').fill('The Rooftop')
-  await field(page, 'Latitude').fill('-26.2041')
-  await field(page, 'Longitude').fill('28.0473')
+  await setLocation(page)
   await next(page)
   await page.getByText('Enter your operating hours').waitFor({ timeout: 10000 })
 
@@ -262,8 +299,7 @@ const onSoon = async (page, text, timeout = 5000) => {
   await page.waitForTimeout(500)
   await next(page)
   await field(page, 'Venue name').fill('The Rooftop')
-  await field(page, 'Latitude').fill('-26.2041')
-  await field(page, 'Longitude').fill('28.0473')
+  await setLocation(page)
   await next(page)
   await page.getByText('Enter your operating hours').waitFor({ timeout: 10000 })
   await next(page)

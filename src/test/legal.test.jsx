@@ -279,12 +279,13 @@ async function walkToReview(user, name = 'Nomsa’s Shisanyama') {
   await user.type(screen.getByRole('combobox', { name: /^address/i }), '4th Ave, Mamelodi')
   await chooseFirst(user, /dress code/i)
   await chooseFirst(user, /atmosphere/i)
-  const lat = screen.getByLabelText(/latitude/i, { selector: 'input' })
-  const lng = screen.getByLabelText(/longitude/i, { selector: 'input' })
-  await user.clear(lat)
-  await user.type(lat, '-25.7069')
-  await user.clear(lng)
-  await user.type(lng, '28.2294')
+  /* Coordinates are set by picking an address now — the numeric fields are
+     gone, because a partner reads a street name rather than a decimal. */
+  await user.click(await screen.findByRole('button', { name: /Gauteng, South Africa/i }))
+  await waitFor(() => {
+    const node = document.querySelector('[data-field="latitude"]')
+    expect(node?.getAttribute('data-latitude')).toBeTruthy()
+  })
 
   await next(user) // hours
   await next(user) // menu

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { clsx } from '../../utils/clsx'
 import DefaultChip, { ChipRow } from './DefaultChip'
 import { CHIP_COPY, SOURCE } from '../../services/smartDefaults'
+import { newSessionToken, resolveSuggestion, suggestAddresses } from '../../services/addressSuggest'
 
 /**
  * Address field with map-backed suggestions.
@@ -22,18 +23,22 @@ import { CHIP_COPY, SOURCE } from '../../services/smartDefaults'
  * the highlighted option. A mouse-only autocomplete would have undone the
  * keyboard work done in the accessibility pass.
  *
- * NETWORK: suggestions come from Nominatim, OpenStreetMap's free geocoder. No
- * API key. Their usage policy asks for at most one request per second, which
- * the 500ms debounce plus typing latency respects — do not lower it, and do not
- * fire per keystroke. Results are restricted to South Africa.
+ * NETWORK: **Google Places when a Maps key is configured, Nominatim when it is
+ * not** — see `services/addressSuggest.js`, which normalises both to one shape
+ * so nothing below this line knows which answered. Results are restricted to
+ * South Africa either way.
+ *
+ * The 500ms debounce is not tuning. Nominatim's usage policy asks for at most
+ * one request per second, and Google bills per request. Do not lower it, and do
+ * not fire per keystroke.
+ *
+ * ⚠️ A GOOGLE SUGGESTION HAS NO COORDINATES. Predictions carry a description
+ * and a place id; the location is a second call, made on PICK. That is why
+ * `choose` is async and why it must not write the address before the point
+ * arrives — an address saved without a point is a venue with a plausible-looking
+ * listing that no radius search will ever return.
  */
 const DEBOUNCE_MS = 500
-
-/**
- * How far around the device position to bias results. ~25km covers a
- * metropolitan area without excluding a venue on the other side of it.
- */
-const BIAS_DEGREES = 0.25
 
 export default function AddressAutocomplete({ value, onChange, error, near }) {
   const [query, setQuery] = useState(value || '')
@@ -50,6 +55,9 @@ export default function AddressAutocomplete({ value, onChange, error, near }) {
   const chipId = useId()
   const boxRef = useRef(null)
   const skipNextLookup = useRef(false)
+  /* Ties this burst of keystrokes to the pick that ends it, so the pair bills
+     as one session rather than as N searches. Renewed after every pick. */
+  const session = useRef(newSessionToken())
 
   // Keep in step if the parent resets the form (e.g. "add another venue").
   useEffect(() => {
@@ -75,43 +83,28 @@ export default function AddressAutocomplete({ value, onChange, error, near }) {
     const timer = setTimeout(async () => {
       setLoading(true)
       setFailed(false)
-      try {
-        // LOCATION BIAS (spec §4). `viewbox` + `bounded=0` prefers results in
-        // the box without excluding everything outside it — a partner listing a
-        // venue in another city must still find it. Applied only while
-        // `near.prompt` is true: once they are reading the list, a late fix
-        // must not reorder it under them (§5).
-        const box =
-          near?.coords && near.prompt
-            ? `&viewbox=${near.coords.longitude - BIAS_DEGREES},${near.coords.latitude + BIAS_DEGREES},` +
-              `${near.coords.longitude + BIAS_DEGREES},${near.coords.latitude - BIAS_DEGREES}&bounded=0`
-            : ''
 
-        const url =
-          'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5' +
-          '&countrycodes=za' +
-          box +
-          '&q=' +
-          encodeURIComponent(q)
-        const results = await fetch(url, {
-          signal: controller.signal,
-          headers: { Accept: 'application/json' },
-        }).then((r) => {
-          if (!r.ok) throw new Error(String(r.status))
-          return r.json()
-        })
-        setOptions(results)
-        setOpen(results.length > 0)
-        setActive(-1)
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          // A geocoder outage must not stop someone listing their venue.
-          setFailed(true)
-          setOptions([])
-        }
-      } finally {
-        setLoading(false)
+      /* LOCATION BIAS (spec §4). Prefers nearby results without excluding
+         anything — a partner listing a venue in another city must still find
+         it. Applied only while `near.prompt` is true: once they are reading the
+         list, a late fix must not reorder it under them (§5). */
+      const results = await suggestAddresses(q, {
+        near,
+        sessionToken: session.current,
+        signal: controller.signal,
+      })
+      setLoading(false)
+
+      /* null = could not ask. [] = asked, nothing matched. Rendering those the
+         same way is the mistake this codebase keeps finding. */
+      if (results === null) {
+        setFailed(true)
+        setOptions([])
+        return
       }
+      setOptions(results)
+      setOpen(results.length > 0)
+      setActive(-1)
     }, DEBOUNCE_MS)
 
     return () => {
@@ -129,18 +122,39 @@ export default function AddressAutocomplete({ value, onChange, error, near }) {
     return () => document.removeEventListener('mousedown', onDocDown)
   }, [])
 
-  const choose = (option) => {
+  const choose = async (option) => {
     skipNextLookup.current = true
-    setQuery(option.display_name)
+    setQuery(option.label)
     setOpen(false)
     setActive(-1)
     setConfirmed(true)
     setNoticeDismissed(false)
+
+    /**
+     * The address goes in immediately; the point may take a second call.
+     *
+     * A Google prediction carries no coordinates. Writing the address now and
+     * the point when it lands keeps the field responsive, and the map fills in
+     * a beat later — which is what already happens on a slow geocode.
+     *
+     * If the point never arrives we still keep the address: a venue with an
+     * address and no pin is fixable by dragging the map, and the map says so
+     * loudly. A venue with neither is a partner starting over.
+     */
+    onChange({ address: option.label })
+
+    const located = await resolveSuggestion(option)
+    /* Renew the session: this pick closed the previous one. */
+    session.current = newSessionToken()
+    if (!located) return
+
     onChange({
-      address: option.display_name,
-      latitude: Number(Number(option.lat).toFixed(6)),
-      longitude: Number(Number(option.lon).toFixed(6)),
+      address: located.address || option.label,
+      ...(Number.isFinite(located.latitude) && Number.isFinite(located.longitude)
+        ? { latitude: located.latitude, longitude: located.longitude }
+        : {}),
     })
+    setQuery(located.address || option.label)
   }
 
   const onKeyDown = (e) => {
@@ -231,7 +245,7 @@ export default function AddressAutocomplete({ value, onChange, error, near }) {
           )}
           {options.map((o, i) => (
             <li
-              key={o.place_id ?? `${o.lat},${o.lon}`}
+              key={o.id}
               id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
@@ -247,7 +261,7 @@ export default function AddressAutocomplete({ value, onChange, error, near }) {
                   i === active ? 'bg-brand-50 text-ink-900' : 'text-ink-700',
                 )}
               >
-                {o.display_name}
+                {o.label}
               </button>
             </li>
           ))}
