@@ -1421,11 +1421,50 @@ export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
         /* Loud, but not cruel, and above all not "try again" — the one thing
            the partner definitely should not do is keep pressing a button that
            cannot work. This is ours to fix, and the message says so. */
-        if (venueId && isAttachPermissionError(err)) {
+        /**
+         * ⚠️ THE `venueId &&` GUARD WAS A BUG. Removed 13 Aug.
+         *
+         * It meant a refusal only counted as unretryable when there was a venue
+         * to attach to — i.e. on the EDIT form. In the wizard, which is where
+         * most photos are uploaded and where no venue exists yet, the same 403
+         * fell through to the generic branch and told the partner to **try
+         * again**. The tenth attempt is refused exactly like the first, so that
+         * is an afternoon of somebody's time.
+         *
+         * It is the same mistake the menu importer made with "We couldn't read
+         * that file", found the same week: a refusal on our side, reported as
+         * something the partner could fix by trying harder.
+         *
+         * It also has a second consequence now. `retryable === false` is what
+         * tells the wizard to stop REQUIRING a photo — so with the guard in
+         * place, a partner in the wizard would have been refused the upload and
+         * then blocked from continuing without one. Trapped, with no way out.
+         */
+        /* A MISSING upload endpoint is as unretryable as a refused one, and
+           for the partner it is the same experience: the photo cannot be
+           uploaded, no matter how many times they press. It matters twice over
+           now — `retryable === false` is also what lifts the "a photo is
+           required" rule, so without this a bench with no `upload_file` would
+           demand a photo and refuse every attempt to provide one. */
+        if (err?.status === 404) {
+          const missing = new Error(
+            `We couldn’t upload ${file.name} — that isn’t working here at the moment, ` +
+              `which is our problem and not yours. There’s nothing wrong with your photo, ` +
+              `and you can carry on without it.`,
+          )
+          missing.retryable = false
+          missing.cause = err
+          throw missing
+        }
+
+        if (isAttachPermissionError(err)) {
           const refused = new Error(
-            `We couldn’t attach ${file.name} to this venue — the app isn’t allowed to, ` +
-              `which is our problem and not yours. Nothing you’ve done is lost. ` +
-              `We’ve been told about it.`,
+            venueId
+              ? `We couldn’t attach ${file.name} to this venue — the app isn’t allowed to, ` +
+                `which is our problem and not yours. Nothing you’ve done is lost.`
+              : `We couldn’t upload ${file.name} — the app isn’t allowed to right now, ` +
+                `which is our problem and not yours. There’s nothing wrong with your photo, ` +
+                `and you can carry on without it.`,
           )
           refused.retryable = false
           refused.cause = err

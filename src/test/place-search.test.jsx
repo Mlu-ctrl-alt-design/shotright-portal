@@ -221,6 +221,12 @@ describe('what must never reach the database', () => {
 
     await user.type(screen.getByRole('textbox', { name: /manager name/i }), 'Nomsa')
     await user.type(screen.getByRole('textbox', { name: /manager surname/i }), 'Dlamini')
+
+      /* Photos are required as of 13 Aug — every walk through the wizard has to
+       add one. See venue-add.test.jsx for the requirement's own tests. */
+    const photo = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
+    await user.upload(screen.getByLabelText(/venue photos — choose files/i), photo)
+    await waitFor(() => expect(screen.getByText(/1 of 10/i)).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: /^next$/i })) // hours
     await user.click(screen.getByRole('button', { name: /^next$/i })) // menu
     await user.click(screen.getByRole('button', { name: /^next$/i })) // review

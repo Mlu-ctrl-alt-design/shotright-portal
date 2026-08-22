@@ -60,6 +60,26 @@ async function pickAddress(user) {
   })
 }
 
+/**
+ * Upload one photo.
+ *
+ * ⚠️ PHOTOS ARE REQUIRED as of 13 Aug — a venue with no picture is a name and
+ * an address, and this is a product people choose with their eyes. Every walk
+ * through this wizard has to add one now, which is why this helper exists
+ * rather than each test doing it.
+ *
+ * The requirement is CONDITIONAL on the bench accepting uploads (see
+ * `validateDetails`), and the fake bench accepts them by default — so the
+ * happy path here is the enforced path. The unenforced path has its own test.
+ */
+async function addPhoto(user) {
+  const file = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
+  await user.upload(screen.getByLabelText(/venue photos — choose files/i), file)
+  // Wait for the upload to land, not just for the input to accept the file:
+  // the counter only moves once the server has answered.
+  await waitFor(() => expect(screen.getByText(/1 of 10/i)).toBeInTheDocument())
+}
+
 /** Step 1 — the vibe. */
 async function pickMood(user, mood = 'Chilled') {
   await user.type(await screen.findByRole('textbox', { name: /^mood$/i }), mood)
@@ -67,7 +87,7 @@ async function pickMood(user, mood = 'Chilled') {
 }
 
 /** Step 2 — the paperwork. `coords: false` deliberately leaves the pin unset. */
-async function fillDetails(user, { name = NAME, coords = true } = {}) {
+async function fillDetails(user, { name = NAME, coords = true, photo = true } = {}) {
   await user.type(await screen.findByRole('textbox', { name: /venue name/i }), name)
   await user.type(screen.getByRole('textbox', { name: /manager name/i }), 'Nomsa')
   await user.type(screen.getByRole('textbox', { name: /manager surname/i }), 'Dlamini')
@@ -91,6 +111,7 @@ async function fillDetails(user, { name = NAME, coords = true } = {}) {
      */
     await pickAddress(user)
   }
+  if (photo) await addPhoto(user)
   return name
 }
 
@@ -263,5 +284,121 @@ describe('set a venue location', () => {
       const node = document.querySelector('[data-field="latitude"]')
       expect(node?.getAttribute('data-latitude')).toBe('-25.7069')
     })
+  })
+})
+
+/* ============================================================================
+   PHOTOS ARE REQUIRED — and the condition on that is the point
+
+   Asked for 13 Aug: "we cannot have a venue that does not have images of any
+   nature." Agreed, and a venue with no picture competes badly in a product
+   people choose with their eyes.
+
+   But the uploader was returning 403 in production on the day this was asked
+   (§19.b), and an unconditional requirement on a broken uploader does not
+   produce venues with photos — it produces NO VENUES AT ALL, because the
+   wizard refuses to advance and the partner has no way to make it advance.
+   So the rule is enforced only where it can be satisfied, which is the same
+   rule the legal gate follows.
+   ========================================================================= */
+describe('at least one photo', () => {
+  it('will not leave the details step without one', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await pickMood(user)
+    await next(user)
+    await fillDetails(user, { photo: false })
+    await next(user)
+
+    /* Shown twice on purpose — inline on the uploader and in the gate banner,
+       the same pattern every other required field uses. */
+    expect((await screen.findAllByText(/add at least one photo/i)).length).toBeGreaterThan(0)
+    // Still on details — the step did not advance.
+    expect(screen.getByRole('textbox', { name: /venue name/i })).toBeInTheDocument()
+  })
+
+  it('says why, in terms of what it costs the partner', async () => {
+    /* "This field is required" tells someone the form has a rule. Telling them
+       a venue with no pictures rarely gets picked tells them why they should
+       want to. */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await pickMood(user)
+    await next(user)
+    await fillDetails(user, { photo: false })
+    await next(user)
+
+    expect(
+      (await screen.findAllByText(/people choose where to go by looking/i)).length,
+    ).toBeGreaterThan(0)
+  })
+
+  it('marks the uploader required BEFORE anyone is blocked', async () => {
+    /* A rule you only discover by hitting it is indistinguishable from a bug. */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await pickMood(user)
+    await next(user)
+
+    const heading = await screen.findByRole('heading', { name: /venue photos/i })
+    expect(heading).toHaveTextContent(/required/i)
+  })
+
+  it('lets the venue through once a photo is added', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    const name = await walkToReview(user)
+    await submit(user)
+
+    await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
+  })
+
+  it('does NOT require one when the bench refuses uploads', async () => {
+    /* THE ASSERTION THIS WHOLE CHANGE HANGS ON.
+
+       On 13 Aug `upload_file` was returning 403 for every partner. Enforcing
+       the requirement in that state would have stopped anybody listing a venue
+       at all — turning "some venues look sparse" into "onboarding is down".
+       A rule nobody can satisfy is not a stricter rule, it is an outage. */
+    bench.uploadRefused = 'always'
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await pickMood(user)
+    await next(user)
+    await fillDetails(user, { photo: false })
+
+    /* The partner TRIES, and is refused. That refusal is the signal — the read
+       probe cannot tell us this, because reading photos and uploading them are
+       different permissions. */
+    const file = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
+    await user.upload(screen.getByLabelText(/venue photos — choose files/i), file)
+    await screen.findByText(/the app isn’t allowed to/i)
+
+    await next(user)
+
+    // Advanced — not trapped behind a control that cannot succeed.
+    await waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: /venue name/i })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('does not mark the uploader required when uploads are refused', async () => {
+    /* An asterisk beside a control that cannot succeed is a promise the page
+       cannot keep. */
+    bench.uploadRefused = 'always'
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await pickMood(user)
+    await next(user)
+
+    const file = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
+    await user.upload(await screen.findByLabelText(/venue photos — choose files/i), file)
+    await screen.findByText(/the app isn’t allowed to/i)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /venue photos/i })).not.toHaveTextContent(
+        /required/i,
+      ),
+    )
   })
 })

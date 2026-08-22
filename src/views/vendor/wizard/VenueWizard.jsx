@@ -4,6 +4,7 @@ import { useCreateVenue } from '../../../hooks/useVendor'
 import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
 import { useDraft, useSetupDraft } from '../../../hooks/useSetupDraft'
 import { useLegalStanding } from '../../../hooks/useLegalStanding'
+import { useVenuePhotoSupport } from '../../../hooks/useVendor'
 import { WIZARD_STEPS, stepIndex } from '../../../services/wizardSteps'
 import {
   FIELD_STEP,
@@ -138,8 +139,43 @@ function Wizard({ resumeId, draft, draftError }) {
       [stepKey]: new Set(prev[stepKey] || []).add(field),
     }))
 
+  /**
+   * Can this bench actually accept a photo?
+   *
+   * `undefined` while the probe is in flight, and the requirement stays OFF
+   * until it answers — a gate that engages before the answer arrives flickers a
+   * blocker in front of someone who has already uploaded.
+   */
+  const { data: photosSupported } = useVenuePhotoSupport()
+
+  /**
+   * Photos live beside `details` in wizard state, not inside it, so they are
+   * folded in here for validation. `photosRequired` travels with them because
+   * the rule is conditional — see `validateDetails`. Requiring a photo on a
+   * bench that refuses uploads would stop every partner listing anything at
+   * all, which is a worse product than a venue with no picture.
+   */
+  /**
+   * Has an upload actually been REFUSED this session?
+   *
+   * `photosSupported` probes the READ endpoint, and reading photos and
+   * uploading them are different permissions — in production on 13 Aug they
+   * were different answers. So the read probe is a weak signal and a real
+   * refusal is a strong one: the moment an upload comes back refused, we stop
+   * demanding a photo, because the partner now has no way to provide one.
+   */
+  const [photoUploadRefused, setPhotoUploadRefused] = useState(false)
+
+  const photosRequired = photosSupported !== false && !photoUploadRefused
+
+  const detailsForValidation = {
+    ...details,
+    photos,
+    photosRequired,
+  }
+
   const stateFor = (key) =>
-    ({ mood: moods, details, hours, menu, review: null })[key]
+    ({ mood: moods, details: detailsForValidation, hours, menu, review: null })[key]
 
 
   const [submitting, setSubmitting] = useState(false)
@@ -420,6 +456,8 @@ function Wizard({ resumeId, draft, draftError }) {
       case 'details':
         return (
           <VenueDetailsStep
+          photosRequired={photosRequired}
+          onUploadRefused={() => setPhotoUploadRefused(true)}
           fromPlace={fromPlace}
           onPlacePicked={(next, filled) => {
             setDetails(next)

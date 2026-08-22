@@ -43,6 +43,9 @@ export default function VenueDetailsStep({
   fromPlace = [],
   onPlacePicked = () => {},
   onClearPlaceField = () => {},
+  /** Whether a photo is demanded before this step can be left. */
+  photosRequired = false,
+  onUploadRefused = () => {},
 }) {
   const { data: lookups, isLoading } = useVenueLookups()
   const { data: photosSupported } = useVenuePhotoSupport()
@@ -332,11 +335,24 @@ export default function VenueDetailsStep({
           exist yet, so the File goes up unattached and is linked on create.
           That is also what lets a RESUMED draft come back with its pictures —
           a draft can carry a `file_url`, and could never carry a File object. */}
+      {/**
+        * REQUIRED, and it has to LOOK required before Next is pressed.
+        *
+        * A rule a partner only discovers by being blocked is indistinguishable
+        * from a bug — the same reasoning as the legal banner. So the heading
+        * says it, and the error only appears once they have tried to leave.
+        *
+        * Suppressed entirely when the bench cannot accept uploads: requiring
+        * something nobody can provide would stop every partner listing at all.
+        */}
       <PhotoUploader
         photos={photos}
         onChange={onPhotosChange}
         upload={uploadVenuePhoto}
         max={MAX_VENUE_PHOTOS}
+        required={photosRequired}
+        error={errors.photos}
+        onUploadRefused={onUploadRefused}
         notice={
           // Said before they start arranging, not after they submit. Eight
           // photographs put in a deliberate order is real work, and finding out

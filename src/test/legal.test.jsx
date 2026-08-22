@@ -287,6 +287,12 @@ async function walkToReview(user, name = 'Nomsa’s Shisanyama') {
     expect(node?.getAttribute('data-latitude')).toBeTruthy()
   })
 
+  /* Photos are required as of 13 Aug — every walk through the wizard has to
+     add one. See venue-add.test.jsx for the requirement's own tests. */
+  const photo = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
+  await user.upload(screen.getByLabelText(/venue photos — choose files/i), photo)
+  await waitFor(() => expect(screen.getByText(/1 of 10/i)).toBeInTheDocument())
+
   await next(user) // hours
   await next(user) // menu
   await next(user) // review
