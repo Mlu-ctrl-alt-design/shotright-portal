@@ -224,7 +224,14 @@ async function setLocation(page, label = '70 Juta') {
   // The pin lands with the pick; wait for it, or the next step validates a
   // venue that has an address and no point.
   await page.locator('[data-field="latitude"][data-latitude]').waitFor({ timeout: 10000 })
+
+  /* NO PHOTO HERE, deliberately — unlike the other suites.
+     This is the photo suite: every test adds its own, and counts them, and
+     asserts on their order. A photo added by a shared helper would be a third
+     picture nobody asked for in "both photos" and would put the wrong one on
+     the cover. */
 }
+
 
 /** What the map is holding, now that no input displays it. */
 const pinLatitude = (page) =>

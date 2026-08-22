@@ -28,6 +28,12 @@
  *                   previously a warning on the success screen, which is the
  *                   worst place to learn it.
  *   open days       hours with no open day describe a venue that is never open.
+ *   photos          a venue with no picture is a name and an address. The app
+ *                   is a MOOD product — people choose where to go by looking —
+ *                   so a listing with nothing to look at competes badly and
+ *                   makes the whole grid look unfinished. ⚠️ CONDITIONAL, and
+ *                   the condition is not a hedge: it is only required when the
+ *                   uploader actually works. See `photosRequired` below.
  *
  * Everything else — manager details, address text, dress code, atmosphere,
  * description, menu — is optional, and validated only for FORMAT when present.
@@ -103,6 +109,30 @@ export function validateDetails(state, touched = null) {
     }
   }
 
+  /**
+   * AT LEAST ONE PHOTO — but only when a photo can actually be uploaded.
+   *
+   * `state.photosRequired` is set by the wizard from the photo capability
+   * probe, and it is false when the bench refuses uploads. That is not
+   * softening the rule, it is the same rule the legal gate follows: **never
+   * enforce what nobody can satisfy.**
+   *
+   * The reason is concrete rather than theoretical. On 8 Aug two partners
+   * reported that `upload_file` returns 403 — venue photos AND the menu
+   * importer, one cause. If this requirement were unconditional while that is
+   * true, the wizard would refuse to advance, the partner would have no way to
+   * make it advance, and NOBODY COULD LIST A VENUE AT ALL. A rule that turns a
+   * "some venues look sparse" problem into a "nobody can onboard" problem is
+   * not a stricter rule, it is an outage.
+   *
+   * When uploads work, this is a hard requirement and behaves like any other.
+   * See qa/clearance-venue-upload.md for the state of that 403.
+   */
+  if (state?.photosRequired && !(state?.photos?.length > 0)) {
+    errors.photos =
+      'Add at least one photo. People choose where to go by looking, so a venue with no pictures rarely gets picked.'
+  }
+
   return touched ? pickTouched(errors, touched) : errors
 }
 
@@ -158,6 +188,7 @@ export const FIELD_STEP = {
   moods: 'mood',
   venue_name: 'details',
   contact_number: 'details',
+  photos: 'details',
   latitude: 'details',
   longitude: 'details',
   days: 'hours',
@@ -182,6 +213,9 @@ export const FIELD_ORDER = [
   'atmosphere',
   'latitude',
   'longitude',
+  // The uploader sits below the map on this step, so a partner sent to fix
+  // "no photos" should be scrolled past everything else, not to the top.
+  'photos',
 ]
 
 export const firstInvalid = (errors) =>

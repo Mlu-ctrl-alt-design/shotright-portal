@@ -57,6 +57,17 @@ async function open({ draftEndpoints = false, store = {} } = {}) {
       }
       if (p.includes('discard_venue_draft')) return r.fulfill({ json: { message: { ok: true } } })
     }
+    if (u.pathname.includes('/api/method/upload_file'))
+      return r.fulfill({
+        json: {
+          message: {
+            name: 'FILE-QA',
+            file_url: '/files/qa-venue.png',
+            file_name: 'qa-venue.png',
+          },
+        },
+      })
+
     return r.fulfill({ status: 404, json: { exc_type: 'DoesNotExistError' } })
   })
 
@@ -103,6 +114,37 @@ async function setLocation(page, label = '70 Juta') {
   // The pin lands with the pick; wait for it, or the next step validates a
   // venue that has an address and no point.
   await page.locator('[data-field="latitude"][data-latitude]').waitFor({ timeout: 10000 })
+
+  await addPhoto(page)
+}
+
+/**
+ * Add one photo — REQUIRED as of 13 Aug.
+ *
+ * A venue with no picture is a name and an address, and this is a product
+ * people choose by looking. Folded into `setLocation` because every caller of
+ * that is a caller who needs the details step to be VALID, and photos are now
+ * part of what valid means.
+ *
+ * The requirement lifts itself if the bench refuses the upload — see
+ * `validateDetails` — so a suite that stubs a 403 does not need to change.
+ */
+async function addPhoto(page) {
+  const input = page.getByLabel('Venue photos — choose files')
+  if ((await input.count()) === 0) return
+  await input.setInputFiles({
+    name: 'qa-venue.png',
+    mimeType: 'image/png',
+    // 1×1 PNG. Real bytes, because prepareImage decodes through a canvas in a
+    // real browser and would reject a fake.
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  })
+  // The counter only moves once the server has answered, so this waits for the
+  // upload rather than for the input to accept the file.
+  await page.getByText(/1 of \d+/).waitFor({ timeout: 15000 }).catch(() => {})
 }
 
 /** What the map is holding, now that no input displays it. */

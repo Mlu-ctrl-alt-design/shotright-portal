@@ -40,6 +40,21 @@ export default function PhotoUploader({
   label = 'Venue photos',
   hint = 'Show the room, the bar, a full table. The first photo is the one customers see.',
   notice = null,
+  /** At least one photo is needed before this step can be left. */
+  required = false,
+  /** Set once the partner has tried to leave without one. */
+  error = null,
+  /**
+   * Fired when an upload is REFUSED rather than merely failing.
+   *
+   * The caller uses this to stop requiring a photo. It matters because
+   * "can we read photos" and "will an upload be accepted" are different
+   * permissions and were, in production on 13 Aug, different answers — reads
+   * worked while `upload_file` returned 403. Requiring a photo on the strength
+   * of the read probe would have trapped every partner behind a control that
+   * could not succeed.
+   */
+  onUploadRefused = () => {},
 }) {
   const [queue, setQueue] = useState([])
   const [errors, setErrors] = useState([])
@@ -148,6 +163,11 @@ export default function PhotoUploader({
            have will refuse the tenth attempt exactly as it refused the first.
            Telling someone to keep pressing a button that cannot work is worse
            than telling them nothing. */
+        /* A refusal is not a failure to retry — it is proof that uploading is
+           not available to this partner right now, and the caller needs to know
+           so it can stop DEMANDING a photo. Told once, on the first refusal. */
+        if (err?.retryable === false) onUploadRefused(err)
+
         setErrors((e) => [
           ...e,
           {
@@ -202,12 +222,30 @@ export default function PhotoUploader({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 id="venue-photos-heading" className="text-sm font-bold text-ink-900">
           {label}
+          {/* Stated up front, not discovered by being blocked. A partner who
+              knows the rule can satisfy it in the same pass; one who finds out
+              at the gate has to come back. */}
+          {required && (
+            <span className="ml-1 font-semibold text-red-700" aria-hidden="true">
+              *
+            </span>
+          )}
+          {required && <span className="sr-only"> (required)</span>}
         </h3>
         <p className="text-xs text-ink-500">
           {photos.length} of {max}
         </p>
       </div>
       <p className="text-sm text-ink-700">{hint}</p>
+
+      {/* `role="alert"` so it is announced when it appears — somebody who
+          pressed Next and did not move needs telling why, not a red border
+          they have to go looking for. */}
+      {error && (
+        <p role="alert" className="text-sm font-semibold text-red-700">
+          {error}
+        </p>
+      )}
 
       {/* NAMED SHOTS, not a sentence listing them.
           eBay's camera walks a strip of labelled slots ("Detail") and Airbnb
