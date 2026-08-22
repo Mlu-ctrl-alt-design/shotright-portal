@@ -1385,8 +1385,22 @@ const isAttachPermissionError = (err) => {
  * choosing, and what lets a resumed draft come back with its pictures: a draft
  * carries `file_url` strings, and could never carry a File object.
  *
- * ✅ 28 Jul: the Vendor role can attach to `Venue`. The unattached retry is
- * gone, and its removal is the point rather than a tidy-up.
+ * ✅ 22 Aug — VERIFIED ON THE BENCH, and it changed the design.
+ *
+ * `upload_file` with `doctype=Venue` is **permanently 403** and always will be.
+ * Vendors hold ["All", "Guest"]; `Venue` grants write to System Manager and
+ * Venue Reviewer only. There is no attach grant, and — this is the part worth
+ * keeping — **there must never be one**: Frappe role permissions are not
+ * row-scoped, so granting Vendor write on `Venue` would let every partner write
+ * every other partner's venue. My own standing ask had that backwards; it is
+ * retracted in §19.b.
+ *
+ * Two things I asserted are refuted by measurement: the Vendor role CAN create
+ * a `File` (role All), and `upload_file` with no doctype returns 200 — the menu
+ * importer was never blocked by permissions at all.
+ *
+ * So there are two upload paths, and which one applies is decided by whether a
+ * venue exists yet rather than by any capability probe:
  *
  * That fallback existed because a permission wall would otherwise have thrown
  * away a perfectly good photograph. What it produced instead was a photo that
@@ -1398,26 +1412,103 @@ const isAttachPermissionError = (err) => {
  * With attaching genuinely available, a refusal is no longer a fact of life to
  * be worked around. It is an anomaly, and it should be loud.
  */
+/**
+ * The whitelisted method that elevates internally — the fix, live since 22 Aug.
+ *
+ * This is what three separate symptoms were all asking for. It ends the
+ * dependency on stock Frappe endpoints and the role permissions they need,
+ * which is the dependency that produced "images don't persist", the 403 logout,
+ * and the photo read falling back to nothing.
+ */
+export const PHOTO_UPLOAD_METHOD = 'shotright.api.upload_venue_photo'
+
 export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
   pick(
     async () => {
       const form = new FormData()
       form.append('file', file, file.name)
       form.append('is_private', '0') // customers have to be able to see it
-      form.append('folder', 'Home/Attachments')
-      if (venueId) {
-        form.append('doctype', 'Venue')
+
+      /**
+       * TWO PATHS, chosen by whether the venue exists yet.
+       *
+       * WITH a venue → `upload_venue_photo`, which elevates and attaches.
+       * WITHOUT one → plain `upload_file` and NO doctype, which is verified to
+       * return 200. The wizard uploads photos on step 2, long before
+       * `create_venue` runs, so there is no venue to attach to and nothing to
+       * elevate for; `create_venue` links the `file_url`s at the end.
+       *
+       * ⚠️ `doctype=Venue` IS NEVER SENT. It is a permanent 403 by design, not
+       * a gap waiting to be filled — see the note above. Adding it back would
+       * fail for every partner, for ever.
+       *
+       * The venue id goes under three names because Frappe drops kwargs a
+       * method does not declare, silently, at 200 — and a photo that uploads
+       * but attaches to nothing is the exact quiet-wrong-result this endpoint
+       * exists to end. Costs nothing; removes a whole class of no-op.
+       */
+      const attaching = Boolean(venueId)
+      if (attaching) {
+        form.append('venue_name', venueId)
+        form.append('venue', venueId)
         form.append('docname', venueId)
+      } else {
+        form.append('folder', 'Home/Attachments')
       }
+
+      const endpoint = attaching
+        ? `/api/method/${PHOTO_UPLOAD_METHOD}`
+        : '/api/method/upload_file'
 
       let uploaded
       try {
-        const { data } = await api.post('/api/method/upload_file', form, {
+        const { data } = await api.post(endpoint, form, {
           headers: { 'Content-Type': 'multipart/form-data' },
           onUploadProgress: (e) => onProgress?.(e.total ? e.loaded / e.total : 0),
         })
         uploaded = data.message || {}
       } catch (err) {
+        /**
+         * 417 — the server read the file and refused it.
+         *
+         * Verified 22 Aug: `.heic` and `.avif` come back 417 and terminal.
+         * `prepareImage` already catches most HEIC in the browser with
+         * iPhone-specific advice, but a file whose type the browser cannot
+         * identify slips through to here.
+         *
+         * Not retryable with THIS file — pressing again re-sends the same
+         * bytes — but very much fixable by the partner, so the message says how
+         * rather than apologising. That distinction matters more than usual now
+         * that a photo is REQUIRED: someone whose only picture is a HEIC and
+         * who is told "something went wrong" cannot list their venue at all.
+         */
+        if (err?.status === 417) {
+          const rejected = new Error(
+            `${file.name} isn’t a format we can use. JPEG or PNG both work — ` +
+              `on an iPhone, Settings → Camera → Formats → Most Compatible makes ` +
+              `every new photo a JPEG.`,
+          )
+          rejected.retryable = false
+          /**
+           * ⚠️ DELIBERATELY NOT `blocksUpload`.
+           *
+           * `retryable` and `blocksUpload` were briefly the same flag, and that
+           * was a bug: a rejected HEIC would have switched the "a photo is
+           * required" rule off for the whole session. They mean different
+           * things and only one of them is about the partner.
+           *
+           *   retryable:false  → pressing again sends the same bytes and fails
+           *                      the same way, so do not offer "try again".
+           *   blocksUpload     → uploading is not available AT ALL, so stop
+           *                      demanding a photo nobody can provide.
+           *
+           * A wrong format is the first and not the second. The partner can fix
+           * it in thirty seconds, and the message says how — so the requirement
+           * stays, correctly.
+           */
+          rejected.cause = err
+          throw rejected
+        }
         /* Loud, but not cruel, and above all not "try again" — the one thing
            the partner definitely should not do is keep pressing a button that
            cannot work. This is ours to fix, and the message says so. */
@@ -1453,6 +1544,7 @@ export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
               `and you can carry on without it.`,
           )
           missing.retryable = false
+          missing.blocksUpload = true
           missing.cause = err
           throw missing
         }
@@ -1467,6 +1559,9 @@ export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
                 `and you can carry on without it.`,
           )
           refused.retryable = false
+          /* Uploading is not available to this partner at all — see the note on
+             `blocksUpload` below. */
+          refused.blocksUpload = true
           refused.cause = err
           throw refused
         }

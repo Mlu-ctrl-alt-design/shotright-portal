@@ -56,7 +56,16 @@ async function open({ photoEndpoints = false, existingPhotos = [], deaf = false 
     if (p.includes('get_vendor_dashboard'))
       return r.fulfill({ json: { message: { profile: PROFILE, stats: {}, venues: [VENUE] } } })
 
-    if (p.endsWith('/api/method/upload_file')) {
+    /* BOTH upload paths.
+       `upload_venue_photo` is the whitelisted method that elevates, used
+       wherever a venue already exists (verified live 22 Aug). `upload_file` is
+       the wizard's path, where no venue exists yet to attach to. Stubbing only
+       one leaves the other 404ing on the catch-all, which reads as a broken
+       uploader rather than a missing stub. */
+    if (
+      p.endsWith('/api/method/upload_file') ||
+      p.endsWith('/api/method/shotright.api.upload_venue_photo')
+    ) {
       const body = r.request().postDataBuffer()
       const raw = body ? body.toString('latin1') : ''
       const fileName = /filename="([^"]+)"/.exec(raw)?.[1] || 'unknown'
@@ -498,9 +507,25 @@ const pinLatitude = (page) =>
   check((await tiles(page).count()) === 2, 'and a new one can be added to it')
 
   check(uploads.length === 1, 'the photo uploaded')
+  /* UPDATED 22 Aug. This used to require `doctype=Venue` + `docname` on the
+     stock `upload_file` call, which was the only way to attach a photo when it
+     was written. Verified on the bench since: that combination is a PERMANENT
+     403 — vendors hold ["All","Guest"] and `Venue` grants write to System
+     Manager / Venue Reviewer only — and the attach grant must never be added,
+     because Frappe role permissions are not row-scoped and it would give every
+     partner write on every other partner's venue.
+
+     `shotright.api.upload_venue_photo` elevates internally instead. The
+     requirement is unchanged and is the reason this check exists: a photo on an
+     existing venue must arrive ATTACHED, or a reviewer opens the venue in Desk
+     and sees nothing. Only the mechanism moved. */
   check(
-    /name="docname"[\s\S]{0,40}V-1/.test(uploads[0].form) && /name="doctype"[\s\S]{0,40}Venue/.test(uploads[0].form),
+    /name="venue_name"[\s\S]{0,40}V-1/.test(uploads[0].form),
     'and, because this venue already exists, went up attached to it — a reviewer sees it in Desk today',
+  )
+  check(
+    !/name="doctype"[\s\S]{0,40}Venue/.test(uploads[0].form),
+    'without doctype=Venue, which is a permanent 403 and must never be sent again',
   )
 
   await context.close()

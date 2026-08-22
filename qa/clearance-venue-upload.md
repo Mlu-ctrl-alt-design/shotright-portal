@@ -2,133 +2,107 @@
 
 ## Verdict
 
-**NOT CLEARED — `POST /api/method/upload_file` is BLOCKED.**
+**CLEARED — via an endpoint switch, not a permission grant.**
 
-Everything downstream of it (venue photos, menu import) is blocked with it. The
-rest of the venue journey is unaffected and continues to ship.
+The portal has been moved onto `shotright.api.upload_venue_photo`. Nothing about
+the permission model changed, and nothing about it should.
 
 ## Scope & method
 
 | | |
 |---|---|
-| Target | `shotright.thedaystar.co.za` — **production**. There is no staging bench. |
-| Mode | **STATIC.** The QA environment's egress proxy refuses CONNECT to that host (403), so no request in this report was actually sent. |
-| Accounts | None used. **A second partner account is still needed** — cross-tenant checks are invisible without one. |
-| Collection | None exists. The inventory below is read from the portal's own service layer. |
+| Target | `shotright.thedaystar.co.za` |
+| Mode | **LIVE, on-bench** (no gateway), verified by the backend 2026-08-22 |
+| Prior run | STATIC — the QA environment's proxy refuses CONNECT to that host. Superseded. |
 
-> **Nothing here is confirmed.** Every finding is a prediction until
-> `qa/probe-upload.sh` is run against the bench. Written as "unverified"
-> throughout, deliberately — a wrongly-green report gets built on.
+Everything below is **measured**, with one exception noted at the end.
 
 ## Findings
 
-### P1 — `upload_file` refuses every upload the portal makes *(unverified)*
+### ✅ RESOLVED — the 403 was structural, and permanent
 
-**Reported** 8 Aug from the live portal, twice, from screens that look
-unrelated: *"images still cannot be attached"* and *"the menu upload is not
-working"*. Both post to `/api/method/upload_file`.
+| Probe | Result |
+|---|---|
+| `upload_file` + `doctype=Venue` | **403, permanent.** Vendors hold `["All","Guest"]`; `Venue` grants write to System Manager / Venue Reviewer only. |
+| `upload_file`, no doctype | **200.** Menu import was never blocked. |
+| Vendor `File` create | **Permitted** (role `All`). |
+| `shotright.api.upload_venue_photo` | **Live, routable, real multipart upload as a vendor SUCCEEDED.** This is the fix. |
 
-**Request** — the two the portal makes, differing in one respect:
+### ❌ Two things I asserted, refuted by measurement
 
-| | venue photo | menu import |
-|---|---|---|
-| `doctype` / `docname` | `Venue` / `VEN-…` | *not sent* |
-| `is_private` | `0` | `1` |
-| needs | File **create** + Venue **write** | File **create** only |
+1. **"The Vendor role cannot create a `File` at all."** Wrong. It can — role
+   `All`. The menu importer's failure and the photo uploader's failure were
+   never the same permission, and my §19.b table implying they were is wrong.
 
-**Actual** `403`. **Expected** `200` with the File record.
+2. **"Grant `File` create to Vendor, and confirm the `Venue` attach grant is
+   live."** ⚠️ **Retracted, and it was dangerous advice.** Frappe role
+   permissions are **not row-scoped**. Granting Vendor write on `Venue` would
+   have let every partner write every other partner's venue — a P0 introduced
+   in the course of fixing a P1. The attach grant does not exist and must not be
+   added. See `docs/PERMISSIONS.md`.
 
-**Why the pair is the whole diagnosis.** If the menu path is *also* refused,
-the missing permission cannot be the Venue attach grant added 28 Jul — that
-path never asks for it. It would mean the Vendor role cannot create a `File` at
-all, which fits the finding already on record in §14: *the Vendor role has no
-doctype access whatsoever*, which is why `upload_file`,
-`frappe.client.get_list` on `File` and `attachOrphans` all failed together and
-were reported as three separate bugs.
+The recommendation that *was* right, and is now shipped, is the other one: a
+whitelisted method that elevates internally. Three symptoms came from one
+dependency on stock Frappe endpoints, and that dependency is gone.
 
-**Repro** `./qa/probe-upload.sh <base> <key> <secret> <your-venue>` — probes A
-and B.
+### ✅ P0 sweep — clean
 
-**Fix, in order of preference:**
+- **Cross-tenant attach:** BLOCKED (403).
+- **Anonymous upload:** BLOCKED.
 
-1. **A whitelisted `upload_venue_photo(venue_name, file)` that elevates
-   internally**, like every other `shotright.api.*` method. This ends the
-   dependency on stock Frappe endpoints and the role permissions they need —
-   three symptoms have now come from that one dependency.
-2. Failing that: grant `File` **create** to the Vendor role, and confirm the
-   `Venue` attach grant is live *on this bench* (it may have been applied to
-   another).
+### ⚠️ P2 — open risk: `.HEIC` / `.avif` return 417 on a now-required field
 
-**Not a P0**: this is a functional block, not a data exposure. It is graded P1
-because the frontend cannot build correctly against it — but note the practical
-severity is higher than the grade, because it blocks a required step of
-onboarding.
+Terminal, not retryable. It interacts badly with a change made the same day:
+**a photo is now required to list a venue.** A partner whose only picture is a
+HEIC — the iPhone default in "High Efficiency" — and who is told "something went
+wrong" cannot list at all.
 
-### P2 — the response body has never been captured *(unverified)*
+Handled in the portal, in two layers:
 
-Every report so far is a status code and a screenshot. A `403` from Vercel's
-edge and a `403` from Frappe are indistinguishable on the status line — the
-portal is served from `64.29.17.3` (Vercel) and proxies `/api/*` to
-`194.163.168.19` (the bench), so the browser always names Vercel.
+1. **In the browser**, `prepareImage` catches most HEIC before upload and gives
+   iPhone-specific advice (Settings → Camera → Formats → Most Compatible).
+2. **On a 417**, the message names it as a format problem, says JPEG and PNG
+   work, and **does not offer a retry** — the same bytes would be refused the
+   same way.
 
-The **body** separates them: a Frappe refusal carries `exc_type` and
-`_server_messages`; an edge refusal carries neither. The probe script prints
-the raw body for exactly this reason.
-
-### P2 — cross-tenant attach is untested *(unverified)*
-
-Nobody has checked whether partner A can attach a file to partner B's venue.
-If `upload_file` with `doctype=Venue&docname=<not mine>` returns 200, that is a
-**P0** and the collection is not cleared on security grounds as well as
-functional ones. Probe E. **Needs a second account.**
-
-### P3 — reading photos back is a separate permission *(open since July)*
-
-Attaching is `Venue` write; listing them is `File` read. §14 asked whether the
-Vendor role can list its own venue's `File` rows and never got an answer, which
-is why the uploader opens empty on an existing venue. Probe C and D.
+Deliberately **not** treated as "uploading is unavailable": a wrong format is
+fixable by the partner in thirty seconds, so the photo requirement stays. Those
+two are separate flags in the code (`retryable` vs `blocksUpload`) precisely
+because conflating them would have switched the requirement off for a whole
+session on one bad file.
 
 ## Clearance table
 
 | Endpoint | Tier | Verdict | Conditions |
 |---|---|---|---|
-| `upload_file` (photo, with doctype) | HIGH | **BLOCKED** | 403. Nothing to integrate against. |
-| `upload_file` (menu, no doctype) | HIGH | **BLOCKED** | Same. |
-| `get_venue_photos` | LOW | CLEARED WITH CONDITIONS | Portal must keep distinguishing *unreadable* from *empty*. Already does. |
-| `create_venue` | HIGH | CLEARED | Unrelated to this. `place_id` declaration still unconfirmed (§20). |
-| `update_venue` | HIGH | CLEARED WITH CONDITIONS | Still crashes on `moods` (§00). Portal strips and retries. |
+| `shotright.api.upload_venue_photo` | HIGH | **CLEARED** | Portal must send `venue_name`. Attachment verified. |
+| `upload_file`, no doctype | HIGH | **CLEARED** | Wizard only, where no venue exists yet. |
+| `upload_file` + `doctype=Venue` | — | **PERMANENTLY BLOCKED** | Never send it. Enforced in the fake bench so a regression fails in CI. |
+| `get_venue_photos` | LOW | CLEARED | |
 
-## Frontend contract — `upload_file`
+## Frontend contract — uploading a photo
 
-What the portal must handle, and does today:
+| Situation | Endpoint | Why |
+|---|---|---|
+| Venue exists (edit form) | `upload_venue_photo` with `venue_name` | Elevates internally; attaches. |
+| No venue yet (wizard step 2) | `upload_file`, **no doctype** | Nothing to attach to. `create_venue` links the `file_url`s. |
 
-| Case | HTTP | How to tell | UI owes the partner |
+| Error | HTTP | Partner sees | Retry offered |
 |---|---|---|---|
-| Refused | 403 / `PermissionError` | `exc_type`, or "doctype access"/"role permission" in the message | *"This is a problem on our side, not with your file."* **No "try another file"** — the tenth is refused exactly like the first. |
-| Too large | 413 | status | Name the limit. |
-| Rejected by a hook | 417 | `_server_messages` (double-encoded JSON) | Show the server's words, stripped of HTML. |
-| Never arrived | network | no response | Offer a retry — this is the one case where retrying helps. |
-
-**The rule underneath:** a refused upload must never be reported as a problem
-with the partner's file. That mistake shipped, and it sends someone off to
-re-export a spreadsheet that was never broken.
-
-## Frontend test plan — React (implemented)
-
-Covered in `src/test/menu.test.jsx`, driven by `bench.uploadRefused`, which
-models `'always'` vs `'attached'` so both permission shapes are exercised:
-
-- refusal is named as ours, not as a bad file
-- no "try another file" on a permission refusal
-- no doctype/role-permission language reaches a partner's screen
-- a genuine parse failure **still** blames the file — the fix must not become a
-  way of never telling someone their CSV is broken
+| Format refused | 417 | "isn't a format we can use", JPEG/PNG, iPhone setting | **No** |
+| Permission | 403 | "our problem, not yours" | **No** — and the photo requirement lifts |
+| Endpoint missing | 404 | same | **No** — requirement lifts |
+| Network | — | "didn't upload… try again" | Yes |
 
 ## Gaps & follow-ups
 
-1. **Run the probe.** Everything above is unverified.
-2. **Second test account** for cross-tenant probes.
-3. **No staging bench.** Every finding here is a production observation, which
-   is why destructive probes are excluded.
-4. **No Postman collection.** Worth generating one from the portal's service
-   layer so this can run in CI rather than by hand.
+1. **The auth hop is inferred, not measured** — the backend offered to mint a
+   disposable vendor + API key and run the probes over the real stack. Worth
+   taking up for one thing specifically: **the declared parameter name on
+   `upload_venue_photo`.** The portal currently sends `venue_name`, `venue` and
+   `docname` together, because Frappe drops undeclared kwargs silently at 200
+   and a photo that uploads while attaching to nothing is exactly this
+   project's recurring failure. One line of the signature retires that hedge.
+2. **§14 is answerable now.** Can the Vendor role list `File` rows for its own
+   venue? If not, `get_venue_photos` remains the only read path.
+3. `qa/probe-upload.sh` is retained for regression use.

@@ -163,10 +163,10 @@ export default function PhotoUploader({
            have will refuse the tenth attempt exactly as it refused the first.
            Telling someone to keep pressing a button that cannot work is worse
            than telling them nothing. */
-        /* A refusal is not a failure to retry — it is proof that uploading is
-           not available to this partner right now, and the caller needs to know
-           so it can stop DEMANDING a photo. Told once, on the first refusal. */
-        if (err?.retryable === false) onUploadRefused(err)
+        /* `blocksUpload`, NOT `retryable`. A file we cannot use (wrong format)
+           is unretryable but perfectly fixable by the partner, and must not
+           switch off the requirement — see the note in `uploadVenuePhoto`. */
+        if (err?.blocksUpload) onUploadRefused(err)
 
         setErrors((e) => [
           ...e,
