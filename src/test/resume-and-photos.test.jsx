@@ -374,6 +374,26 @@ describe('uploading through the whitelisted method', () => {
     await waitFor(() => expect(bench.files.length).toBeGreaterThan(0))
     expect(bench.files.at(-1).attached_to_name).toBe('VEN-00001')
   })
+
+  it('saves the uploaded photo WITH its File docname', async () => {
+    /* ⚠️ 23 Aug, from the live site: `upload_venue_photo` returns the File
+       docname as `file` — core `upload_file` calls it `name` — and the client
+       read only `name`. So every photo uploaded through the attaching path
+       reached `set_venue_photos` as `file: undefined`, and the whole save came
+       back 417: "Each photo needs a `file` (the File docname)". The fake bench
+       now refuses exactly what the real one refuses, so this test fails at the
+       save (an alert, no stored rows) rather than passing over the drift. */
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+    await user.upload(await uploaderInput(), jpeg())
+    await waitFor(() => expect(bench.files.length).toBeGreaterThan(0))
+
+    await user.click(await screen.findByRole('button', { name: /save and resubmit|^save/i }))
+
+    await waitFor(() => expect(bench.photos['VEN-00001']?.length).toBeGreaterThan(0))
+    const rows = bench.photos['VEN-00001']
+    expect(rows.every((r) => typeof r.file === 'string' && r.file.length > 0)).toBe(true)
+    expect(rows.at(-1).file).toBe(bench.files.at(-1).name)
+  })
 })
 
 /* ============================================================================

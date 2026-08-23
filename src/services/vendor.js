@@ -1569,7 +1569,16 @@ export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
       }
 
       return {
-        name: uploaded.name,
+        /**
+         * ⚠️ 23 Aug, from the live site: the two upload endpoints name the
+         * File docname DIFFERENTLY. Core `upload_file` returns it as `name`;
+         * `upload_venue_photo` returns it as `file` (and no `name` at all).
+         * Reading only `name` left every photo uploaded through the attaching
+         * path with `name: undefined` — which `photoRow` forwarded as
+         * `file: undefined`, and `set_venue_photos` refused the whole save
+         * with a 417: "Each photo needs a `file` (the File docname)".
+         */
+        name: uploaded.name || uploaded.file,
         file_url: uploaded.file_url,
         file_name: uploaded.file_name || file.name,
         attached: Boolean(venueId),

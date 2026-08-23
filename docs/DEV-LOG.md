@@ -17,7 +17,61 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 8 Aug 2026 (latest) — one report was ours all along
+## 23 Aug 2026 (latest) — the photo save 417, and §0 fixed at the source
+
+Reported from the live portal, on VEN-00010's edit screen:
+
+```
+GET  …get_venue_detail?venue_name=VEN-00010   404
+POST …set_venue_photos                        417
+```
+
+Both from one ordinary action: the partner uploaded a photo and saved.
+
+### The 417 — two endpoints, two names for the same value
+
+`upload_venue_photo` returns the File docname as **`file`**; core `upload_file`
+returns it as **`name`**. `uploadVenuePhoto` read only `uploaded.name`, so every
+photo that went through the attaching path (the 22 Aug fix!) carried
+`name: undefined`, `photoRow` forwarded it as `file: undefined`, and
+`set_venue_photos` refused the whole save: *"Each photo needs a `file` (the
+File docname)"*. Reading photos back was never affected — `normalisePhoto`
+already accepts both spellings. Only fresh uploads broke, and only on save.
+
+**Why 63 green checks missed it:** the fake bench's `upload_venue_photo`
+handler returned the row with `name`, i.e. the shape we *wished* the server
+had, and its `set_venue_photos` accepted rows with no `file` at all. The suite
+was validating the client against our own guess. Three changes:
+
+- `uploadVenuePhoto` reads `uploaded.name || uploaded.file` (one line; the fix).
+- The fake bench now returns `{file, file_url, file_name}` from
+  `upload_venue_photo` and refuses docname-less rows with the server's exact
+  417 message — the drift class itself is now testable.
+- A regression test drives the real flow (upload on the edit screen → Save →
+  assert `bench.photos` rows hold File docnames). Verified red first: with the
+  one-liner reverted it fails; with it, 174/174 pass.
+
+### The 404 — §0 is fixed server-side
+
+The backend's `get_venue_detail` is now dual-scoped like `get_venue_products`:
+the **owning vendor** gets their own venue at any workflow_state; everyone else
+keeps the Approved-only gate. So the edit screen's detail read works again the
+moment an upload legitimately drops an Approved venue back to Pending for
+re-review — which is exactly what happened to VEN-00010 (that state flip is
+designed behaviour, not a bug). The dashboard-row fallback stays: it is still
+the right behaviour against an older backend, and `_partial` still marks who
+answered.
+
+### Skipped
+
+- Playwright e2e not run this session (fix is service-layer; RTL suite covers
+  the changed path end-to-end through the form).
+- `get_legal_documents` 417 at login noticed in the same log — the app method
+  is singular (`get_legal_document`); not touched today.
+
+Session: ~1h, on the bench box (backend + portal in one sitting).
+
+## 8 Aug 2026 — one report was ours all along
 
 Two issues reported from the live portal, logged to BACKEND-ASKS §19. They were
 logged as a matched pair of backend recurrences. **One of them wasn't a backend

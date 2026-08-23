@@ -523,6 +523,11 @@ const apiHandlers = [
 
   method('shotright.api.set_venue_photos', (args) => {
     const rows = parse(args.photos, []) || []
+    /* The real `_normalise` (venue_photos.py) refuses any row without a `file`
+       docname, with exactly this message at 417. Accepting such rows here is
+       how the `uploaded.name`/`uploaded.file` drift survived 63 green checks. */
+    if (rows.some((r) => !r || typeof r !== 'object' || !r.file))
+      return validationError('Each photo needs a `file` (the File docname)')
     bench.photos[args.venue_name] = rows.map((r) => ({ ...r }))
     return ok({ ok: true })
   }),
@@ -696,7 +701,13 @@ const apiHandlers = [
       attached_to_name: venue,
     }
     bench.files.push(row)
-    return ok(row)
+    /* ⚠️ 23 Aug: the REAL endpoint returns the File docname as `file`, not
+       `name` — venue_photos.py builds `{file, file_url, file_name, photos}`.
+       This mock used to return the row as-is, i.e. with `name`, so the suite
+       green-lit a client that read `uploaded.name` and then sent
+       `file: undefined` to set_venue_photos — a 417 on the live bench that no
+       test could see. The fake bench speaks the server's actual shape. */
+    return ok({ file: row.name, file_url: row.file_url, file_name: row.file_name })
   }),
 
   /* The Mood doctype is read through Frappe's generic resource API. */
