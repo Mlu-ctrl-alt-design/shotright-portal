@@ -29,6 +29,10 @@
  * already in the lists below, so the buckets match the live vocabulary — this
  * is no longer a guess wrapped in a safety net.
  *
+ * ✅ UPDATED 23 Aug. The workflow gained **Draft** as its first state (the
+ * submission gate). Draft has its own bucket: it is the one state that means
+ * "waiting on the partner", and every other bucket means the opposite.
+ *
  * The aliases stay regardless. They cost nothing, and what they prevent is the
  * silent failure: the day a fourth state appears, an unrecognised venue is
  * shown with its raw status instead of vanishing.
@@ -60,10 +64,17 @@ const ALIASES = {
     'in review',
     'under review',
     'submitted',
-    'draft',
-    'new',
   ],
   declined: ['declined', 'rejected', 'denied', 'refused', 'not approved', 'cancelled', 'canceled'],
+  /**
+   * ⚠️ 23 Aug: 'draft' and 'new' MOVED OUT of pending. Draft became a real
+   * bench state that day (the submission gate: create_venue lands in Draft,
+   * and only submit_venue_for_review queues it). Bucketing draft under
+   * pending was harmless while no venue could actually hold the state; now
+   * it would tell a partner "you're waiting on us" about a listing that is
+   * in no queue at all and waiting on THEM.
+   */
+  draft: ['draft', 'new', 'unsubmitted', 'not submitted'],
 }
 
 const LOOKUP = new Map(
@@ -86,7 +97,7 @@ export function bucketOf(state) {
  * with "Unknown". Showing the bench's actual word is what lets someone
  * recognise the mismatch and fix this file.
  */
-const BUCKET_LABELS = { approved: 'Approved', pending: 'Pending', declined: 'Declined' }
+const BUCKET_LABELS = { approved: 'Approved', pending: 'Pending', declined: 'Declined', draft: 'Draft' }
 
 export function stateLabel(state) {
   const bucket = bucketOf(state)
@@ -94,7 +105,7 @@ export function stateLabel(state) {
 }
 
 /** Badge palette key. Unrecognised states get the neutral one. */
-const BUCKET_TONES = { approved: 'Approved', pending: 'Pending', declined: 'Rejected' }
+const BUCKET_TONES = { approved: 'Approved', pending: 'Pending', declined: 'Rejected', draft: 'Draft' }
 
 export const stateTone = (state) => BUCKET_TONES[bucketOf(state)] ?? 'Draft'
 

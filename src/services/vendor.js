@@ -263,12 +263,37 @@ export const logout = () =>
  * erroring would bounce a signed-out visitor into the portal with no profile
  * behind them. No token means guest; that is answerable without a round trip.
  */
+/**
+ * Where the session check hands its dashboard payload.
+ *
+ * Restoring a session IS a `get_vendor_dashboard` call — and before this, the
+ * dashboard or venue list then made the IDENTICAL call again the moment it
+ * mounted (both round-trips visible back-to-back in the server's nginx log).
+ * On the networks partners use, that pattern is a full second of spinner
+ * spent asking a question we were already holding the answer to.
+ *
+ * main.jsx registers a seeder that writes the payload into the query cache,
+ * SYNCHRONOUSLY inside getSession — before the auth store flips to
+ * 'authenticated' and any screen mounts, so the first screen finds the cache
+ * already warm. A callback registered from the composition root, rather than
+ * a snapshot consumed from useQuery's initialData, because the first draft
+ * did the latter: a single-use take() inside a render-time callback, which
+ * React is free to call in a render it then throws away. The snapshot burned
+ * in a discarded render and the venue list sat on its spinner for ever —
+ * caught by this suite, on the login test of all places.
+ */
+let seedSession = null
+export const registerSessionSeeder = (fn) => {
+  seedSession = fn
+}
+
 export const getSession = () =>
   pick(
     async () => {
       if (!hasAuthToken()) throw Object.assign(new Error('Not signed in'), { status: 401 })
       const dash = await call('shotright.api.get_vendor_dashboard')
       if (!dash?.profile) throw Object.assign(new Error('Not signed in'), { status: 401 })
+      seedSession?.(dash)
       return { user: dash.profile.email, vendor_profile: dash.profile }
     },
     () => mockBackend.getLoggedUser(),
@@ -674,6 +699,17 @@ export const createVenue = (payload) =>
         longitude: payload.longitude ?? null,
         dress_code: payload.dress_code,
         atmosphere_desc: payload.atmosphere,
+        /**
+         * ⚠️ Never sent until 23 Aug, and it cost more than an empty field.
+         * The wizard collects a street address on step 2, the backend has
+         * declared `address` on create_venue all along — and this call left
+         * it out, so every wizard-created venue landed with no address. That
+         * was cosmetic until the completeness gate went live: no address is a
+         * BLOCKER, so from 23 Aug the omission meant every new venue was
+         * refused at submission with "Add a street address" about an address
+         * the partner had already typed.
+         */
+        address: payload.address || '',
         moods: [...canonical.map((m) => m.label), ...suggested.map((m) => m.mood)],
         operating_hours: rows,
         /**
@@ -743,6 +779,49 @@ export const createVenue = (payload) =>
       return { venue, warnings }
     },
     async () => ({ venue: await mockBackend.createVenue(payload), warnings: [] }),
+  )()
+
+/* ------------------------------------------------------------- submission */
+
+export const SUBMIT_REVIEW_METHOD = 'shotright.api.submit_venue_for_review'
+
+/**
+ * Ask the bench to put a listing in front of a moderator.
+ *
+ * Creation stopped meaning submission on 22 Aug: `create_venue` lands in
+ * Draft, and this call is the only door into the review queue. The verdict
+ * comes back as a 200 either way — `workflow_state: 'Pending'` with optional
+ * `marks` (thin but reviewable: few photos, no menu), or `'Declined'` with
+ * `blockers` (nothing to review: no photo, no description, no address) — so
+ * the caller can show every reason at once.
+ *
+ * Returns `{asked: false, method}` when the bench predates the endpoint: the
+ * venue exists and is safe, it just cannot be queued from here, and the
+ * caller must say that rather than claim a review that will never happen.
+ *
+ * A 417 for "already waiting" / "already approved" is folded into a normal
+ * verdict rather than thrown: both mean the listing needs nothing from the
+ * partner, and a partner double-clicking Submit has not made a mistake worth
+ * an error screen.
+ */
+export const submitVenueForReview = (venueId) =>
+  pick(
+    () =>
+      withFallback(SUBMIT_REVIEW_METHOD, async () => {
+        try {
+          const verdict = await call(SUBMIT_REVIEW_METHOD, { venue_name: venueId })
+          return { asked: true, ...verdict }
+        } catch (err) {
+          const text = err?.message || ''
+          if (/already waiting/i.test(text))
+            return { asked: true, workflow_state: 'Pending', blockers: [], marks: [] }
+          if (/already approved/i.test(text))
+            return { asked: true, workflow_state: 'Approved', blockers: [], marks: [] }
+          throw err
+        }
+      }, async () => ({ asked: false, method: SUBMIT_REVIEW_METHOD })),
+    /* Demo mode has no moderation queue — everything is instantly "waiting". */
+    async () => ({ asked: true, workflow_state: 'Pending', blockers: [], marks: [] }),
   )()
 
 /**

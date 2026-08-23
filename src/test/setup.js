@@ -1,5 +1,15 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
+
+/**
+ * Views are lazy-loaded now (route-level code splitting, 23 Aug), which puts
+ * one more async hop — the chunk import resolving through Suspense — between
+ * render and content. Testing Library's default 1s findBy* budget was sized
+ * for a tree that mounts synchronously and only waits on the fake bench; give
+ * it room for the import too. Passing tests are exactly as fast as before —
+ * this only moves the point where a genuinely missing element gives up.
+ */
+configure({ asyncUtilTimeout: 4000 })
 import { afterAll, afterEach, beforeAll, vi } from 'vitest'
 import { server } from './server'
 import { resetBench } from './bench'
