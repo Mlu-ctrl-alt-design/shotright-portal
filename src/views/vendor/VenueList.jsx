@@ -1,6 +1,6 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import { useDashboard } from '../../hooks/useVendor'
-import { Badge, Button, EmptyState, Alert } from '../../components/ui'
+import { Badge, Button, EmptyState, Alert, OverflowMenu, OverflowMenuItem } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { clsx } from '../../utils/clsx'
 import { inBucket, stateLabel, stateTone, unrecognisedStates } from '../../services/workflowState'
@@ -212,8 +212,37 @@ export default function VenueList() {
               {venues.map((venue) => (
                 <tr key={venue.name}>
                   <td className="px-5 py-4">
-                    <p className="font-medium text-ink-900">{venue.venue_name}</p>
-                    <p className="text-xs text-ink-500">{venue.address}</p>
+                    <div className="flex items-center gap-3">
+                      {/* The listing's face — the cover the partner chose (or
+                          photo 1), straight off the dashboard payload so it
+                          costs no extra request. alt="" and aria-hidden: the
+                          name is right beside it, and announcing "Cover photo
+                          of X" before "X" in every row is noise, not
+                          information. */}
+                      {venue.cover_image ? (
+                        <img
+                          src={venue.cover_image}
+                          alt=""
+                          aria-hidden="true"
+                          loading="lazy"
+                          className="h-12 w-16 shrink-0 rounded-lg object-cover ring-1 ring-gray-200"
+                        />
+                      ) : (
+                        /* No photos yet — the initial, not a broken-image
+                           icon, and not an empty gap that would make the
+                           column ragged. */
+                        <span
+                          aria-hidden="true"
+                          className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-lg font-bold text-brand-600 ring-1 ring-gray-200"
+                        >
+                          {(venue.venue_name || '?').trim().charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                      <div>
+                        <p className="font-medium text-ink-900">{venue.venue_name}</p>
+                        <p className="text-xs text-ink-500">{venue.address}</p>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-5 py-4">
                     <Badge tone={stateTone(venue.workflow_state)}>
@@ -222,12 +251,15 @@ export default function VenueList() {
                   </td>
                   <td className="px-5 py-4 text-ink-700">{venue.dress_code || '—'}</td>
                   <td className="px-5 py-4">
-                    <div className="flex justify-end gap-4">
-                      {/* A declined venue's first question is "why?", not
-                          "what's on the menu?". The answer leads the row, and
-                          is emphasised, because a partner scanning this table
-                          has no other route to the reviewer's reasons. */}
-                      {inBucket(venue, 'declined') && (
+                    {/* ONE action in the open, the rest behind "⋯". Five links
+                        per row made every row shout; the primary slot answers
+                        "what would this partner do next?" — a declined venue's
+                        first question is "why?", a pending one's is "how far
+                        along?", and an approved one gets Edit. Everything else
+                        (and Edit itself, when it is not the primary) waits in
+                        the overflow, one click away instead of zero. */}
+                    <div className="flex items-center justify-end gap-2">
+                      {inBucket(venue, 'declined') ? (
                         <Link
                           to={`/venues/${venue.name}/review`}
                           aria-label={`Why ${venue.venue_name} was declined`}
@@ -235,15 +267,7 @@ export default function VenueList() {
                         >
                           Why?
                         </Link>
-                      )}
-                      {/* A pending venue had no route to its own status at
-                          all: the row said "Pending" and that was the end of
-                          it. Deliberately not emphasised the way "Why?" is —
-                          a decline needs acting on, waiting does not, and
-                          shouting about a venue that is simply in a queue
-                          would be noise in a column that has to stay
-                          scannable. */}
-                      {inBucket(venue, 'pending') && (
+                      ) : inBucket(venue, 'pending') ? (
                         <Link
                           to={`/venues/${venue.name}/review`}
                           aria-label={`Progress of ${venue.venue_name}`}
@@ -251,35 +275,46 @@ export default function VenueList() {
                         >
                           Progress
                         </Link>
+                      ) : (
+                        <Link
+                          to={`/venues/${venue.name}/edit`}
+                          aria-label={`Edit ${venue.venue_name}`}
+                          className="font-medium text-brand-600 hover:underline"
+                        >
+                          Edit
+                        </Link>
                       )}
-                      {/* Every venue gets one. A partner fills in eleven fields
-                          across five steps and never sees the thing they are
-                          making — the first look at it as a customer would is
-                          otherwise after it is live, which is the wrong moment
-                          to notice the cover photo is of the car park. */}
-                      <Link
-                        to={`/venues/${venue.name}/preview`}
-                        aria-label={`Preview ${venue.venue_name} as customers see it`}
-                        className="font-medium text-brand-600 hover:underline"
-                      >
-                        Preview
-                      </Link>
-                      {/* Names the venue for assistive tech: a column of
-                          identical "Edit" links is unusable out of context. */}
-                      <Link
-                        to={`/venues/${venue.name}/menu`}
-                        aria-label={`Menu for ${venue.venue_name}`}
-                        className="font-medium text-brand-600 hover:underline"
-                      >
-                        Menu
-                      </Link>
-                      <Link
-                        to={`/venues/${venue.name}/edit`}
-                        aria-label={`Edit ${venue.venue_name}`}
-                        className="font-medium text-brand-600 hover:underline"
-                      >
-                        Edit
-                      </Link>
+                      <OverflowMenu label={`More actions for ${venue.venue_name}`}>
+                        {/* Every venue gets Preview. A partner fills in eleven
+                            fields across five steps and never sees the thing
+                            they are making — the first look as a customer
+                            would see it must not be after it is live. */}
+                        <OverflowMenuItem
+                          as={Link}
+                          to={`/venues/${venue.name}/preview`}
+                          aria-label={`Preview ${venue.venue_name} as customers see it`}
+                        >
+                          Preview
+                        </OverflowMenuItem>
+                        <OverflowMenuItem
+                          as={Link}
+                          to={`/venues/${venue.name}/menu`}
+                          aria-label={`Menu for ${venue.venue_name}`}
+                        >
+                          Menu
+                        </OverflowMenuItem>
+                        {/* Edit moves here only when the primary slot is
+                            taken by a state-specific answer. */}
+                        {(inBucket(venue, 'declined') || inBucket(venue, 'pending')) && (
+                            <OverflowMenuItem
+                              as={Link}
+                              to={`/venues/${venue.name}/edit`}
+                              aria-label={`Edit ${venue.venue_name}`}
+                            >
+                              Edit
+                            </OverflowMenuItem>
+                          )}
+                      </OverflowMenu>
                     </div>
                   </td>
                 </tr>

@@ -17,7 +17,55 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 23 Aug 2026 (latest) — the photo save 417, and §0 fixed at the source
+## 23 Aug 2026, later (latest) — the venue list gets a face, and its actions stop shouting
+
+Requested: the cover image per venue on the list, and one visible action with
+the rest behind an overflow.
+
+### Covers
+
+`get_vendor_dashboard` now sends `cover_image` per venue (backend change, same
+session — along with `address` and `dress_code`, which this table has been
+rendering as blank cells all along because the endpoint never sent them; the
+28 Jul "the edit form loses the address" note assumed the dashboard carried it,
+and it did not). The row shows the cover as a thumbnail; a venue with no photos
+gets its initial in a tile, never a broken-image icon. No photo request per row
+— the list stays one call.
+
+### One action + overflow
+
+The primary slot answers "what would this partner do next": Why? for declined,
+Progress for pending, Edit otherwise. Preview and Menu — and Edit, when the
+slot is taken — live behind a "⋯" `OverflowMenu` (new UI primitive, with
+`OverflowMenuItem`). Two decisions worth recording:
+
+- **It is a disclosure, not an ARIA menu.** `role="menu"` promises arrow-key
+  traversal and focus wrapping this does not implement; aria-expanded on the
+  button plus ordinary links is the honest contract. Same reasoning as the
+  status tabs.
+- **The panel is `position: fixed`,** anchored when opened, because the rows
+  sit in an `overflow-x-auto` wrapper that would clip an absolute panel — the
+  last row's menu would open into nothing. Any scroll closes the panel rather
+  than letting it drift off its anchor.
+
+5 new RTL tests (cover shown from the dashboard payload; initial for a
+coverless venue; one visible action with Preview/Menu/duplicate-Edit checks;
+declined leads with Why? and keeps Edit in the overflow; Escape closes and
+returns focus). 179/179 pass; production build clean.
+
+### Also this session, backend-side
+
+Running the dashboard tests exposed that the 22 Aug submission gate had been
+**activated but never migrated**: today's bench restarts loaded code that
+inserts venues as Draft while the site schema still refused the value — live
+venue creation was broken until `bench migrate` ran. It has; creation lands in
+Draft as designed. Logged properly in the app's own DEV-LOG.
+
+Session: ~1h.
+
+---
+
+## 23 Aug 2026 — the photo save 417, and §0 fixed at the source
 
 Reported from the live portal, on VEN-00010's edit screen:
 

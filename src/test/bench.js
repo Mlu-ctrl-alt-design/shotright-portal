@@ -35,6 +35,7 @@ export const VENUE_ONE = {
   name: 'VEN-00001',
   venue_name: 'Corner Kitchen & Bar',
   address: '12 Long St, Cape Town',
+  cover_image: '/files/corner-kitchen-cover.jpg',
   latitude: -33.9249,
   longitude: 18.4241,
   dress_code: 'Smart casual',
