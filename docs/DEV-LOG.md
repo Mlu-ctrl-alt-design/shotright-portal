@@ -17,7 +17,68 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 23 Aug 2026, later (latest) — the venue list gets a face, and its actions stop shouting
+## 23 Aug 2026, evening (latest) — the wizard finally submits, and the app stops shipping itself to the login page
+
+Two asks: the submit-for-review step the 22 Aug backend gate has been waiting
+on, and "the loading of the app takes quite a while".
+
+### Submission — creation stopped being enough a day ago
+
+`create_venue` lands in **Draft** now; only `submit_venue_for_review` queues a
+listing. The wizard claimed "sent to our team for review" over a venue no
+moderator would ever see. Changes:
+
+- `submitVenueForReview` service + hook. The wizard calls it after photos and
+  menu are saved, and **a submission failure can never fail the wizard** — the
+  venue exists by then, and re-walking five steps over a queueing hiccup would
+  be the expensive kind of honesty.
+- **WizardSuccess tells the truth per outcome**: queued (old copy, true
+  again, plus advisory `marks` — few photos, no menu); refused (every
+  `blocker` listed at once, venue safe in Declined, "Finish the listing" into
+  edit); couldn't ask (endpoint missing/failed — venue in Drafts, submit from
+  My venues).
+- **Draft got its own bucket.** It was aliased under *pending* — defensible
+  when no venue could hold the state, a lie the day one could: it told a
+  partner "waiting on us" about the one state that means "waiting on you".
+  Drafts tab on My venues; a draft row leads with a **Submit** button, whose
+  outcome (queued / refused-with-reasons / unavailable) is said in an alert.
+- **Found under the same stone: the wizard never sent the address.**
+  `create_venue` has declared `address` all along; the portal's call omitted
+  it, so every wizard-created venue landed address-less (behind the 28 Jul
+  "edit form loses the address" mystery, and why the bench is full of NULL
+  addresses). With the completeness gate live this stopped being cosmetic:
+  no-address is a blocker, so every new venue would have been refused at
+  submission with "Add a street address" about an address the partner typed
+  on step 2. One line in the create call fixes it.
+- Fake bench now creates in Draft and implements the real submission rules
+  (blockers/marks/417s), so the suite models the bench that exists.
+
+### Performance — two structural fixes, no micro-optimisation
+
+- **Route-level code splitting.** One 550 kB chunk (172 kB gz) carried every
+  screen; the login page downloaded the wizard, the menu editor and all venue
+  screens before first paint. Every view is `React.lazy` now: initial JS is
+  **116 kB gz + a 1 kB screen chunk (−33%)**, and heavy screens (wizard 21 kB
+  gz, map 46 kB gz, editor 128 kB gz) arrive only when asked for.
+- **The double dashboard fetch is gone.** Restoring a session IS a
+  `get_vendor_dashboard` call, and the first screen then made the identical
+  call again (both visible back-to-back in nginx). `main.jsx` registers a
+  seeder; `getSession` hands its payload into the query cache synchronously,
+  before any screen mounts. Signed-in startup: one round-trip, not two.
+- **A lesson paid for in debugging time**: the first draft seeded via a
+  single-use `take()` inside `useQuery`'s `initialData` callback — render
+  time. React discarded a render, the snapshot burned with it, and the venue
+  list span for ever. Caught by the login test. Side effects in render-time
+  callbacks, never again; the seeder lives in the composition root.
+
+6 new tests (3 wizard outcomes, 3 draft-list behaviours); 185/185 pass. The
+lazy-route hop needed `asyncUtilTimeout: 4000` and two finds made async.
+
+Session: ~2h.
+
+---
+
+## 23 Aug 2026, later — the venue list gets a face, and its actions stop shouting
 
 Requested: the cover image per venue on the list, and one visible action with
 the rest behind an overflow.

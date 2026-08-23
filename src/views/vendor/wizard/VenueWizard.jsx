@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { useCreateVenue } from '../../../hooks/useVendor'
+import { useCreateVenue, useSubmitVenueForReview } from '../../../hooks/useVendor'
 import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
 import { useDraft, useSetupDraft } from '../../../hooks/useSetupDraft'
 import { useLegalStanding } from '../../../hooks/useLegalStanding'
@@ -182,6 +182,7 @@ function Wizard({ resumeId, draft, draftError }) {
   const [submitError, setSubmitError] = useState(null)
   const [created, setCreated] = useState(null)
   const createVenue = useCreateVenue()
+  const submitReview = useSubmitVenueForReview()
   /* Submitting is where a listing enters our review queue and starts heading
      for real customers, so it is where the agreement has to be in place. See
      `ENFORCE_AT` in services/legal.js for why here and not at login. */
@@ -322,7 +323,24 @@ function Wizard({ resumeId, draft, draftError }) {
       // at submit, since that is when "submitted unmodified" becomes true.
       defaults.reportAccepted()
       markComplete(currentIndex)
-      setCreated({ venue, warnings })
+      /**
+       * Creation is SAVING; submission is what puts the listing in front of a
+       * moderator — split on the bench since 22 Aug, so a wizard that stops at
+       * create leaves the venue in Draft for ever while promising a review.
+       *
+       * Asked here, after photos and menu have landed, because the rules
+       * judge what is attached. And never allowed to fail the wizard: the
+       * venue EXISTS by this line, and a submission hiccup dressed as a
+       * creation failure would send the partner back to redo five steps of
+       * work that is already saved.
+       */
+      let review
+      try {
+        review = await submitReview.mutateAsync(venue?.name ?? venue?.venue_name)
+      } catch (err) {
+        review = { asked: true, failed: true, error: err.message }
+      }
+      setCreated({ venue, warnings, review })
       // The draft has become a Venue. Leaving it behind would put "continue
       // setup" on the dashboard next to the venue it already created, and the
       // partner would reasonably do both.
@@ -418,7 +436,9 @@ function Wizard({ resumeId, draft, draftError }) {
     return (
       <WizardSuccess
         venueName={created.venue?.venue_name ?? details.venue_name}
+        venueId={created.venue?.name}
         warnings={created.warnings}
+        review={created.review}
         onAddAnother={restart}
       />
     )

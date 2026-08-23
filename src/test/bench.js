@@ -63,6 +63,8 @@ const initial = () => ({
     get_venue_photos: true,
     set_venue_photos: true,
     save_venue_draft: true,
+    /* The only door into the review queue — live on the bench since 23 Aug. */
+    submit_venue_for_review: true,
     list_venue_drafts: true,
     get_venue_draft: true,
     discard_venue_draft: true,

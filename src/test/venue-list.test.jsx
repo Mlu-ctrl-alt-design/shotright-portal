@@ -26,8 +26,10 @@ const pushDeclined = () =>
   })
 
 const rowFor = async (venueName) => {
-  const cell = await screen.findByText(venueName)
-  return cell.closest('tr')
+  // findAll: the submit-outcome alert also names the venue, and only one of
+  // the matches lives in a table row.
+  const cells = await screen.findAllByText(venueName)
+  return cells.map((c) => c.closest('tr')).find(Boolean)
 }
 
 describe('venue list covers', () => {
@@ -107,5 +109,77 @@ describe('venue list actions', () => {
       expect(screen.queryByRole('link', { name: 'Menu for Corner Kitchen & Bar' })).toBeNull(),
     )
     expect(toggle).toHaveFocus()
+  })
+})
+
+/* ============================================================================
+   DRAFTS — the state that means "waiting on the partner", real on the bench
+   since 23 Aug. Bucketing it under Pending (as this portal briefly did) told
+   a partner "you're waiting on us" about a venue in no queue at all.
+   ========================================================================= */
+describe('draft venues', () => {
+  const pushDraft = (overrides = {}) =>
+    bench.venues.push({
+      name: 'VEN-00042',
+      venue_name: 'Umgababa Fish Shack',
+      address: '1 Beach Rd, Umgababa',
+      atmosphere_desc: 'Fresh off the boat',
+      workflow_state: 'Draft',
+      dress_code: 'Casual',
+      moods: [],
+      operating_hours: [],
+      ...overrides,
+    })
+
+  it('shows under its own Drafts tab, badged Draft, with Submit leading the row', async () => {
+    pushDraft()
+    const { user } = renderApp({ route: LIST, signedIn: true })
+
+    const row = await rowFor('Umgababa Fish Shack')
+    expect(within(row).getByText('Draft')).toBeInTheDocument()
+    expect(
+      within(row).getByRole('button', { name: 'Submit Umgababa Fish Shack for review' }),
+    ).toBeInTheDocument()
+    // Edit is not lost — it waits in the overflow.
+    expect(screen.queryByRole('link', { name: 'Edit Umgababa Fish Shack' })).toBeNull()
+    await user.click(
+      screen.getByRole('button', { name: 'More actions for Umgababa Fish Shack' }),
+    )
+    expect(screen.getByRole('link', { name: 'Edit Umgababa Fish Shack' })).toBeInTheDocument()
+    // And the tab knows its own.
+    expect(screen.getByRole('link', { name: /Drafts/ })).toHaveTextContent('1')
+  })
+
+  it('Submit moves a complete draft into the review queue, visibly', async () => {
+    pushDraft()
+    bench.photos['VEN-00042'] = [{ file: 'FILE-9', file_url: '/files/shack.jpg', idx: 1 }]
+    const { user } = renderApp({ route: LIST, signedIn: true })
+
+    const row = await rowFor('Umgababa Fish Shack')
+    await user.click(
+      within(row).getByRole('button', { name: 'Submit Umgababa Fish Shack for review' }),
+    )
+
+    await screen.findByText(/is with our team for review/i)
+    expect(bench.venues.find((v) => v.name === 'VEN-00042').workflow_state).toBe('Pending')
+    // The refetched list agrees: the row is badged Pending now.
+    const after = await rowFor('Umgababa Fish Shack')
+    await waitFor(() => expect(within(after).getByText('Pending')).toBeInTheDocument())
+  })
+
+  it('a refused Submit says every reason and where to fix them', async () => {
+    pushDraft({ address: '', atmosphere_desc: '' }) // and no photos
+    const { user } = renderApp({ route: LIST, signedIn: true })
+
+    const row = await rowFor('Umgababa Fish Shack')
+    await user.click(
+      within(row).getByRole('button', { name: 'Submit Umgababa Fish Shack for review' }),
+    )
+
+    await screen.findByText(/isn’t ready for review yet/i)
+    expect(screen.getByText(/at least one photograph/i)).toBeInTheDocument()
+    expect(screen.getByText(/street address/i)).toBeInTheDocument()
+    expect(screen.getByText(/describe the venue/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /finish the listing/i })).toBeInTheDocument()
   })
 })

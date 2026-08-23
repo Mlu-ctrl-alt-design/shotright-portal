@@ -402,3 +402,54 @@ describe('at least one photo', () => {
     )
   })
 })
+
+/* ============================================================================
+   THE SUBMISSION STEP — creation stopped meaning submission on the bench
+   (22 Aug gate, live 23 Aug). The wizard now calls submit_venue_for_review
+   after everything is saved, and the success screen only claims "sent to our
+   team" when that is what happened. These pin all three outcomes.
+   ========================================================================= */
+describe('submitting for review', () => {
+  it('queues the finished venue and says so truthfully', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    const name = await walkToReview(user)
+    await submit(user)
+
+    await screen.findByText(/sent to our team for review/i)
+    const call = bench.calls.find((c) => c.method === 'submit_venue_for_review')
+    expect(call).toBeTruthy()
+    expect(bench.venues.find((v) => v.venue_name === name).workflow_state).toBe('Pending')
+  })
+
+  it('shows every reason when the rules refuse the listing, and offers the way forward', async () => {
+    /* Photos saved pre-venue can fail to attach (the endpoint may be behind);
+       the completeness rules then refuse the listing. The partner must see
+       ALL the reasons and where to go — never "sent for review" over a venue
+       that is actually Declined. */
+    bench.deploy.set_venue_photos = false
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    const name = await walkToReview(user)
+    await submit(user)
+
+    await screen.findByText(/not ready for review yet/i)
+    expect(screen.getByText(/at least one photograph/i)).toBeInTheDocument()
+    expect(screen.queryByText(/sent to our team for review/i)).toBeNull()
+    expect(screen.getByRole('link', { name: /finish the listing/i })).toBeInTheDocument()
+    expect(bench.venues.find((v) => v.venue_name === name).workflow_state).toBe('Declined')
+  })
+
+  it('never claims a review on a bench that cannot queue one', async () => {
+    bench.deploy.submit_venue_for_review = false
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    const name = await walkToReview(user)
+    await submit(user)
+
+    await screen.findByText(/couldn’t send it to our team/i)
+    expect(screen.queryByText(/sent to our team for review/i)).toBeNull()
+    // The venue exists and is safe — in Draft, where My venues can submit it.
+    expect(bench.venues.find((v) => v.venue_name === name).workflow_state).toBe('Draft')
+  })
+})

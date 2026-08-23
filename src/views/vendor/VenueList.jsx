@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useDashboard } from '../../hooks/useVendor'
+import { useDashboard, useSubmitVenueForReview } from '../../hooks/useVendor'
 import { Badge, Button, EmptyState, Alert, OverflowMenu, OverflowMenuItem } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { clsx } from '../../utils/clsx'
@@ -39,6 +40,8 @@ const TABS = [
   { key: 'approved', label: 'Approved', bucket: 'approved' },
   { key: 'pending', label: 'Pending', bucket: 'pending' },
   { key: 'declined', label: 'Declined', bucket: 'declined' },
+  /* Appended, not inserted: `missingDeclined` below indexes TABS[3]. */
+  { key: 'draft', label: 'Drafts', bucket: 'draft' },
 ]
 
 const EMPTY = {
@@ -56,6 +59,11 @@ const EMPTY = {
     description:
       'Venues the team could not approve appear here, so you can fix them and resubmit.',
   },
+  draft: {
+    title: 'No drafts',
+    description:
+      'A venue you create but haven’t sent for review yet lives here until you submit it.',
+  },
   '': {
     title: 'No venues yet',
     description: 'Add your first venue to start appearing in mood searches.',
@@ -70,6 +78,35 @@ export default function VenueList() {
   // one.
   const { data: dash, isLoading, error } = useDashboard()
   const data = dash?.venues ?? []
+  const submitReview = useSubmitVenueForReview()
+  /**
+   * The outcome of the last Submit, said in place. A Draft row's Submit either
+   * moves the venue (the refetched list shows it under Pending — visible), is
+   * refused with reasons (invisible unless said: the row just turns Declined),
+   * or cannot run at all. The last two need words, so all three get them.
+   */
+  const [submitNote, setSubmitNote] = useState(null)
+
+  const submitForReview = async (venue) => {
+    setSubmitNote(null)
+    try {
+      const result = await submitReview.mutateAsync(venue.name)
+      if (result?.asked === false) {
+        setSubmitNote({ kind: 'unavailable', venueName: venue.venue_name })
+      } else if (result?.blockers?.length) {
+        setSubmitNote({
+          kind: 'refused',
+          venueName: venue.venue_name,
+          venueId: venue.name,
+          blockers: result.blockers,
+        })
+      } else {
+        setSubmitNote({ kind: 'queued', venueName: venue.venue_name })
+      }
+    } catch (err) {
+      setSubmitNote({ kind: 'error', venueName: venue.venue_name, message: err.message })
+    }
+  }
 
   // Unknown values fall back to All rather than showing an empty list under a
   // tab that is not highlighted — which would read as "you have no venues".
@@ -156,6 +193,43 @@ export default function VenueList() {
           })}
         </ul>
       </nav>
+
+      {submitNote?.kind === 'queued' && (
+        <Alert variant="success">
+          <strong>{submitNote.venueName}</strong> is with our team for review — you&rsquo;ll find
+          it under <strong>Pending</strong>.
+        </Alert>
+      )}
+      {submitNote?.kind === 'refused' && (
+        <Alert variant="warning">
+          <strong>{submitNote.venueName}</strong> isn&rsquo;t ready for review yet. It still
+          needs:
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {submitNote.blockers.map((b) => (
+              <li key={b.code || b.message}>{b.message}</li>
+            ))}
+          </ul>
+          <Link
+            to={`/venues/${submitNote.venueId}/edit`}
+            className="mt-2 inline-block font-bold underline"
+          >
+            Finish the listing
+          </Link>
+        </Alert>
+      )}
+      {submitNote?.kind === 'unavailable' && (
+        <Alert variant="warning">
+          We couldn&rsquo;t send <strong>{submitNote.venueName}</strong> for review just now —
+          that isn&rsquo;t working here at the moment, which is our problem and not yours.
+          Nothing is lost; please try again later.
+        </Alert>
+      )}
+      {submitNote?.kind === 'error' && (
+        <Alert variant="danger">
+          Submitting <strong>{submitNote.venueName}</strong> didn&rsquo;t work:{' '}
+          {submitNote.message}
+        </Alert>
+      )}
 
       {missingDeclined && (
         <Alert variant="danger">
@@ -259,7 +333,20 @@ export default function VenueList() {
                         (and Edit itself, when it is not the primary) waits in
                         the overflow, one click away instead of zero. */}
                     <div className="flex items-center justify-end gap-2">
-                      {inBucket(venue, 'declined') ? (
+                      {inBucket(venue, 'draft') ? (
+                        /* A draft is the one state waiting on the PARTNER, and
+                           what it is waiting for is this. A button, not a
+                           link — it acts here, it doesn't go anywhere. */
+                        <button
+                          type="button"
+                          onClick={() => submitForReview(venue)}
+                          disabled={submitReview.isPending}
+                          aria-label={`Submit ${venue.venue_name} for review`}
+                          className="font-bold text-brand-600 hover:underline disabled:cursor-wait disabled:opacity-50"
+                        >
+                          Submit
+                        </button>
+                      ) : inBucket(venue, 'declined') ? (
                         <Link
                           to={`/venues/${venue.name}/review`}
                           aria-label={`Why ${venue.venue_name} was declined`}
@@ -305,7 +392,9 @@ export default function VenueList() {
                         </OverflowMenuItem>
                         {/* Edit moves here only when the primary slot is
                             taken by a state-specific answer. */}
-                        {(inBucket(venue, 'declined') || inBucket(venue, 'pending')) && (
+                        {(inBucket(venue, 'declined') ||
+                          inBucket(venue, 'pending') ||
+                          inBucket(venue, 'draft')) && (
                             <OverflowMenuItem
                               as={Link}
                               to={`/venues/${venue.name}/edit`}

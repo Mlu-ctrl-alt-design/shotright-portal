@@ -234,10 +234,58 @@ const apiHandlers = [
       moods: parse(args.moods, []) || [],
       operating_hours: parse(args.operating_hours, []) || [],
       // The server owns this. A client must never be able to set it.
-      workflow_state: 'Pending',
+      // Draft since the 22 Aug submission gate (live on the bench 23 Aug):
+      // creating a venue no longer queues it — submit_venue_for_review does.
+      workflow_state: 'Draft',
     }
     bench.venues.push(venue)
     return ok({ ...venue })
+  }),
+
+  /**
+   * The only door into the review queue, live on the bench since 23 Aug.
+   *
+   * Mirrors venue_completeness.py: BLOCKERS (no photos / no description / no
+   * street address) refuse the listing to Declined with the reasons returned
+   * as a 200 — not thrown, so a wizard can show all of them at once. MARKS
+   * (fewer than 4 photos / no menu) never refuse; the listing goes to Pending
+   * carrying them. Submitting an Approved or already-Pending venue is a 417,
+   * reproduced from the real handler.
+   */
+  method('shotright.api.submit_venue_for_review', ({ venue_name }) => {
+    const venue = venueById(venue_name)
+    if (!venue) return docMissing()
+    if (venue.workflow_state === 'Approved')
+      return validationError('This venue is already approved. Edit it to send changes for re-review.')
+    if (venue.workflow_state === 'Pending')
+      return validationError('This venue is already waiting for review.')
+
+    const photos = bench.photos[venue_name] || []
+    const blockers = []
+    const marks = []
+    if (photos.length === 0) {
+      blockers.push({ code: 'no_photos', message: 'Add at least one photograph.' })
+    } else if (photos.length < 4) {
+      marks.push({ code: 'few_photos', message: `Only ${photos.length} of 4 photos — add more to fill the listing` })
+    }
+    if (!(venue.atmosphere_desc || '').trim())
+      blockers.push({ code: 'no_description', message: 'Describe the venue.' })
+    if (!(venue.address || '').trim())
+      blockers.push({ code: 'no_address', message: 'Add a street address.' })
+    const hasMenu = bench.headings.some(
+      (h) => h.venue === venue_name && bench.items.some((i) => i.parent_heading === h.name),
+    )
+    if (!hasMenu) marks.push({ code: 'no_menu', message: 'No menu yet — add one so customers can see prices' })
+
+    venue.workflow_state = blockers.length ? 'Declined' : 'Pending'
+    venue.review_notes = blockers.length ? blockers.map((b) => b.message).join('\n') : null
+    return ok({
+      venue: venue_name,
+      workflow_state: venue.workflow_state,
+      review_notes: venue.review_notes,
+      blockers,
+      marks,
+    })
   }),
 
   method('shotright.api.update_venue', (args) => {
