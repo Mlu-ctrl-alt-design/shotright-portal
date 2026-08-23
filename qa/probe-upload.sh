@@ -26,11 +26,29 @@
 
 set -uo pipefail
 
-BASE="${1:?base url}"
-KEY="${2:?api key}"
-SECRET="${3:?api secret}"
-VENUE="${4:?a venue docname on THIS account}"
-OTHER_VENUE="${5:-}"
+# Credentials come from the environment by default so an API secret does not
+# end up in shell history, in a scrollback buffer, or pasted into a chat log.
+# Positional arguments still work for a throwaway run.
+BASE="${1:-${SHOTRIGHT_BASE:-}}"
+KEY="${2:-${SHOTRIGHT_KEY:-}}"
+SECRET="${3:-${SHOTRIGHT_SECRET:-}}"
+VENUE="${4:-${SHOTRIGHT_VENUE:-}}"
+OTHER_VENUE="${5:-${SHOTRIGHT_OTHER_VENUE:-}}"
+
+if [ -z "$BASE" ] || [ -z "$KEY" ] || [ -z "$SECRET" ] || [ -z "$VENUE" ]; then
+  cat <<USAGE
+Usage:
+  SHOTRIGHT_KEY=… SHOTRIGHT_SECRET=… \\
+  ./probe-upload.sh https://shotright.thedaystar.co.za '' '' VEN-00001 [OTHER-VENUE]
+
+or, if you do not mind the secret in your history:
+  ./probe-upload.sh <base> <key> <secret> <your-venue> [another-account's-venue]
+
+OTHER-VENUE is optional but it is the only probe here that can find a P0 —
+it checks whether you can attach a file to somebody else's venue.
+USAGE
+  exit 2
+fi
 
 AUTH="Authorization: token ${KEY}:${SECRET}"
 TMP="$(mktemp -d)"

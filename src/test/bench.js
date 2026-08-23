@@ -75,6 +75,9 @@ const initial = () => ({
     'frappe.client.get_list': true,
     'frappe.client.set_value': true,
     upload_file: true,
+    /* The whitelisted uploader that elevates internally. Live 22 Aug — this is
+       what ended the dependency on stock Frappe endpoints. */
+    upload_venue_photo: true,
 
     /* Shipped 7 Aug, so `true` is now the truthful default. The flag stays so a
        test can still put it back to false: partners' benches are updated at

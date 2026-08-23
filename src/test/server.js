@@ -620,6 +620,25 @@ const apiHandlers = [
     const docname = form.get('docname')
     record('upload_file', { doctype, docname, fileName: file?.name })
 
+    /**
+     * ⚠️ `doctype=Venue` IS A PERMANENT 403. Verified on the bench 22 Aug.
+     *
+     * Vendors hold ["All", "Guest"]; `Venue` grants write to System Manager and
+     * Venue Reviewer only. There is no attach grant and there must never be
+     * one — Frappe role permissions are not row-scoped, so granting it would
+     * let every partner write every other partner's venue.
+     *
+     * Modelled here unconditionally, rather than behind `uploadRefused`,
+     * because it is not a bench state that might change. It is the contract. A
+     * portal that starts sending `doctype=Venue` again fails immediately here
+     * rather than in production.
+     */
+    if (doctype === 'Venue') {
+      return permissionError(
+        'User <strong>thabo@cornerkitchen.co.za</strong> does not have doctype access via role permission for document Venue',
+      )
+    }
+
     if (
       bench.uploadRefused === 'always' ||
       bench.uploadRefused === true ||
@@ -635,6 +654,46 @@ const apiHandlers = [
       file_url: `/files/${bench.files.length + 1}-${file?.name || 'photo.jpg'}`,
       file_name: file?.name || 'photo.jpg',
       attached_to_name: docname || null,
+    }
+    bench.files.push(row)
+    return ok(row)
+  }),
+
+  /**
+   * `shotright.api.upload_venue_photo` — the whitelisted method that elevates.
+   *
+   * Live on the bench since 22 Aug and the fix for three separate symptoms. It
+   * takes the file and a venue and does the attach internally, so the Vendor
+   * role never needs write on `Venue` at all.
+   */
+  http.all('*/api/method/shotright.api.upload_venue_photo', async ({ request }) => {
+    if (bench.deploy.upload_venue_photo === false)
+      return methodMissing('shotright.api.upload_venue_photo')
+
+    const form = await request.formData()
+    const file = form.get('file')
+    const venue = form.get('venue_name') || form.get('venue') || form.get('docname')
+    record('upload_venue_photo', { venue_name: venue, fileName: file?.name })
+
+    if (!venue) return validationError('venue_name is required')
+    if (!bench.venues.some((v) => v.name === venue)) return validationError('Not permitted')
+
+    if (bench.uploadRefused === 'always' || bench.uploadRefused === true) {
+      return permissionError('Not permitted')
+    }
+
+    /* Verified 22 Aug: .heic and .avif are refused with a terminal 417. Most
+       HEIC is caught in the browser before it gets here; a file whose type the
+       browser cannot identify is not. */
+    if (/\.(heic|heif|avif)$/i.test(file?.name || '')) {
+      return validationError('Unsupported image format')
+    }
+
+    const row = {
+      name: `FILE-${bench.files.length + 1}`,
+      file_url: `/files/${bench.files.length + 1}-${file?.name || 'photo.jpg'}`,
+      file_name: file?.name || 'photo.jpg',
+      attached_to_name: venue,
     }
     bench.files.push(row)
     return ok(row)

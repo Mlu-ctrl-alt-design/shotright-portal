@@ -230,7 +230,11 @@ describe('upload venue images', () => {
   })
 
   it('reports an upload that failed, rather than showing a tile for it', async () => {
-    bench.deploy.upload_file = false
+    /* The EDIT form uploads through `upload_venue_photo` as of 22 Aug — the
+       whitelisted method that elevates. `upload_file` is only used by the
+       wizard, where no venue exists yet to attach to, so switching that off
+       here would prove nothing. */
+    bench.deploy.upload_venue_photo = false
     const { user } = renderApp({ route: EDIT, signedIn: true })
 
     await user.upload(await photoInput(), file())
@@ -314,3 +318,73 @@ describe('discarding a draft', () => {
     expect(screen.getByText(/Half-finished venue/i)).toBeInTheDocument()
   })
 })
+
+/* ============================================================================
+   VERIFIED ON THE BENCH, 22 AUG — the endpoint switch
+
+   `upload_file` with `doctype=Venue` is a PERMANENT 403. Vendors hold
+   ["All","Guest"]; Venue grants write to System Manager / Venue Reviewer only.
+   There is no attach grant and there must never be one — Frappe role
+   permissions are not row-scoped, so granting it would let every partner write
+   every other partner's venue.
+
+   `shotright.api.upload_venue_photo` elevates internally and is the fix. These
+   pin the switch, because the failure mode of getting it wrong is silent: a
+   photo that uploads, shows a tile, and attaches to nothing.
+   ========================================================================= */
+/* Same helpers as the suite above, which scopes them inside its own describe. */
+const EDIT = '/venues/VEN-00001/edit'
+const jpeg = (name = 'front-bar.jpg') =>
+  new File([new Uint8Array([1, 2, 3])], name, { type: 'image/jpeg' })
+
+const uploaderInput = async () => {
+  await screen.findByRole('heading', { name: /photos of this venue/i })
+  return document
+    .querySelector('section[aria-labelledby="venue-photos-heading"]')
+    .querySelector('input[type="file"]')
+}
+
+describe('uploading through the whitelisted method', () => {
+  it('uses upload_venue_photo when the venue exists', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+    await user.upload(await uploaderInput(), jpeg())
+
+    await waitFor(() =>
+      expect(bench.calls.some((c) => c.method === 'upload_venue_photo')).toBe(true),
+    )
+    const call = bench.calls.find((c) => c.method === 'upload_venue_photo')
+    expect(call.args.venue_name).toBe('VEN-00001')
+  })
+
+  it('NEVER sends doctype=Venue — it is a permanent 403, not a gap', async () => {
+    /* The bench refuses this unconditionally now, so a regression fails here
+       rather than for every partner in production. */
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+    await user.upload(await uploaderInput(), jpeg())
+
+    await waitFor(() => expect(bench.files.length).toBeGreaterThan(0))
+    const attempted = bench.calls.filter((c) => c.method === 'upload_file')
+    expect(attempted.every((c) => c.args.doctype !== 'Venue')).toBe(true)
+  })
+
+  it('attaches to the venue, so a reviewer sees it', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+    await user.upload(await uploaderInput(), jpeg())
+
+    await waitFor(() => expect(bench.files.length).toBeGreaterThan(0))
+    expect(bench.files.at(-1).attached_to_name).toBe('VEN-00001')
+  })
+})
+
+/* ============================================================================
+   A FORMAT THE SERVER WILL NOT TAKE — covered in verify11, not here.
+
+   Verified 22 Aug: .heic and .avif come back 417 and terminal. Testing it needs
+   a file the browser's `accept` filter would reject, and `user.upload` honours
+   that attribute — so the file never reaches the code under test and the
+   assertion passes or fails for the wrong reason. Playwright's `setInputFiles`
+   does not honour it, which is why the test lives in the browser suite.
+
+   Worth naming rather than deleting: this is the one path where a partner can
+   be holding a photo, on a now-REQUIRED field, and be unable to use it.
+   ========================================================================= */

@@ -11,6 +11,13 @@ import { chromium } from 'playwright'
  *
  * Two separate failures in one line.
  *
+ * ⚠️ UPDATED 22 Aug. `doctype: 'Venue'` is a PERMANENT 403 — vendors hold
+ * ["All","Guest"] and Venue grants write to System Manager / Venue Reviewer
+ * only — and the attach grant must never be added, because Frappe role
+ * permissions are not row-scoped. Attaching now goes through the whitelisted
+ * `shotright.api.upload_venue_photo`, which elevates internally. The
+ * requirements below are unchanged; only the mechanism moved.
+ *
  * 1. THE UPLOAD. Stock `upload_file` with `doctype: 'Venue'` needs write
  *    permission on the Venue doc. The Vendor role hasn't got any — everything
  *    goes through whitelisted `shotright.api.*` methods that elevate
@@ -90,9 +97,17 @@ async function open({ attach = 'denied' } = {}) {
     if (p.includes('get_venue_products')) return r.fulfill({ json: { message: [] } })
     if (p.includes('get_venue_photos')) return r.fulfill({ json: { message: [] } })
 
-    if (p.endsWith('/api/method/upload_file')) {
+    /* BOTH upload paths. As of 22 Aug the portal attaches via the whitelisted
+       `upload_venue_photo`, which elevates internally; `upload_file` is only
+       the wizard's path, where no venue exists yet. "Attaching" is therefore
+       decided by WHICH ENDPOINT was called, not by a `doctype` part — that part
+       is never sent any more, because `doctype=Venue` is a permanent 403. */
+    if (
+      p.endsWith('/api/method/upload_file') ||
+      p.endsWith('/api/method/shotright.api.upload_venue_photo')
+    ) {
       const raw = r.request().postDataBuffer()?.toString('latin1') || ''
-      const attaching = /name="doctype"/.test(raw)
+      const attaching = p.endsWith('upload_venue_photo') || /name="venue_name"/.test(raw)
       uploads.push({ attaching })
 
       if (attach === 'broken') {

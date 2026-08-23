@@ -40,16 +40,16 @@ Logged together, and they turned out to be different in kind.
 - **19.a — ours, fixed.** No server error was involved, and it was the same
   incident as the `get_venue_detail` 404 reported minutes later.
 - **19.c — ours, fixed.** The draft id was read under the wrong field name.
-- **19.b / 19.d — yours, still open**, and they are one issue: the menu importer
-  and the photo uploader both post to `/api/method/upload_file`. That the menu
-  path is *also* refused is the most useful fact we have, because it sends no
-  `doctype` — see the table below.
+- **19.b / 19.d — ✅ RESOLVED 22 Aug.** And they were NOT one issue: the menu
+  importer was never blocked by permissions at all. `upload_venue_photo` now
+  handles the photo path. My reasoning that the two shared a cause was wrong,
+  and is corrected below rather than quietly edited out.
 
 **Three of the four reports arrived as separate issues and were logged as
 separate issues. They were two.** Worth saying because it changed the diagnosis
 twice: the 404 explained the moods, and the menu upload narrowed the 403.
 
-**What we need for 19.b, and cannot get from here.** The browser's Network tab →
+**What we needed for 19.b** — the response body — was supplied on 22 Aug by an on-bench run. Kept for the record:
 the failing `upload_file` → the **Response body**. The status line alone cannot
 tell us who refused (see below); the body can. A screenshot of the red message
 on screen is not enough either — the portal deliberately no longer prints server
@@ -93,6 +93,46 @@ genuinely changes their moods, we have to send them, and it still crashes.
 **Still open on your side:** §00 (the write), and §0 (why `get_venue_detail`
 404s on VEN-00008 while the dashboard lists it — the portal survives it, but it
 is a real 404 and it is what exposed this).
+
+#### 19.b — ✅ RESOLVED 22 Aug, and my diagnosis was half wrong
+
+**`shotright.api.upload_venue_photo` is live and the portal is on it.** The
+whitelisted method that elevates internally — the recommendation that was right,
+now shipped. Three symptoms came from one dependency on stock Frappe endpoints,
+and that dependency is gone.
+
+**Two things I got wrong, both corrected by measurement on the bench:**
+
+1. **"The Vendor role cannot create a `File` at all."** Wrong — it can, via role
+   `All`. `upload_file` with no doctype returns 200, so **the menu importer was
+   never blocked by permissions**. The table below reasoned from the two calls
+   differing by one thing and concluded they shared a cause. They did not.
+2. **"Grant `File` create to Vendor, and confirm the `Venue` attach grant is
+   live."** ⚠️ **Retracted — that advice was dangerous.** Frappe role
+   permissions are **not row-scoped**, so granting Vendor write on `Venue` would
+   let every partner write every other partner's venue. A P0 introduced while
+   fixing a P1. The attach grant does not exist and must never be added.
+
+**`upload_file` + `doctype=Venue` is a PERMANENT 403**, by design rather than by
+omission. The portal no longer sends it, and the fake bench now refuses it
+unconditionally so a regression fails in CI rather than in production.
+
+P0 sweep clean: cross-tenant attach blocked, anonymous upload blocked.
+
+**Still open:** `.heic`/`.avif` return a terminal 417, on a field that is now
+required. Handled in the portal (named as a format problem, with the iPhone
+setting that fixes it, and no retry offered) but a partner holding only a HEIC
+is a partner who cannot list until they convert it. See
+`qa/clearance-venue-upload.md`.
+
+**One question worth one line of your signature:** what parameter name does
+`upload_venue_photo` declare for the venue? The portal sends `venue_name`,
+`venue` and `docname` together, because Frappe drops undeclared kwargs at 200
+and a photo that uploads while attaching to nothing is this project's signature
+failure. Naming it retires the hedge.
+
+<details>
+<summary>Original diagnosis, kept because the reasoning is instructive and the conclusion was wrong</summary>
 
 #### 19.b — uploads: images AND the menu importer, one endpoint
 
@@ -164,6 +204,8 @@ The standing ask from §14 if the permission cannot stay: **a whitelisted
 `upload_venue_photo(venue_name, file)` that elevates internally**, the same way
 every other `shotright.api.*` method does. That removes the dependency on stock
 Frappe endpoints for good, and it is the shape the rest of this app already has.
+
+</details>
 
 #### 19.c — "discard this draft is not working" — ✅ FIXED, also ours
 
