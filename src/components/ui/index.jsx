@@ -12,7 +12,7 @@
  * label, secondary actions are white with a yellow border, and CANCEL is bare
  * yellow text with no box.
  */
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { clsx } from '../../utils/clsx'
 
 /* ---------------------------------------------------------------- Button */
@@ -510,6 +510,126 @@ export function Badge({ children, tone }) {
     >
       {children}
     </span>
+  )
+}
+
+/* ---------------------------------------------------------- OverflowMenu */
+/**
+ * A "⋯" button that discloses the secondary actions for a row.
+ *
+ * DELIBERATELY NOT the ARIA menu pattern. `role="menu"` promises arrow-key
+ * traversal, typeahead, and focus wrapping — none of which is implemented
+ * here, and a promise a screen reader user finds broken is worse than the
+ * humbler truth: this is a disclosure (aria-expanded on the button) revealing
+ * a list of ordinary links. Same reasoning as the venue tabs: semantics follow
+ * the behaviour, not the appearance.
+ *
+ * The panel is `position: fixed`, anchored to the button when it opens,
+ * because these rows live inside an `overflow-x-auto` table wrapper — an
+ * absolutely-positioned panel would be clipped by it, and the last row's menu
+ * would open into nothing. Fixed positioning ignores the clip; the trade-off
+ * is that the anchor goes stale when the page scrolls, so any scroll simply
+ * closes the panel rather than letting it float away from its button.
+ */
+export function OverflowMenu({ label, children, className }) {
+  const [anchor, setAnchor] = useState(null) // null = closed; else {top,right}
+  const rootRef = useRef(null)
+  const buttonRef = useRef(null)
+  const open = anchor !== null
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onPointerDown = (e) => {
+      if (!rootRef.current?.contains(e.target)) setAnchor(null)
+    }
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setAnchor(null)
+        buttonRef.current?.focus()
+      }
+    }
+    const onScroll = () => setAnchor(null)
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    // Capture phase: the scroll that matters may happen on the table wrapper,
+    // and scroll events do not bubble.
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [open])
+
+  const toggle = () => {
+    if (open) {
+      setAnchor(null)
+      return
+    }
+    const rect = buttonRef.current.getBoundingClientRect()
+    setAnchor({
+      top: rect.bottom + 4,
+      right: Math.max(window.innerWidth - rect.right, 8),
+    })
+  }
+
+  return (
+    <div ref={rootRef} className={clsx('relative inline-flex', className)}>
+      <button
+        type="button"
+        ref={buttonRef}
+        aria-label={label}
+        aria-expanded={open}
+        onClick={toggle}
+        className={clsx(
+          'flex h-8 w-8 items-center justify-center rounded-full text-ink-700 transition',
+          'hover:bg-brand-50 hover:text-ink-900 focus-visible:ring-2 focus-visible:ring-brand-500',
+          open && 'bg-brand-50 text-ink-900',
+        )}
+      >
+        {/* Three dots, drawn rather than typed: the ellipsis glyph sits on the
+            baseline and reads as punctuation to a copy-paster. */}
+        <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">
+          <circle cx="4" cy="10" r="1.7" />
+          <circle cx="10" cy="10" r="1.7" />
+          <circle cx="16" cy="10" r="1.7" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          style={{ position: 'fixed', top: anchor.top, right: anchor.right }}
+          className="z-30 w-48 rounded-xl bg-white py-1.5 shadow-lg ring-1 ring-gray-200"
+          // Any click that lands on a link or button inside has done its job;
+          // the panel closing is part of the action completing.
+          onClick={(e) => {
+            if (e.target.closest('a, button')) setAnchor(null)
+          }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One row of an OverflowMenu — spacing and hover treatment only. `as` takes a
+ * router Link (the kit stays router-free, same trick as MetricCard).
+ */
+export function OverflowMenuItem({ as: Component = 'a', className, children, ...props }) {
+  return (
+    <Component
+      className={clsx(
+        'block px-4 py-2 text-sm font-medium text-ink-700 transition',
+        'hover:bg-brand-50 hover:text-ink-900',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </Component>
   )
 }
 
