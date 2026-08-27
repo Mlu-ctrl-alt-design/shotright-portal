@@ -1471,22 +1471,25 @@ export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
         /**
          * 417 — the server read the file and refused it.
          *
-         * Verified 22 Aug: `.heic` and `.avif` come back 417 and terminal.
-         * `prepareImage` already catches most HEIC in the browser with
-         * iPhone-specific advice, but a file whose type the browser cannot
-         * identify slips through to here.
+         * Verified 22 Aug: `.heic`, `.heif` and `.avif` come back 417 and
+         * terminal. As of the format split in `utils/image.js` the portal
+         * should no longer be ABLE to send one: `prepareImage` re-encodes
+         * everything outside `UPLOADABLE_TYPES` to JPEG before it gets here,
+         * and refuses with its own advice when it cannot decode the file at all.
+         *
+         * So this branch is now a backstop rather than a routine path, and if
+         * it fires the conversion layer missed something. It stays because the
+         * cost of being wrong about that is a partner who cannot list at all.
          *
          * Not retryable with THIS file — pressing again re-sends the same
-         * bytes — but very much fixable by the partner, so the message says how
-         * rather than apologising. That distinction matters more than usual now
-         * that a photo is REQUIRED: someone whose only picture is a HEIC and
-         * who is told "something went wrong" cannot list their venue at all.
+         * bytes — but fixable by the partner, so the message says how rather
+         * than apologising.
          */
         if (err?.status === 417) {
           const rejected = new Error(
-            `${file.name} isn’t a format we can use. JPEG or PNG both work — ` +
-              `on an iPhone, Settings → Camera → Formats → Most Compatible makes ` +
-              `every new photo a JPEG.`,
+            `The server wouldn’t accept ${file.name}. If it came off an iPhone, ` +
+              `adding it from the phone itself usually works — open this page there ` +
+              `and pick the photo. Otherwise a JPEG or PNG copy will go through.`,
           )
           rejected.retryable = false
           /**

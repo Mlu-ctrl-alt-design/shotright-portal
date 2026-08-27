@@ -65,14 +65,28 @@ if (!global.matchMedia) {
 }
 
 /* jsdom has no canvas, and `prepareImage` downscales through one. The real
-   thing is covered by the Playwright suites, which run in a browser that can
-   actually decode a JPEG; here it would only ever assert that our stub returns
-   what our stub returns. */
+   thing is covered by `image.test.js` (which stubs the two browser primitives
+   and exercises the actual branching) and by the Playwright suites, which run
+   in a browser that can genuinely decode a JPEG.
+
+   ⚠️ The stub still honours ONE part of the contract: nothing leaves here in a
+   format the bench refuses. A passthrough stub would have modelled a world in
+   which a `.avif` reaches `upload_venue_photo` — which is the same shape of
+   mistake as the mock that returned the File docname as `name` and let 173
+   green checks certify a save that 417'd on the live bench. A double is
+   allowed to be simpler than the real thing; it is not allowed to disagree
+   with it. */
 vi.mock('../utils/image.js', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    prepareImage: vi.fn(async (file) => ({ file, resized: false, width: 1200, height: 900 })),
+    prepareImage: vi.fn(async (file) => {
+      const convert = !actual.UPLOADABLE_TYPES.includes(file.type)
+      const out = convert
+        ? new File([file], `${file.name.replace(/\.[^./\\]+$/, '')}.jpg`, { type: 'image/jpeg' })
+        : file
+      return { file: out, resized: convert, width: 1200, height: 900, originalSize: file.size }
+    }),
   }
 })
 
