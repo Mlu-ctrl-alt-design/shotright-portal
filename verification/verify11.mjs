@@ -370,9 +370,17 @@ const pinLatitude = (page) =>
   const body = await page.locator('section[aria-labelledby="venue-photos-heading"]')
     .evaluate((n) => n.textContent)
   check(/HEIC/.test(body), 'an iPhone HEIC photo is named for what it is')
+  /* The advice has to be something the partner can do at the desk they are
+     sitting at. "Change a camera setting and take it again" assumes they are
+     standing in the venue; adding the photo from the phone assumes only that
+     they have the phone on them, and iOS converts it on the way. */
   check(
-    /Settings → Camera → Formats → Most Compatible/.test(body),
-    'and the message is the two taps that fix it, not "unsupported file type"',
+    /open this page on the iPhone/.test(body),
+    'and the fix offered needs no software and no second trip to the venue',
+  )
+  check(
+    !/unsupported/i.test(body),
+    'never "unsupported file type"',
   )
   check(uploads.length === 0, 'nothing was uploaded')
   check((await tiles(page).count()) === 0, 'and no tile pretends otherwise')

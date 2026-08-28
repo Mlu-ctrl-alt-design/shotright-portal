@@ -687,9 +687,11 @@ const apiHandlers = [
       return permissionError('Not permitted')
     }
 
-    /* Verified 22 Aug: .heic and .avif are refused with a terminal 417. Most
-       HEIC is caught in the browser before it gets here; a file whose type the
-       browser cannot identify is not. */
+    /* Verified 22 Aug: .heic, .heif and .avif are refused with a terminal 417.
+       Since the format split in `utils/image.js` the portal converts all three
+       to JPEG before sending, so nothing should ever trip this. It stays
+       precisely so that a regression in that conversion shows up as a failing
+       test here rather than as a partner who cannot list their venue. */
     if (/\.(heic|heif|avif)$/i.test(file?.name || '')) {
       return validationError('Unsupported image format')
     }

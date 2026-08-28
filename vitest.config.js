@@ -19,7 +19,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.js'],
-    include: ['src/**/*.test.jsx'],
+    // `.js` as well as `.jsx`: the pure-logic units (image preparation, the
+    // format contract with the bench) have no components in them and should not
+    // have to pretend otherwise to be run.
+    include: ['src/**/*.test.{js,jsx}'],
     testTimeout: 15000,
     // The suites share one MSW server and one localStorage. Running files in
     // parallel threads is fine (each gets its own module registry), but within

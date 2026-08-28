@@ -22,8 +22,38 @@
  * path is both simpler and the one that is right everywhere.
  */
 
-/** What the customer app can display, and therefore what we accept. */
-export const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif']
+/**
+ * What the BENCH will store. Measured 22 Aug on shotright.thedaystar.co.za:
+ * `.heic`, `.heif` and `.avif` come back 417 "Unsupported image format", and
+ * a 417 is terminal — there is no retry that turns it into a 200.
+ *
+ * This list is therefore not a taste judgement, it is the server's contract.
+ * Anything outside it is re-encoded to JPEG before it is ever sent.
+ */
+export const UPLOADABLE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+
+/**
+ * What the partner is allowed to PICK. Deliberately wider than the list above.
+ *
+ * These two used to be one constant, and that single fact caused both of the
+ * ways this step could dead-end:
+ *
+ *   - `.avif` was on the list, so a small AVIF sailed through `prepareImage`
+ *     untouched and was uploaded as-is — straight into the terminal 417. The
+ *     partner picked a file we said we accepted and then could not save.
+ *   - `.heic` was NOT on the list, so the file dialog greyed out an iPhone
+ *     owner's photos. They got no message, because the `accept` attribute
+ *     filters before any of our code runs. The careful HEIC copy in `decode`
+ *     below was unreachable in practice.
+ *
+ * Now: pick anything a browser can plausibly open, and let `prepareImage`
+ * convert it. The only files that reach the server are JPEG, PNG and WebP.
+ */
+export const ACCEPTED_TYPES = UPLOADABLE_TYPES.concat([
+  'image/avif',
+  'image/heic',
+  'image/heif',
+])
 
 /** Both MIME types and extensions — some pickers report an empty `type`. */
 export const ACCEPT_ATTR = ACCEPTED_TYPES.concat([
@@ -32,6 +62,8 @@ export const ACCEPT_ATTR = ACCEPTED_TYPES.concat([
   '.png',
   '.webp',
   '.avif',
+  '.heic',
+  '.heif',
 ]).join(',')
 
 /** Long edge after downscaling. Generous for a full-bleed listing header. */
@@ -79,9 +111,11 @@ function decode(file) {
       reject(
         new ImageError(
           looksLikeHeic(file)
-            ? `${file.name} is an iPhone HEIC photo, which this browser can’t open. On your ` +
-              `iPhone go to Settings → Camera → Formats → Most Compatible and take it again, ` +
-              `or open the photo and share it to yourself first — that converts it.`
+            ? `${file.name} is an iPhone HEIC photo, and this browser can’t open it. ` +
+              `The quickest fix is to add it from your phone instead — open this page on ` +
+              `the iPhone and pick the photo there, and it converts on the way. Otherwise ` +
+              `email or WhatsApp the photo to yourself and add the copy that arrives, or on ` +
+              `a Mac open it in Preview and choose File → Export as JPEG.`
             : `We couldn’t open ${file.name}. It may be damaged, or not really a photo. ` +
               `JPG, PNG and WebP all work.`,
         ),
@@ -124,7 +158,11 @@ export async function prepareImage(file) {
   if (!w0 || !h0) throw new ImageError(`${file.name} has no picture in it.`)
 
   const scale = Math.min(1, MAX_EDGE / Math.max(w0, h0))
-  const needsWork = scale < 1 || file.size > TARGET_BYTES || !ACCEPTED_TYPES.includes(file.type)
+  /* `UPLOADABLE_TYPES`, not `ACCEPTED_TYPES`. An AVIF or a HEIC the browser
+     managed to decode is still a file the bench refuses at 417, so it always
+     gets re-encoded — even when it is small enough and small enough on the
+     long edge that nothing else here would have touched it. */
+  const needsWork = scale < 1 || file.size > TARGET_BYTES || !UPLOADABLE_TYPES.includes(file.type)
 
   if (!needsWork) {
     return { file, width: w0, height: h0, resized: false, originalSize: file.size }
@@ -145,8 +183,9 @@ export async function prepareImage(file) {
   const blob = await toBlob(canvas, 'image/jpeg', 0.82)
 
   // Re-encoding a small, already-efficient photo can make it BIGGER. Keep
-  // whichever is smaller, as long as the original was a type we accept.
-  if (blob.size >= file.size && ACCEPTED_TYPES.includes(file.type) && scale === 1) {
+  // whichever is smaller — but only when the original is a type the bench will
+  // actually store. A smaller AVIF that comes back 417 is not the better file.
+  if (blob.size >= file.size && UPLOADABLE_TYPES.includes(file.type) && scale === 1) {
     return { file, width: w0, height: h0, resized: false, originalSize: file.size }
   }
 
