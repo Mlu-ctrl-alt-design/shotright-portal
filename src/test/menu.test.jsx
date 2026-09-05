@@ -153,7 +153,61 @@ describe('delete a menu item', () => {
     await user.click(await screen.findByRole('button', { name: /remove/i }))
 
     await waitFor(() => expect(bench.items).toHaveLength(0))
-    await waitFor(() => expect(screen.queryByText('Chakalaka')).not.toBeInTheDocument())
+    /* The ROW is gone — its Remove button only exists on a row. Scoped rather
+       than a document-wide text query, because the undo strip names the item
+       it just removed, and that is the point of it. */
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /remove chakalaka/i })).not.toBeInTheDocument(),
+    )
+  })
+
+  /**
+   * Undo instead of "Are you sure?". A dialog interrupts everyone to catch the
+   * rare mistake; a way back costs the careful partner nothing.
+   *
+   * ⚠️ It RE-CREATES rather than un-deletes, so the item returns with a new id.
+   * The alternative — holding the delete back for a few seconds so Undo could
+   * cancel it — would show the row as gone while the server still had it, which
+   * is the exact thing the test above exists to prevent.
+   */
+  it('offers a way back, and putting it back reaches the server', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /remove/i }))
+    await waitFor(() => expect(bench.items).toHaveLength(0))
+
+    await user.click(await screen.findByRole('button', { name: /^undo$/i }))
+
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+    expect(bench.items[0].item_name).toBe('Chakalaka')
+    expect(await screen.findByRole('button', { name: /remove chakalaka/i })).toBeInTheDocument()
+  })
+
+  it('does not offer to undo a removal the server refused', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    bench.deploy['frappe.client.delete'] = false
+    await user.click(await screen.findByRole('button', { name: /remove/i }))
+
+    await screen.findByText(/can’t remove menu items yet/i)
+    /* Nothing was removed, so there is nothing to put back — and an Undo here
+       would imply something happened. */
+    expect(screen.queryByRole('button', { name: /^undo$/i })).not.toBeInTheDocument()
+
+    /* This test was written to check the Undo and found something else: a bench
+       that does not whitelist `frappe.client.delete` answers 404
+       DoesNotExistError rather than 403, which the service rethrew and the row
+       printed verbatim. A partner was being shown the words "DoesNotExistError"
+       where their dish had failed to delete. */
+    expect(screen.queryByText(/DoesNotExist|PermissionError|frappe\./i)).not.toBeInTheDocument()
   })
 
   it('does not report a delete that the server refused', async () => {

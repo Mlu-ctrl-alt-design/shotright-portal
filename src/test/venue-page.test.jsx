@@ -329,7 +329,7 @@ describe('edit a menu item', () => {
     await user.type(within(form).getByLabelText(/^item$/i), 'Mutton curry')
     await user.click(screen.getByRole('button', { name: /^save$/i }))
 
-    expect(await screen.findByText(/can’t change a menu item just yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/can’t change a menu item yet/i)).toBeInTheDocument()
     expect(within(form).getByLabelText(/^item$/i)).toHaveValue('Mutton curry')
   })
 

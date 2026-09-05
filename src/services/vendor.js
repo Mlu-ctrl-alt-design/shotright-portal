@@ -1261,6 +1261,18 @@ export const deleteItem = async (itemId) => {
     )) {
       return { deleted: false, reason: 'not-allowed' }
     }
+    /**
+     * ⚠️ A bench that does not WHITELIST `frappe.client.delete` answers 404
+     * `DoesNotExistError`, not 403 — and this used to rethrow that, so the menu
+     * row printed the words "DoesNotExistError" at a restaurant owner.
+     *
+     * Cannot-delete is cannot-delete. Whether the method is absent or forbidden
+     * changes nothing the partner can act on, so both come back the same way
+     * and neither reaches a screen.
+     */
+    if (isMethodMissing(err, 'frappe.client.delete')) {
+      return { deleted: false, reason: 'not-available' }
+    }
     throw err
   }
 }
