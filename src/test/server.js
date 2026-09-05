@@ -309,6 +309,46 @@ const apiHandlers = [
     return ok({ ...venue })
   }),
 
+  /**
+   * Google sign-in, as a bench that HAS it would answer.
+   *
+   * Off by default (`bench.deploy.login_with_google`), so the ordinary suite
+   * runs against a bench that has never heard of it — which is the state the
+   * live one is in until the backend says otherwise, and the state in which no
+   * button may appear.
+   *
+   * The parameter is `credential` here. The portal does not know that, so it
+   * tries `credential`, `id_token` and `token` in turn; this rejects the wrong
+   * ones the way Frappe does, with a TypeError about an unexpected keyword,
+   * rather than quietly accepting them.
+   */
+  method('shotright.api.login_with_google', (args) => {
+    if (!bench.deploy.login_with_google) return methodMissing('shotright.api.login_with_google')
+
+    const unexpected = Object.keys(args).filter((k) => k !== 'credential' && k !== 'cmd')
+    if (unexpected.length) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception: `TypeError: login_with_google() got an unexpected keyword argument '${unexpected[0]}'`,
+        },
+        { status: 417 },
+      )
+    }
+
+    // The probe: no credential at all. A method that EXISTS says so by
+    // refusing, and that refusal is what tells the portal it is there.
+    if (!args.credential) return validationError('credential is required')
+
+    if (args.credential === 'unverified-account') {
+      return ok({ otp_required: true, email: 'new@partner.co.za' })
+    }
+    if (args.credential !== 'good-google-token') {
+      return validationError('That Google sign-in could not be verified.')
+    }
+    return ok({ api_key: 'GK', api_secret: 'GS' })
+  }),
+
   /* ---------------------------------------------------------------- menu */
   method('shotright.api.get_venue_products', ({ venue_name }) => {
     if (!venueById(venue_name)) return docMissing()
