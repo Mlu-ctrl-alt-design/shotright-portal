@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { clsx } from '../../utils/clsx'
+import { formatTime, toTimeInput } from '../../utils/time'
 
 /**
  * Operating hours, as bands rather than seven rows.
@@ -49,12 +50,9 @@ const SHORT = {
   Sunday: 'Sun',
 }
 
-/** "09:00:00" and "9:00" both render as "09:00". Frappe sends the former. */
-export function formatTime(value) {
-  if (!value) return '—'
-  const [h = '0', m = '00'] = String(value).split(':')
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
+/* Times are parsed, never sliced — see `utils/time.js` for the two bugs that
+   taught us the difference. Re-exported so callers of this module keep working. */
+export { formatTime, toTimeInput }
 
 /**
  * Collapse per-day rows into consecutive bands sharing the same state.
@@ -196,7 +194,7 @@ export function OperatingHoursEditor({ rows, onChange }) {
                 <input
                   type="time"
                   aria-label={`${bandLabel(days)} opening time`}
-                  value={row.open_time?.slice(0, 5) || ''}
+                  value={toTimeInput(row.open_time)}
                   disabled={closed}
                   onChange={(e) => setDays(days, { open_time: e.target.value })}
                   className={timeClass}
@@ -204,7 +202,7 @@ export function OperatingHoursEditor({ rows, onChange }) {
                 <input
                   type="time"
                   aria-label={`${bandLabel(days)} closing time`}
-                  value={row.close_time?.slice(0, 5) || ''}
+                  value={toTimeInput(row.close_time)}
                   disabled={closed}
                   onChange={(e) => setDays(days, { close_time: e.target.value })}
                   className={timeClass}

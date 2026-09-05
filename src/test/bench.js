@@ -42,9 +42,17 @@ export const VENUE_ONE = {
   atmosphere_desc: 'Loud, warm, good for a long table.',
   workflow_state: 'Approved',
   moods: ['MOOD-CHILLED'],
+  /* ⚠️ Frappe's ACTUAL wire format for a Time field, not a tidied-up version of
+     it. A Time is serialised as `str(timedelta)`, which zero-pads the minutes
+     and NOT the hour — so nine in the morning arrives as "9:00:00". This
+     fixture used to say "17:00", a shape the bench never sends, and that is the
+     whole reason a bug that blanked every morning opening time got through: the
+     one venue in the fake world opened in the evening, in a format with nothing
+     to trip over. Wednesday exists to keep a single-digit hour in the suite. */
   operating_hours: [
-    { day_of_week: 'Monday', open_time: '17:00', close_time: '23:00', closed: 0 },
-    { day_of_week: 'Tuesday', open_time: '17:00', close_time: '23:00', closed: 0 },
+    { day_of_week: 'Monday', open_time: '17:00:00', close_time: '23:00:00', closed: 0 },
+    { day_of_week: 'Tuesday', open_time: '17:00:00', close_time: '23:00:00', closed: 0 },
+    { day_of_week: 'Wednesday', open_time: '9:00:00', close_time: '23:00:00', closed: 0 },
   ],
 }
 
