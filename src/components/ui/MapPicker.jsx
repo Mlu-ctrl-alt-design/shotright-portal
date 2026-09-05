@@ -358,8 +358,8 @@ export default function MapPicker({
       <div>
         <h2 className="text-lg font-bold text-ink-900">Where is your venue?</h2>
         <p className="mt-0.5 text-sm text-ink-700">
-          Customers find venues near them, so this pin is how your venue gets discovered. Picking
-          an address above drops it for you — drag it if it is not exact.
+          Customers find venues near them. Picking an address drops the pin — drag it if it’s
+          off.
         </p>
       </div>
 
@@ -475,8 +475,7 @@ export default function MapPicker({
           silently load-bearing default (§1). */}
       {provisional && hasPoint && (
         <Alert variant="warning">
-          This pin is roughly where you are now, not your venue. Pick your address above or drag
-          the pin onto the right spot before you continue.
+          This pin is where you are now, not your venue. Move it before you continue.
         </Alert>
       )}
     </section>

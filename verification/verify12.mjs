@@ -215,7 +215,7 @@ const text = (page, sel = 'main') => page.locator(sel).evaluate((n) => n.textCon
     !/guidelines|standards|criteria/i.test(body),
     'no generic placeholder reason anywhere — a partner would act on it and be declined again',
   )
-  check(/isn’t good enough/i.test(body), 'it owns the failure instead of implying the partner caused it')
+  check(/that’s on us, not you/i.test(body), 'it owns the failure instead of implying the partner caused it')
   check(
     /can’t load the reviewer’s note right now/i.test(body),
     'and separately says the note could not be loaded — without naming an endpoint',

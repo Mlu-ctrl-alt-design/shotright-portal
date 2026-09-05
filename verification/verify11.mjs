@@ -265,7 +265,7 @@ const pinLatitude = (page) =>
     'with no endpoint on the bench, it says so before the partner arranges anything',
   )
   check(
-    /upload properly/i.test(body) && /reviewers will see them/i.test(body),
+    /reviewers see these/i.test(body) && /customers don’t yet/i.test(body),
     'and says what DOES happen, so "add them anyway" is a real instruction',
   )
 
@@ -555,7 +555,7 @@ const pinLatitude = (page) =>
     'an existing venue says the same thing, learned from the read rather than a probe',
   )
   check(
-    /order below isn’t saved/i.test(body),
+    /order isn’t saved/i.test(body),
     'and is specific about which part does not stick',
   )
 

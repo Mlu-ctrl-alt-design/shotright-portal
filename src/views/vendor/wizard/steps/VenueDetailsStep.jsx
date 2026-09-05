@@ -190,9 +190,8 @@ export default function VenueDetailsStep({
         <Alert variant="info">
           <p className="font-bold">We’ve filled in what we found — please check it</p>
           <p className="mt-1">
-            Marked fields came from the listing you picked. They’re often slightly out of date, and
-            what you submit is what customers will see, so give each one a look. Edit anything and
-            it becomes yours.
+            Marked fields came from the listing you picked. Check each one — what you submit is
+            what customers see.
           </p>
         </Alert>
       )}
@@ -362,9 +361,8 @@ export default function VenueDetailsStep({
             <Alert variant="warning">
               <p className="font-bold">Photos aren’t reaching customers yet</p>
               <p className="mt-1">
-                Add them anyway — they upload properly and our reviewers will see them with your
-                venue. The app just has no place to show a venue’s pictures yet, so they won’t
-                appear in search, and the order you put them in isn’t saved yet.
+                Reviewers see these. Customers don’t yet — the app has no place for venue
+                photos, and the order isn’t saved.
               </p>
             </Alert>
           ) : null

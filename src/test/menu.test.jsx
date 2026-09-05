@@ -281,3 +281,36 @@ describe('when the menu upload is refused', () => {
     expect(upload.args.docname).toBeFalsy()
   })
 })
+
+describe('a description as the bench actually stores it', () => {
+  /**
+   * REPORTED FROM THE LIVE SITE (screenshot, /venues/VEN-00010/menu): an item
+   * read `<p>Tomatoes, creamy burrata and a great summer starter.</p>` on
+   * screen — the partner's own sentence with Frappe's markup around it.
+   *
+   * Frappe's Text Editor field stores HTML and React escapes it, so the tags
+   * are shown rather than applied. The fake bench used to hand descriptions
+   * back exactly as they were sent, which is why no test could see this; it now
+   * wraps them in `<p>` the way the real one does.
+   */
+  it('reaches the partner as words, not as markup', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Starters')
+    const card = (await screen.findByRole('heading', { name: 'Starters' })).closest('section')
+    await user.type(within(card).getByLabelText(/^item$/i), 'Prawn Cocktail')
+    await user.type(within(card).getByLabelText(/price/i), '80')
+    await user.type(
+      within(card).getByLabelText(/description/i),
+      'Tomatoes, creamy burrata and a great summer starter.',
+    )
+    await user.click(within(card).getByRole('button', { name: /add item/i }))
+
+    /* The bench really is holding HTML — otherwise this test proves nothing. */
+    await waitFor(() => expect(bench.items.at(-1)?.description).toMatch(/^<p>/))
+
+    expect(
+      await screen.findByText('Tomatoes, creamy burrata and a great summer starter.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/<p>/)).not.toBeInTheDocument()
+  })
+})

@@ -519,8 +519,7 @@ function Wizard({ resumeId, draft, draftError }) {
       {draftError && (
         <div className="mb-5">
           <Alert variant="warning">
-            We couldn’t find that saved setup. Nothing has been lost from any venue you already
-            submitted — but this draft is gone, so you’ll need to fill it in again.
+            We couldn’t find that draft. Venues you’ve already submitted aren’t affected.
           </Alert>
         </div>
       )}

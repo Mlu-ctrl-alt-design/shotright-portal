@@ -176,9 +176,8 @@ function WhatTheReviewerSaid({ review }) {
       <Card title="Why this was declined">
         <p className="text-sm font-bold text-ink-900">No reason was recorded.</p>
         <p className="mt-2 text-sm text-ink-700">
-          That isn’t good enough, and it isn’t something you did — a decision came back without a
-          note attached to it. Please ask us directly rather than guessing: we can tell you exactly
-          what needs to change, and you shouldn’t have to resubmit twice to find out.
+          We didn’t record a reason — that’s on us, not you. Ask and we’ll tell you exactly what
+          to change.
         </p>
         {/* Named precisely, so this reaches whoever owns the bench rather than
             evaporating into "the portal is broken". Kept quiet and factual —
@@ -272,8 +271,7 @@ function FixList({ venueId, items }) {
         ))}
       </ul>
       <p className="mt-4 text-xs text-ink-500">
-        Ticking these is just for you — it keeps your place while you work through them. Our team
-        sees the venue itself when you resubmit, not this list.
+        Just for you — we see the venue when you resubmit, not this list.
       </p>
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
@@ -373,8 +371,7 @@ function Next({ venue, venueId, review }) {
   return (
     <Card title="What happens next">
       <p className="text-sm text-ink-700">
-        Editing this venue sends it straight back to our team for another look. Nothing you&rsquo;ve
-        already entered is lost.
+        Editing sends this venue back to our team for another look.
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">

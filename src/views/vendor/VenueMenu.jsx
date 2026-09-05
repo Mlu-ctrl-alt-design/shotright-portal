@@ -163,9 +163,8 @@ export default function VenueMenu() {
         <Alert variant="warning">
           <p className="font-bold">We can’t read this menu from the server yet</p>
           <p className="mt-1">
-            Your menu hasn’t been lost. We can’t load it here at the moment, but everything
-            already on it is still there and still showing to customers. Adding items may not
-            work until this is back.
+            Your menu hasn’t been lost — customers still see it. Adding items may not work until
+            this is back.
           </p>
         </Alert>
       )}
@@ -175,8 +174,7 @@ export default function VenueMenu() {
 
       <Card title="Upload your menu">
         <p className="text-sm text-ink-700">
-          Start from our template, fill in your dishes, and upload it here. Headings are created
-          automatically as they appear.
+          Start from our template. Headings are created as they appear.
         </p>
         <p className="mt-1 text-xs text-ink-500">
           Columns:{' '}

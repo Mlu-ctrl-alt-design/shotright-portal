@@ -167,9 +167,7 @@ export default function MoodStep({ value, onChange, errors = {} }) {
   return (
     <div className="space-y-5">
       <p className="text-sm text-ink-700">
-        Here is where you determine the vibe or mood your customers will search for in order to find
-        your business on our application. Type your own if none of these fit — we&rsquo;ll review it
-        and add it to the list.
+        The vibe customers search for. Type your own if none fit — we&rsquo;ll review it.
       </p>
 
       {/* Smart default, front-loaded. Shown only until the first mood is picked:
