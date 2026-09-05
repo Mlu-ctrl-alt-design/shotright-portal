@@ -87,7 +87,7 @@ describe('resume a venue addition', () => {
     renderApp({ route: '/venues/new?draft=DRAFT-GONE', signedIn: true })
 
     expect(
-      await screen.findByText(/couldn’t find that saved setup/i, {}, { timeout: 5000 }),
+      await screen.findByText(/couldn’t find that draft/i, {}, { timeout: 5000 }),
     ).toBeInTheDocument()
   })
 

@@ -393,9 +393,8 @@ export default function VenueForm() {
                 <Alert variant="warning">
                   <p className="font-bold">These don’t reach customers yet</p>
                   <p className="mt-1">
-                    Photos you add here upload properly and attach to this venue, so our reviewers
-                    see them. The app has no place to show a venue’s pictures yet, so they won’t
-                    appear in search, and the order below isn’t saved yet.
+                    Reviewers see these. Customers don’t yet — the app has no place for venue
+                    photos, and the order isn’t saved.
                   </p>
                 </Alert>
               )}

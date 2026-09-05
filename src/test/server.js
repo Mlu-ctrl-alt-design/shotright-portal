@@ -317,7 +317,14 @@ const apiHandlers = [
       parent_heading: args.heading_name || args.heading || args.parent_heading,
       item_name: args.item_name,
       price: Number(args.price) || 0,
-      description: args.description || '',
+      /* ⚠️ Frappe's Text Editor field stores HTML, so what comes back out is
+         `<p>the sentence</p>` and NOT the sentence. This mock used to hand back
+         exactly what was sent, which is how the live site ended up printing
+         `<p>Tomatoes, creamy burrata…</p>` at a partner while every test was
+         green. Third time this shape of mistake has cost us a bug (see the File
+         docname in #23 and the unpadded Time hour in #27): a double may be
+         simpler than the server, never different from it. */
+      description: args.description ? `<p>${args.description}</p>` : '',
     })
     return ok({ name })
   }),

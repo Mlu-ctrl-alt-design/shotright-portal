@@ -154,7 +154,7 @@ describe('what the partner is told', () => {
     await user.click(await screen.findByRole('button', { name: /Corner Kitchen & Bar/i }))
 
     expect(await screen.findByText(/filled in what we found — please check it/i)).toBeInTheDocument()
-    expect(screen.getByText(/what you submit is what customers will see/i)).toBeInTheDocument()
+    expect(screen.getByText(/what you submit is what customers see/i)).toBeInTheDocument()
   })
 
   it('marks each prefilled field, rather than only saying so once', async () => {

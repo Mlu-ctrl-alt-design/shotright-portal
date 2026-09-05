@@ -39,6 +39,7 @@ import { mockBackend } from './mockBackend'
 import { matchMood, FALLBACK_MOODS } from './moods'
 import { VENUE_LOOKUPS } from './lookups'
 import { normaliseProfile, toProfilePayload } from './profile'
+import { plainText } from '../utils/html'
 
 const pick = (real, mock) => (USE_MOCKS ? mock : real)
 
@@ -1122,11 +1123,31 @@ export const updateVenue = async (venueId, payload, existing) => {
  */
 export const MENU_READ_METHOD = 'shotright.api.get_venue_products'
 
+/**
+ * One heading and its items, with the descriptions turned back into prose.
+ *
+ * ⚠️ Frappe stores a description as HTML, so the live site was showing partners
+ * `<p>Tomatoes, creamy burrata…</p>` — their own sentence wrapped in markup the
+ * bench added. Stripped on the way IN rather than at each render, so there is
+ * one place it happens and no view can forget. `utils/html.js` says why this is
+ * not `dangerouslySetInnerHTML`.
+ */
+const normaliseHeading = (heading) => ({
+  ...heading,
+  items: (heading?.items || []).map((item) => ({
+    ...item,
+    description: plainText(item?.description),
+  })),
+})
+
 export const getMenu = async (venueId) => {
-  if (USE_MOCKS) return { headings: await mockBackend.getMenu(venueId), unavailable: false }
+  if (USE_MOCKS) {
+    const headings = await mockBackend.getMenu(venueId)
+    return { headings: headings.map(normaliseHeading), unavailable: false }
+  }
   try {
     const headings = await callGet(MENU_READ_METHOD, { venue_name: venueId })
-    return { headings: headings || [], unavailable: false }
+    return { headings: (headings || []).map(normaliseHeading), unavailable: false }
   } catch (err) {
     if (isMethodMissing(err, MENU_READ_METHOD)) {
       return { headings: [], unavailable: MENU_READ_METHOD }

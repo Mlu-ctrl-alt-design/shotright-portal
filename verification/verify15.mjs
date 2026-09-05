@@ -158,7 +158,7 @@ async function open({ detail, dashboard = detail, endpoint = null } = {}) {
     'but NOT as a portal fault — we read the field fine, nobody wrote in it',
   )
   check(
-    /isn’t good enough, and it isn’t something you did/i.test(body),
+    /that’s on us, not you/i.test(body),
     'the partner is told whose problem it is',
   )
   check(
