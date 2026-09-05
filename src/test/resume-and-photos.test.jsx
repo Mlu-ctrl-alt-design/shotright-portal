@@ -239,8 +239,15 @@ describe('upload venue images', () => {
 
     await user.upload(await photoInput(), file())
 
-    await waitFor(() => expect(document.body.textContent).toMatch(/didn’t upload|couldn’t/i))
+    await waitFor(() => expect(document.body.textContent).toMatch(/can’t add photos/i))
     expect(screen.queryByAltText('front-bar.jpg')).not.toBeInTheDocument()
+
+    /* ⚠️ And it must NOT be reported as a problem with the file. This bench
+       answers a missing method with a 417 AttributeError — the same status a
+       rejected image uses — so an endpoint that does not exist was telling the
+       partner to check their iPhone camera settings. They would convert a
+       perfectly good JPEG, upload it again, and be told the same thing. */
+    expect(document.body.textContent).not.toMatch(/iPhone|format/i)
   })
 })
 
