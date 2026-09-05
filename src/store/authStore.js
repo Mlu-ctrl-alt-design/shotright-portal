@@ -50,6 +50,28 @@ export const useAuthStore = create((set) => ({
   },
 
   /**
+   * The same landing as `login`, from a Google ID token instead of a password.
+   *
+   * Deliberately shares the token check and the `otpRequired` branch rather
+   * than reimplementing them: the bug those exist for — a partner sent to a
+   * dashboard with nothing to authenticate with — does not care which button
+   * they pressed to get there.
+   */
+  async loginWithGoogle(credential) {
+    const session = await vendorApi.loginWithGoogle(credential)
+    if (session?.otpRequired) return session
+    if (!hasAuthToken()) {
+      throw new Error('We couldn’t sign you in. Please try again.')
+    }
+    set({
+      status: 'authenticated',
+      user: session.user,
+      vendorProfile: session.vendor_profile,
+    })
+    return session
+  },
+
+  /**
    * Register.
    *
    * Returns `{otpRequired: true, email}` when the bench requires email

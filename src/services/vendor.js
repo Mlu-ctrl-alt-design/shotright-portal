@@ -98,6 +98,7 @@ export async function withFallback(method, real, whenMissing) {
 export const __resetCapabilities = () => {
   capabilities.clear()
   photoSupport = null
+  googleSupport = null
 }
 
 /* --------------------------------------------------------------------- auth */
@@ -133,6 +134,110 @@ export const login = (email, password) =>
       return result
     },
   )()
+
+/**
+ * Signing in with Google.
+ *
+ * WE DO NOT KNOW WHAT THE BENCH CALLS THIS. The mobile app has Google sign-in,
+ * so something exists; the portal has never been told its name. Rather than
+ * guess one and ship a button that 404s, the same shape used everywhere else
+ * here applies — a list of candidates, tried in order, and the feature simply
+ * does not appear when none of them is deployed.
+ *
+ * THE PARAMETER NAME IS ALSO A GUESS, and unlike a form field a wrong kwarg on
+ * a whitelisted method is fatal: Frappe raises TypeError rather than ignoring
+ * it. So each method is tried with each name, and an unexpected-keyword error
+ * moves on to the next rather than surfacing.
+ */
+export const GOOGLE_AUTH_METHODS = [
+  'shotright.api.login_with_google',
+  'shotright.api.google_login',
+  'shotright.api.login_google',
+  'shotright.api.social_login',
+]
+
+const GOOGLE_CREDENTIAL_PARAMS = ['credential', 'id_token', 'token']
+
+const isWrongParameter = (err) =>
+  /unexpected keyword argument|got an unexpected|missing \d+ required positional/i.test(
+    `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+  )
+
+/**
+ * Is there anything on the other end?
+ *
+ * Probed by calling each candidate with NO credential. A method that is not
+ * there answers 404 `DoesNotExistError`; a method that is there rejects the
+ * empty call with a validation error, and that rejection is the proof we want.
+ * `isMethodMissing` reads the exception text, which is the only thing that
+ * separates a missing METHOD from a missing DOCUMENT on this bench.
+ *
+ * No credential is sent, so a probe cannot log anybody in or out.
+ *
+ * Cached for the tab: the login screen must not fire four requests per render.
+ */
+let googleSupport = null
+
+export const googleAuthSupported = () => {
+  if (USE_MOCKS) return Promise.resolve(true)
+  if (!googleSupport) {
+    googleSupport = (async () => {
+      for (const method of GOOGLE_AUTH_METHODS) {
+        try {
+          await call(method, {})
+          return true
+        } catch (err) {
+          if (!isMethodMissing(err, method)) return true
+        }
+      }
+      return false
+    })()
+  }
+  return googleSupport
+}
+
+/**
+ * Exchange a Google ID token for the portal's own api_key/api_secret.
+ *
+ * The token is Google's claim about who this is; only the bench can check it
+ * against Google's signing keys, so nothing here inspects or trusts it. What
+ * comes back is the same shape as `login`, including the `otp_required` branch
+ * — a Google account can still belong to a partner who has not finished
+ * verifying, and walking them past that is how someone ends up on a dashboard
+ * with nothing to authenticate with.
+ */
+export const loginWithGoogle = async (credential) => {
+  if (!credential) throw new Error('Google didn’t give us anything to sign in with.')
+
+  if (USE_MOCKS) {
+    setAuthToken({ api_key: 'mock', api_secret: 'mock' })
+    return { api_key: 'mock', api_secret: 'mock' }
+  }
+
+  let lastError = null
+  for (const method of GOOGLE_AUTH_METHODS) {
+    for (const param of GOOGLE_CREDENTIAL_PARAMS) {
+      try {
+        const result = await call(method, { [param]: credential })
+        if (result?.otp_required) {
+          return { otpRequired: true, email: result.email }
+        }
+        setAuthToken(result)
+        return result
+      } catch (err) {
+        if (isMethodMissing(err, method)) break // wrong method, not wrong name
+        if (isWrongParameter(err)) continue // right method, try the next name
+        throw err // a real refusal: a rejected token, a blocked account
+      }
+    }
+  }
+
+  /* Every candidate was absent. The button should not have been on screen —
+     `googleAuthSupported` gates it — so this is a deployment that changed under
+     a tab that was already open. */
+  throw lastError ||
+    new Error('Signing in with Google isn’t available on this server yet. Use your password.')
+}
 
 /**
  * Register returns a token in the same shape as login, so a new partner lands
@@ -1269,6 +1374,56 @@ export const ITEM_UPDATE_METHODS = [
 
 export const ITEM_DELETE_METHODS = ['shotright.api.delete_product_item']
 
+/**
+ * How a menu item is named to the bench.
+ *
+ * ⚠️ FROM THE LIVE SITE, on every attempt to edit a menu item:
+ *
+ *   TypeError: update_product_item() missing 1 required positional argument:
+ *   'item_id'
+ *
+ * The portal was sending `item` AND `name` — two guesses, neither of them the
+ * one the method declares, and both of them extra kwargs on top of the missing
+ * required one. `item_id` now goes first because the bench has told us that is
+ * the name; the others stay behind it, tried only when a method rejects the
+ * one before, so a differently-written endpoint still works.
+ *
+ * ONE AT A TIME, deliberately. Sending all three together looks like belt and
+ * braces and is the opposite: Frappe's whitelisted call passes the form dict
+ * straight into the function, so every name the method does not declare is an
+ * unexpected keyword and a TypeError. Hedging works for multipart fields, which
+ * is where this codebase learned the habit; it is actively harmful here.
+ */
+const ITEM_ID_PARAMS = ['item_id', 'item', 'name']
+
+const isWrongItemParameter = (err) =>
+  /unexpected keyword argument|missing \d+ required (positional|keyword)/i.test(
+    `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+  )
+
+/**
+ * Call the first deployed method that accepts one of the identifier names.
+ *
+ * Returns `{result, method, param}`, or null when no candidate is deployed. A
+ * real refusal — a permission error, a rejected value — is thrown rather than
+ * being mistaken for a wrong guess.
+ */
+const callForItem = async (methods, itemId, extra = {}) => {
+  for (const method of methods) {
+    for (const param of ITEM_ID_PARAMS) {
+      try {
+        const result = (await call(method, { [param]: itemId, ...extra })) ?? { ok: true }
+        return { result, method, param }
+      } catch (err) {
+        if (isMethodMissing(err, method)) break // this method is absent entirely
+        if (isWrongItemParameter(err)) continue // right method, wrong name for it
+        throw err
+      }
+    }
+  }
+  return null
+}
+
 /** Try each name; `undefined` from all of them means none is deployed. */
 const firstDeployed = async (methods, args) => {
   for (const method of methods) {
@@ -1292,11 +1447,11 @@ const firstDeployed = async (methods, args) => {
 export const updateItem = async (itemId, payload) => {
   if (USE_MOCKS) return { saved: true, item: await mockBackend.updateItem?.(itemId, payload) }
 
-  const body = { item: itemId, name: itemId, item_name: payload.item_name }
+  const body = { item_name: payload.item_name }
   if (payload.price !== undefined) body.price = payload.price
   if (payload.description !== undefined) body.description = payload.description
 
-  const attempt = await firstDeployed(ITEM_UPDATE_METHODS, body)
+  const attempt = await callForItem(ITEM_UPDATE_METHODS, itemId, body)
   if (attempt) return { saved: true, method: attempt.method }
 
   return { saved: false, reason: 'no-endpoint' }
@@ -1314,7 +1469,7 @@ export const updateItem = async (itemId, payload) => {
 export const deleteItem = async (itemId) => {
   if (USE_MOCKS) return mockBackend.deleteItem(itemId)
 
-  const attempt = await firstDeployed(ITEM_DELETE_METHODS, { item: itemId, name: itemId })
+  const attempt = await callForItem(ITEM_DELETE_METHODS, itemId)
   if (attempt) return { deleted: true, method: attempt.method }
 
   try {

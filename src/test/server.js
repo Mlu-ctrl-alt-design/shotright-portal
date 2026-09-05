@@ -60,6 +60,42 @@ const declaredOnly = (method, args) => {
 
 const record = (method, args) => bench.calls.push({ method, args })
 
+/**
+ * Frappe's answer to being called with the wrong argument name.
+ *
+ * A whitelisted method takes the form dict as kwargs, so a name it does not
+ * declare is an unexpected keyword and the one it needs is missing — both
+ * TypeErrors, and neither is silently ignored the way an undeclared field on a
+ * doc write is. The portal's search for the right name depends on telling those
+ * apart from a real refusal.
+ */
+const ITEM_PARAM_NAMES = ['item_id', 'item', 'name']
+
+const itemParamError = (fn, args) => {
+  const wanted = bench.itemIdParam
+  const given = ITEM_PARAM_NAMES.filter((p) => p in args)
+  const extra = given.find((p) => p !== wanted)
+  if (extra) {
+    return HttpResponse.json(
+      {
+        exc_type: 'TypeError',
+        exception: `TypeError: ${fn}() got an unexpected keyword argument '${extra}'`,
+      },
+      { status: 417 },
+    )
+  }
+  if (!given.includes(wanted)) {
+    return HttpResponse.json(
+      {
+        exc_type: 'TypeError',
+        exception: `TypeError: ${fn}() missing 1 required positional argument: '${wanted}'`,
+      },
+      { status: 417 },
+    )
+  }
+  return null
+}
+
 /* ------------------------------------------------------------------ handlers */
 
 /**
@@ -309,6 +345,46 @@ const apiHandlers = [
     return ok({ ...venue })
   }),
 
+  /**
+   * Google sign-in, as a bench that HAS it would answer.
+   *
+   * Off by default (`bench.deploy.login_with_google`), so the ordinary suite
+   * runs against a bench that has never heard of it — which is the state the
+   * live one is in until the backend says otherwise, and the state in which no
+   * button may appear.
+   *
+   * The parameter is `credential` here. The portal does not know that, so it
+   * tries `credential`, `id_token` and `token` in turn; this rejects the wrong
+   * ones the way Frappe does, with a TypeError about an unexpected keyword,
+   * rather than quietly accepting them.
+   */
+  method('shotright.api.login_with_google', (args) => {
+    if (!bench.deploy.login_with_google) return methodMissing('shotright.api.login_with_google')
+
+    const unexpected = Object.keys(args).filter((k) => k !== 'credential' && k !== 'cmd')
+    if (unexpected.length) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception: `TypeError: login_with_google() got an unexpected keyword argument '${unexpected[0]}'`,
+        },
+        { status: 417 },
+      )
+    }
+
+    // The probe: no credential at all. A method that EXISTS says so by
+    // refusing, and that refusal is what tells the portal it is there.
+    if (!args.credential) return validationError('credential is required')
+
+    if (args.credential === 'unverified-account') {
+      return ok({ otp_required: true, email: 'new@partner.co.za' })
+    }
+    if (args.credential !== 'good-google-token') {
+      return validationError('That Google sign-in could not be verified.')
+    }
+    return ok({ api_key: 'GK', api_secret: 'GS' })
+  }),
+
   /* ---------------------------------------------------------------- menu */
   method('shotright.api.get_venue_products', ({ venue_name }) => {
     if (!venueById(venue_name)) return docMissing()
@@ -353,8 +429,23 @@ const apiHandlers = [
    * everything else the endpoint exists and a test opts OUT; for these the
    * endpoint doesn't and a test opts IN.
    */
+  /**
+   * ⚠️ THE ITEM IS ADDRESSED AS `item_id`. Verified from the live bench:
+   *
+   *   TypeError: update_product_item() missing 1 required positional argument:
+   *   'item_id'
+   *
+   * This mock used to accept `item` or `name` — the two the portal was guessing
+   * at, and the two the real method does NOT declare — so a green suite covered
+   * a feature that could never once have worked. Fifth time a double
+   * disagreeing with the server has cost us a bug, after the File docname, the
+   * unpadded Time hour, the HTML in a description, and the fields update_venue
+   * silently drops.
+   */
   method('shotright.api.update_product_item', (args) => {
-    const item = bench.items.find((i) => i.name === (args.item || args.name))
+    const wrong = itemParamError('update_product_item', args)
+    if (wrong) return wrong
+    const item = bench.items.find((i) => i.name === args[bench.itemIdParam])
     if (!item) return docMissing()
     if (args.item_name !== undefined) item.item_name = args.item_name
     if (args.price !== undefined) item.price = Number(args.price) || 0
@@ -363,7 +454,9 @@ const apiHandlers = [
   }),
 
   method('shotright.api.delete_product_item', (args) => {
-    const id = args.item || args.name
+    const wrong = itemParamError('delete_product_item', args)
+    if (wrong) return wrong
+    const id = args[bench.itemIdParam]
     const before = bench.items.length
     bench.items = bench.items.filter((i) => i.name !== id)
     return before === bench.items.length ? docMissing() : ok({ ok: true })
@@ -457,8 +550,35 @@ const apiHandlers = [
 
   /* --------------------------------------------------------------- legal */
 
+  /**
+   * The SECOND candidate name. Off unless a test turns it on, so it can stand
+   * in for "the real method is one of the other ones we guessed" — which is the
+   * only reason the portal carries a list.
+   */
+  method('shotright.api.get_vendor_legal_documents', () =>
+    bench.legalListAltName
+      ? ok(
+          bench.legal.map((d) => ({
+            name: d.name,
+            title: d.title,
+            content: d.content ?? '',
+            required: d.required === undefined ? 1 : d.required,
+            accepted: d.accepted ? 1 : 0,
+          })),
+        )
+      : methodMissing('shotright.api.get_vendor_legal_documents'),
+  ),
+
+  /**
+   * ⚠️ `bench.legalListRefuses` models what the LIVE bench did on 5 Sep: a 417
+   * on this exact method, with no arguments sent. A method that exists and
+   * throws is not a method that is missing, and the portal used to stop at the
+   * first one — hiding the candidates behind it.
+   */
   method('shotright.api.get_legal_documents', () =>
-    ok(
+    bench.legalListRefuses
+      ? validationError('get_legal_documents() missing 1 required positional argument')
+      : ok(
       bench.legal.map((d) => ({
         name: d.name,
         title: d.title,
@@ -586,7 +706,29 @@ const apiHandlers = [
   }),
 
   /* ------------------------------------------------------ menu import job */
-  method('shotright.api.start_menu_import', () => ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })),
+  /**
+   * The importer, and what it does with the way we name the uploaded file.
+   *
+   * `bench.importerWants` is the parameter this bench's method actually
+   * declares. Anything else gets Frappe's TypeError, which is what a whitelisted
+   * method really does with an unexpected keyword — it does NOT ignore it the
+   * way a doc write does. `'none'` models an importer that refuses every shape.
+   */
+  method('shotright.api.start_menu_import', (args) => {
+    const wanted = bench.importerWants
+    if (wanted && !(wanted in args)) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception: `TypeError: start_menu_import() got an unexpected keyword argument '${
+            Object.keys(args).find((k) => k !== 'venue_name' && k !== 'cmd') || 'file_name'
+          }'`,
+        },
+        { status: 417 },
+      )
+    }
+    return ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })
+  }),
   method('shotright.api.get_menu_import_status', () =>
     bench.importFails
       ? ok({

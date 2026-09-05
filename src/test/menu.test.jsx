@@ -457,3 +457,124 @@ describe('while the menu is loading', () => {
     bones.forEach((bone) => expect(bone).toHaveAttribute('aria-hidden', 'true'))
   })
 })
+
+describe('the CSV import, when the server will not take the file', () => {
+  /**
+   * REPORTED: "we're still struggling to upload Menu via csv."
+   *
+   * The upload and the import are two calls, and only the first was tagged. So
+   * anything the IMPORTER refused fell through to "we couldn't read that file"
+   * — a sentence about the partner's spreadsheet, over a problem in our
+   * request. They try a different file, and a CSV instead of an Excel, and a
+   * shorter one, and every attempt fails identically.
+   *
+   * This component's upload branch was written to fix exactly that mistake one
+   * step earlier. It was left in place here.
+   */
+  const upload = async (user) => {
+    await user.click(await screen.findByRole('button', { name: /import a spreadsheet/i }))
+    const input = await screen.findByLabelText(/menu file/i)
+    await user.upload(
+      input,
+      new File(['heading,item_name,price\nMains,Bobotie,120'], 'menu.csv', { type: 'text/csv' }),
+    )
+  }
+
+  it('does not blame the spreadsheet when the importer refuses the request', async () => {
+    bench.importerWants = 'none'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    expect(await screen.findByText(/couldn’t start the import/i)).toBeInTheDocument()
+    expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/nothing is wrong with your file/i)).toBeInTheDocument()
+  })
+
+  /* Neither retrying nor swapping the file can help, so neither is offered —
+     the same rule the permission branch already follows. */
+  it('does not send them off to find another file', async () => {
+    bench.importerWants = 'none'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    await screen.findByText(/couldn’t start the import/i)
+    expect(screen.queryByRole('button', { name: /try another file/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /by hand/i })).toBeInTheDocument()
+  })
+
+  /**
+   * The importer declares `file_url`, not `file_name`. The portal has always
+   * sent a DOCNAME under the name `file_name`, so a bench that wants the URL
+   * refused every import — and said so in a TypeError the partner saw as a
+   * problem with their spreadsheet.
+   */
+  it('finds the parameter the importer actually declares', async () => {
+    bench.importerWants = 'file_url'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    await waitFor(() =>
+      expect(bench.calls.some((c) => c.method === 'start_menu_import' && c.args.file_url)).toBe(
+        true,
+      ),
+    )
+    expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('naming a menu item to the bench', () => {
+  /**
+   * FROM THE LIVE SITE, on every attempt to edit a menu item:
+   *
+   *   TypeError: update_product_item() missing 1 required positional argument:
+   *   'item_id'
+   *
+   * The portal sent `item` AND `name` — two guesses, neither of them the one
+   * the method declares, and both extra keywords on top of the missing required
+   * one. A whitelisted method takes the form dict as kwargs, so Frappe refuses
+   * every one of those rather than ignoring them.
+   *
+   * The mock accepted `item` or `name` and not `item_id`, so a green suite
+   * covered a feature that could never once have worked on the real bench.
+   */
+  it('sends item_id, and only one identifier', async () => {
+    bench.deploy.update_product_item = true
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /edit chakalaka/i }))
+    const form = screen.getByRole('button', { name: /^save$/i }).closest('form')
+    await user.clear(within(form).getByLabelText(/price/i))
+    await user.type(within(form).getByLabelText(/price/i), '55')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(bench.items[0].price).toBe(55))
+
+    const sent = bench.calls.filter((c) => c.method === 'update_product_item').at(-1)
+    expect(sent.args.item_id).toBe(bench.items[0].name)
+    /* Hedging works for multipart fields, which is where this codebase learned
+       the habit. On a whitelisted method every extra name is a TypeError. */
+    expect(sent.args).not.toHaveProperty('item')
+    expect(sent.args).not.toHaveProperty('name')
+  })
+
+  /* The list is still a list: a bench that calls it something else keeps
+     working, because the portal tries the next name on a TypeError. */
+  it('finds the name a differently-written bench uses', async () => {
+    bench.deploy.update_product_item = true
+    bench.itemIdParam = 'item'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /remove chakalaka/i }))
+
+    await waitFor(() => expect(bench.items).toHaveLength(0))
+  })
+})

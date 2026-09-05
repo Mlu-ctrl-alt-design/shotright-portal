@@ -63,9 +63,26 @@ const initial = () => ({
    */
   silentlyDrops: [],
 
+  /**
+   * Which parameter the menu importer declares for the uploaded file. The
+   * portal does not know, so it tries `file_name`, `file_url` and `file` in
+   * turn. `'none'` is an importer that takes none of them.
+   */
+  importerWants: 'file_name',
+
+  /**
+   * Which argument the Product Item methods declare. `item_id` is what the live
+   * bench told us on 5 Sep; the others exist so the portal's search for the
+   * right name is testable.
+   */
+  itemIdParam: 'item_id',
+
   /** Which methods exist. Flip to false to model "not deployed yet". */
   deploy: {
     login: true,
+    /* Off: the live bench has never told the portal it has this, and until it
+       does no sign-in button may appear. Flip it on to model one that does. */
+    login_with_google: false,
     register_vendor: true,
     get_vendor_dashboard: true,
     get_venue_detail: true,
@@ -250,6 +267,12 @@ const initial = () => ({
    * path are unaffected on a bench with nothing to accept.
    */
   legal: [],
+
+  /** The live 417: `get_legal_documents` exists and throws. */
+  legalListRefuses: false,
+
+  /** The documents live under the second candidate name instead. */
+  legalListAltName: false,
 
   /**
    * THE FAILURE THIS SUITE EXISTS FOR: accept returns 200 and writes nothing.

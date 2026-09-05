@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { Button, Input, PasswordInput, Alert } from '../../components/ui'
+import GoogleSignInButton from '../../components/ui/GoogleSignInButton'
 import AuthLayout from '../../components/layout/AuthLayout'
 
 /**
@@ -34,6 +35,7 @@ function strengthOf(password) {
 export default function Register() {
   const navigate = useNavigate()
   const register = useAuthStore((s) => s.register)
+  const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle)
 
   const [form, setForm] = useState({
     first_name: '',
@@ -79,11 +81,30 @@ export default function Register() {
       // The address rides in router state, not the URL: a query string would
       // put it in browser history, in the Referer of any outbound link, and in
       // whatever records paths.
-      if (result?.otpRequired) {
-        navigate('/verify', { replace: true, state: { email: result.email } })
-        return
-      }
-      navigate('/', { replace: true })
+      land(result)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* Shared by both ways in. A Google account can belong to a partner who has
+     not finished verifying, and handling that on only one path would land them
+     on a dashboard they cannot use. */
+  const land = (result) => {
+    if (result?.otpRequired) {
+      navigate('/verify', { replace: true, state: { email: result.email } })
+      return
+    }
+    navigate('/', { replace: true })
+  }
+
+  const onGoogleCredential = async (credential) => {
+    setBusy(true)
+    setError(null)
+    try {
+      land(await loginWithGoogle(credential))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -170,6 +191,17 @@ export default function Register() {
             Register
           </Button>
         </div>
+
+        {/* Same control as the login screen, and deliberately the same wording
+            from Google ("Sign up with"): for a partner who has never been here,
+            signing up and signing in with Google are one action, and the bench
+            makes the account if there isn't one. Two buttons that look like a
+            choice, where there is none, is a decision we would be inventing. */}
+        <GoogleSignInButton
+          label="signup_with"
+          onCredential={onGoogleCredential}
+          disabled={busy}
+        />
 
         <p className="pt-1 text-center">
           <Link to="/login" className="text-sm text-ink-700 underline hover:text-ink-900">
