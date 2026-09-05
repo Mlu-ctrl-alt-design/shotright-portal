@@ -179,6 +179,23 @@ export default function Profile() {
 
       <Card title="Change password">
         <form onSubmit={savePassword} className="space-y-4">
+          {/* A password manager needs to know WHICH account this new password
+              belongs to, and it works that out from a username field in the
+              same form. With none here it either saves the password against
+              nothing or offers to overwrite the wrong entry — and Chrome says
+              so in the console. Hidden rather than shown because the address is
+              already on screen in the details form above; this is here for the
+              browser, not to be read twice. */}
+          <input
+            type="text"
+            name="username"
+            autoComplete="username"
+            value={profile?.email || ''}
+            readOnly
+            hidden
+            aria-hidden="true"
+            tabIndex={-1}
+          />
           <div className="grid gap-4 sm:grid-cols-2">
             <PasswordInput
               label="New password"

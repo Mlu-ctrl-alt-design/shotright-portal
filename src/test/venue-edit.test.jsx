@@ -323,6 +323,43 @@ describe('moods that arrive in an unexpected shape', () => {
     const write = bench.calls.filter((c) => c.method === 'update_venue').at(-1)
     expect(write.args.moods).toContain('MOOD-RETIRED')
   })
+
+  /**
+   * REPORTED FROM THE LIVE SITE, via a console log:
+   * `The specified value "9:00:" does not conform to the required format.`
+   *
+   * Two bugs behind one symptom, both from Frappe not zero-padding the hour of
+   * a Time field. The form cut the first five characters off "9:00:00" and gave
+   * an <input type="time"> a value it cannot parse, so the field rendered
+   * EMPTY; and it compared open and close as strings, where "9:00:00" sorts
+   * after "23:00:00", so the save was refused outright with "closing time must
+   * be after opening time".
+   *
+   * Net effect: a venue opening any time before ten o'clock could not be
+   * edited at all. The Wednesday row in the fixture opens at 9:00:00 for
+   * exactly this reason.
+   */
+  it('saves a venue that opens before ten in the morning', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    expect(
+      screen.queryByText(/closing time must be after opening time/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows that nine o’clock opening time instead of an empty box', async () => {
+    renderApp({ route: EDIT, signedIn: true })
+
+    const opening = await screen.findByLabelText(/Wednesday opening time/i)
+    expect(opening).toHaveValue('09:00')
+  })
+
 })
 
   it('saves when detail 404s AND the dashboard row describes moods differently', async () => {

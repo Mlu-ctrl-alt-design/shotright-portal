@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { minutesSinceMidnight } from '../../utils/time'
 import {
   useVenue,
   useMoods,
@@ -152,7 +153,24 @@ export default function VenueForm() {
       setError('A venue must be open on at least one day.')
       return
     }
-    const badRow = openDays.find((h) => h.open_time >= h.close_time)
+    /**
+     * ⚠️ Compared as MINUTES, not as strings.
+     *
+     * This was `h.open_time >= h.close_time`, and Frappe does not zero-pad the
+     * hour of a Time field — so a venue opening at nine and closing at eleven
+     * arrived as "9:00:00" and "23:00:00", and `"9" > "2"` made the string
+     * comparison say closing came first. Every venue opening before ten
+     * o'clock was refused the save, on a form that gave no way to argue.
+     *
+     * A row we cannot read at all is NOT treated as backwards: refusing a save
+     * because of a value the partner never typed and cannot see is the same
+     * mistake in a different coat.
+     */
+    const badRow = openDays.find((h) => {
+      const open = minutesSinceMidnight(h.open_time)
+      const close = minutesSinceMidnight(h.close_time)
+      return open !== null && close !== null && open >= close
+    })
     if (badRow) {
       setError(`${badRow.day_of_week}: closing time must be after opening time.`)
       return
