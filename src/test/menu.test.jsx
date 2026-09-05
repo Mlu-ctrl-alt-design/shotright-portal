@@ -524,3 +524,57 @@ describe('the CSV import, when the server will not take the file', () => {
     expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
   })
 })
+
+describe('naming a menu item to the bench', () => {
+  /**
+   * FROM THE LIVE SITE, on every attempt to edit a menu item:
+   *
+   *   TypeError: update_product_item() missing 1 required positional argument:
+   *   'item_id'
+   *
+   * The portal sent `item` AND `name` — two guesses, neither of them the one
+   * the method declares, and both extra keywords on top of the missing required
+   * one. A whitelisted method takes the form dict as kwargs, so Frappe refuses
+   * every one of those rather than ignoring them.
+   *
+   * The mock accepted `item` or `name` and not `item_id`, so a green suite
+   * covered a feature that could never once have worked on the real bench.
+   */
+  it('sends item_id, and only one identifier', async () => {
+    bench.deploy.update_product_item = true
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /edit chakalaka/i }))
+    const form = screen.getByRole('button', { name: /^save$/i }).closest('form')
+    await user.clear(within(form).getByLabelText(/price/i))
+    await user.type(within(form).getByLabelText(/price/i), '55')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(bench.items[0].price).toBe(55))
+
+    const sent = bench.calls.filter((c) => c.method === 'update_product_item').at(-1)
+    expect(sent.args.item_id).toBe(bench.items[0].name)
+    /* Hedging works for multipart fields, which is where this codebase learned
+       the habit. On a whitelisted method every extra name is a TypeError. */
+    expect(sent.args).not.toHaveProperty('item')
+    expect(sent.args).not.toHaveProperty('name')
+  })
+
+  /* The list is still a list: a bench that calls it something else keeps
+     working, because the portal tries the next name on a TypeError. */
+  it('finds the name a differently-written bench uses', async () => {
+    bench.deploy.update_product_item = true
+    bench.itemIdParam = 'item'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /remove chakalaka/i }))
+
+    await waitFor(() => expect(bench.items).toHaveLength(0))
+  })
+})

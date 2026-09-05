@@ -70,6 +70,13 @@ const initial = () => ({
    */
   importerWants: 'file_name',
 
+  /**
+   * Which argument the Product Item methods declare. `item_id` is what the live
+   * bench told us on 5 Sep; the others exist so the portal's search for the
+   * right name is testable.
+   */
+  itemIdParam: 'item_id',
+
   /** Which methods exist. Flip to false to model "not deployed yet". */
   deploy: {
     login: true,

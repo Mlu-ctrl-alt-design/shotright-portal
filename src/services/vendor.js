@@ -1374,6 +1374,56 @@ export const ITEM_UPDATE_METHODS = [
 
 export const ITEM_DELETE_METHODS = ['shotright.api.delete_product_item']
 
+/**
+ * How a menu item is named to the bench.
+ *
+ * ⚠️ FROM THE LIVE SITE, on every attempt to edit a menu item:
+ *
+ *   TypeError: update_product_item() missing 1 required positional argument:
+ *   'item_id'
+ *
+ * The portal was sending `item` AND `name` — two guesses, neither of them the
+ * one the method declares, and both of them extra kwargs on top of the missing
+ * required one. `item_id` now goes first because the bench has told us that is
+ * the name; the others stay behind it, tried only when a method rejects the
+ * one before, so a differently-written endpoint still works.
+ *
+ * ONE AT A TIME, deliberately. Sending all three together looks like belt and
+ * braces and is the opposite: Frappe's whitelisted call passes the form dict
+ * straight into the function, so every name the method does not declare is an
+ * unexpected keyword and a TypeError. Hedging works for multipart fields, which
+ * is where this codebase learned the habit; it is actively harmful here.
+ */
+const ITEM_ID_PARAMS = ['item_id', 'item', 'name']
+
+const isWrongItemParameter = (err) =>
+  /unexpected keyword argument|missing \d+ required (positional|keyword)/i.test(
+    `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+  )
+
+/**
+ * Call the first deployed method that accepts one of the identifier names.
+ *
+ * Returns `{result, method, param}`, or null when no candidate is deployed. A
+ * real refusal — a permission error, a rejected value — is thrown rather than
+ * being mistaken for a wrong guess.
+ */
+const callForItem = async (methods, itemId, extra = {}) => {
+  for (const method of methods) {
+    for (const param of ITEM_ID_PARAMS) {
+      try {
+        const result = (await call(method, { [param]: itemId, ...extra })) ?? { ok: true }
+        return { result, method, param }
+      } catch (err) {
+        if (isMethodMissing(err, method)) break // this method is absent entirely
+        if (isWrongItemParameter(err)) continue // right method, wrong name for it
+        throw err
+      }
+    }
+  }
+  return null
+}
+
 /** Try each name; `undefined` from all of them means none is deployed. */
 const firstDeployed = async (methods, args) => {
   for (const method of methods) {
@@ -1397,11 +1447,11 @@ const firstDeployed = async (methods, args) => {
 export const updateItem = async (itemId, payload) => {
   if (USE_MOCKS) return { saved: true, item: await mockBackend.updateItem?.(itemId, payload) }
 
-  const body = { item: itemId, name: itemId, item_name: payload.item_name }
+  const body = { item_name: payload.item_name }
   if (payload.price !== undefined) body.price = payload.price
   if (payload.description !== undefined) body.description = payload.description
 
-  const attempt = await firstDeployed(ITEM_UPDATE_METHODS, body)
+  const attempt = await callForItem(ITEM_UPDATE_METHODS, itemId, body)
   if (attempt) return { saved: true, method: attempt.method }
 
   return { saved: false, reason: 'no-endpoint' }
@@ -1419,7 +1469,7 @@ export const updateItem = async (itemId, payload) => {
 export const deleteItem = async (itemId) => {
   if (USE_MOCKS) return mockBackend.deleteItem(itemId)
 
-  const attempt = await firstDeployed(ITEM_DELETE_METHODS, { item: itemId, name: itemId })
+  const attempt = await callForItem(ITEM_DELETE_METHODS, itemId)
   if (attempt) return { deleted: true, method: attempt.method }
 
   try {

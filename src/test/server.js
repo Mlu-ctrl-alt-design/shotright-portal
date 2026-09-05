@@ -60,6 +60,42 @@ const declaredOnly = (method, args) => {
 
 const record = (method, args) => bench.calls.push({ method, args })
 
+/**
+ * Frappe's answer to being called with the wrong argument name.
+ *
+ * A whitelisted method takes the form dict as kwargs, so a name it does not
+ * declare is an unexpected keyword and the one it needs is missing — both
+ * TypeErrors, and neither is silently ignored the way an undeclared field on a
+ * doc write is. The portal's search for the right name depends on telling those
+ * apart from a real refusal.
+ */
+const ITEM_PARAM_NAMES = ['item_id', 'item', 'name']
+
+const itemParamError = (fn, args) => {
+  const wanted = bench.itemIdParam
+  const given = ITEM_PARAM_NAMES.filter((p) => p in args)
+  const extra = given.find((p) => p !== wanted)
+  if (extra) {
+    return HttpResponse.json(
+      {
+        exc_type: 'TypeError',
+        exception: `TypeError: ${fn}() got an unexpected keyword argument '${extra}'`,
+      },
+      { status: 417 },
+    )
+  }
+  if (!given.includes(wanted)) {
+    return HttpResponse.json(
+      {
+        exc_type: 'TypeError',
+        exception: `TypeError: ${fn}() missing 1 required positional argument: '${wanted}'`,
+      },
+      { status: 417 },
+    )
+  }
+  return null
+}
+
 /* ------------------------------------------------------------------ handlers */
 
 /**
@@ -393,8 +429,23 @@ const apiHandlers = [
    * everything else the endpoint exists and a test opts OUT; for these the
    * endpoint doesn't and a test opts IN.
    */
+  /**
+   * ⚠️ THE ITEM IS ADDRESSED AS `item_id`. Verified from the live bench:
+   *
+   *   TypeError: update_product_item() missing 1 required positional argument:
+   *   'item_id'
+   *
+   * This mock used to accept `item` or `name` — the two the portal was guessing
+   * at, and the two the real method does NOT declare — so a green suite covered
+   * a feature that could never once have worked. Fifth time a double
+   * disagreeing with the server has cost us a bug, after the File docname, the
+   * unpadded Time hour, the HTML in a description, and the fields update_venue
+   * silently drops.
+   */
   method('shotright.api.update_product_item', (args) => {
-    const item = bench.items.find((i) => i.name === (args.item || args.name))
+    const wrong = itemParamError('update_product_item', args)
+    if (wrong) return wrong
+    const item = bench.items.find((i) => i.name === args[bench.itemIdParam])
     if (!item) return docMissing()
     if (args.item_name !== undefined) item.item_name = args.item_name
     if (args.price !== undefined) item.price = Number(args.price) || 0
@@ -403,7 +454,9 @@ const apiHandlers = [
   }),
 
   method('shotright.api.delete_product_item', (args) => {
-    const id = args.item || args.name
+    const wrong = itemParamError('delete_product_item', args)
+    if (wrong) return wrong
+    const id = args[bench.itemIdParam]
     const before = bench.items.length
     bench.items = bench.items.filter((i) => i.name !== id)
     return before === bench.items.length ? docMissing() : ok({ ok: true })
