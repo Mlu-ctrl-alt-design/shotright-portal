@@ -119,6 +119,26 @@ export const getLegalDocuments = async () => {
     return { available: true, documents, outstanding: outstandingOf(documents), canAccept: true }
   }
 
+  /**
+   * ⚠️ A METHOD THAT EXISTS AND REFUSES IS NOT THE END OF THE LIST.
+   *
+   * Seen on the live site, 5 Sep:
+   *
+   *   GET /api/method/shotright.api.get_legal_documents  →  417
+   *
+   * 417 is Frappe's ValidationError: the request reached the bench, the method
+   * ran, and it threw. This loop used to return on the first such error, so one
+   * unhappy candidate hid the three behind it — and since the portal sends NO
+   * arguments at all, the likeliest cause is an argument the method requires
+   * and we do not know about.
+   *
+   * So a refusal is remembered and the next name is tried. The first error is
+   * what gets reported if every one of them fails, because it came from the
+   * method most likely to be the real one.
+   */
+  let firstError = null
+  let firstErrorMethod = null
+
   for (const method of LEGAL_LIST_METHODS) {
     let payload
     try {
@@ -128,7 +148,24 @@ export const getLegalDocuments = async () => {
         async () => undefined,
       )
     } catch (error) {
-      return { available: false, documents: [], outstanding: [], errored: true, error, method }
+      /**
+       * The bench's own words, to the CONSOLE and never to the partner.
+       *
+       * Whatever it says — a missing argument, no vendor profile, a broken
+       * document row — is the one thing that turns "legal documents don't load"
+       * into a one-line question for whoever owns the bench. Losing it inside a
+       * generic failure state is how this stays unfixed.
+       */
+      console.warn(
+        `[shotright] ${method} answered ${error?.status || 'an error'}: ` +
+          `${error?.message || 'no message'}. The portal sends no arguments to this ` +
+          `method — if it requires one, that is the gap.`,
+      )
+      if (!firstError) {
+        firstError = error
+        firstErrorMethod = method
+      }
+      continue
     }
     if (payload === undefined) continue
 
@@ -139,6 +176,17 @@ export const getLegalDocuments = async () => {
       documents,
       outstanding: outstandingOf(documents),
       method,
+    }
+  }
+
+  if (firstError) {
+    return {
+      available: false,
+      documents: [],
+      outstanding: [],
+      errored: true,
+      error: firstError,
+      method: firstErrorMethod,
     }
   }
 

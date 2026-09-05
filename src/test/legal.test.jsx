@@ -360,3 +360,45 @@ describe('submitting a venue with something outstanding', () => {
     await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
   })
 })
+
+describe('when the bench answers 417', () => {
+  /**
+   * SEEN ON THE LIVE SITE, 5 Sep:
+   *
+   *   GET /api/method/shotright.api.get_legal_documents  →  417
+   *
+   * 417 is Frappe's ValidationError — the request reached the bench, the method
+   * ran, and it threw. The portal sends no arguments to it at all, so the
+   * likeliest cause is one it requires and we do not know about.
+   */
+  it('keeps trying the other names instead of stopping at the first refusal', async () => {
+    bench.legalListRefuses = true
+    bench.legal = [{ name: 'TERMS', title: 'Partner terms', content: 'Read me.', required: 1 }]
+
+    /* The documents are under a DIFFERENT candidate name — which is the whole
+       reason the portal carries a list. One refusal used to hide it. */
+    bench.legalListAltName = true
+
+    const { getLegalDocuments } = await import('../services/legal')
+    const result = await getLegalDocuments()
+
+    expect(result.available).toBe(true)
+    expect(result.documents).toHaveLength(1)
+    expect(result.method).toBe('shotright.api.get_vendor_legal_documents')
+  })
+
+  /**
+   * And whatever happens, nobody is locked out. A document we cannot read is
+   * not a document anyone can be asked to accept, and gating on a capability
+   * the bench cannot fulfil traps every partner behind a button that cannot
+   * work.
+   */
+  it('does not block a partner over a document it could not fetch', async () => {
+    bench.legalListRefuses = true
+
+    const { getLegalDocuments, canEnforce } = await import('../services/legal')
+    const standing = await getLegalDocuments()
+
+    expect(canEnforce(standing)).toBe(false)
+  })
+})

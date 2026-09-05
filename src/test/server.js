@@ -497,8 +497,35 @@ const apiHandlers = [
 
   /* --------------------------------------------------------------- legal */
 
+  /**
+   * The SECOND candidate name. Off unless a test turns it on, so it can stand
+   * in for "the real method is one of the other ones we guessed" — which is the
+   * only reason the portal carries a list.
+   */
+  method('shotright.api.get_vendor_legal_documents', () =>
+    bench.legalListAltName
+      ? ok(
+          bench.legal.map((d) => ({
+            name: d.name,
+            title: d.title,
+            content: d.content ?? '',
+            required: d.required === undefined ? 1 : d.required,
+            accepted: d.accepted ? 1 : 0,
+          })),
+        )
+      : methodMissing('shotright.api.get_vendor_legal_documents'),
+  ),
+
+  /**
+   * ⚠️ `bench.legalListRefuses` models what the LIVE bench did on 5 Sep: a 417
+   * on this exact method, with no arguments sent. A method that exists and
+   * throws is not a method that is missing, and the portal used to stop at the
+   * first one — hiding the candidates behind it.
+   */
   method('shotright.api.get_legal_documents', () =>
-    ok(
+    bench.legalListRefuses
+      ? validationError('get_legal_documents() missing 1 required positional argument')
+      : ok(
       bench.legal.map((d) => ({
         name: d.name,
         title: d.title,
@@ -626,7 +653,29 @@ const apiHandlers = [
   }),
 
   /* ------------------------------------------------------ menu import job */
-  method('shotright.api.start_menu_import', () => ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })),
+  /**
+   * The importer, and what it does with the way we name the uploaded file.
+   *
+   * `bench.importerWants` is the parameter this bench's method actually
+   * declares. Anything else gets Frappe's TypeError, which is what a whitelisted
+   * method really does with an unexpected keyword — it does NOT ignore it the
+   * way a doc write does. `'none'` models an importer that refuses every shape.
+   */
+  method('shotright.api.start_menu_import', (args) => {
+    const wanted = bench.importerWants
+    if (wanted && !(wanted in args)) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception: `TypeError: start_menu_import() got an unexpected keyword argument '${
+            Object.keys(args).find((k) => k !== 'venue_name' && k !== 'cmd') || 'file_name'
+          }'`,
+        },
+        { status: 417 },
+      )
+    }
+    return ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })
+  }),
   method('shotright.api.get_menu_import_status', () =>
     bench.importFails
       ? ok({

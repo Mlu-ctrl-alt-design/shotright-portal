@@ -63,6 +63,13 @@ const initial = () => ({
    */
   silentlyDrops: [],
 
+  /**
+   * Which parameter the menu importer declares for the uploaded file. The
+   * portal does not know, so it tries `file_name`, `file_url` and `file` in
+   * turn. `'none'` is an importer that takes none of them.
+   */
+  importerWants: 'file_name',
+
   /** Which methods exist. Flip to false to model "not deployed yet". */
   deploy: {
     login: true,
@@ -253,6 +260,12 @@ const initial = () => ({
    * path are unaffected on a bench with nothing to accept.
    */
   legal: [],
+
+  /** The live 417: `get_legal_documents` exists and throws. */
+  legalListRefuses: false,
+
+  /** The documents live under the second candidate name instead. */
+  legalListAltName: false,
 
   /**
    * THE FAILURE THIS SUITE EXISTS FOR: accept returns 200 and writes nothing.

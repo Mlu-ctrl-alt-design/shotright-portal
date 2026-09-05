@@ -457,3 +457,70 @@ describe('while the menu is loading', () => {
     bones.forEach((bone) => expect(bone).toHaveAttribute('aria-hidden', 'true'))
   })
 })
+
+describe('the CSV import, when the server will not take the file', () => {
+  /**
+   * REPORTED: "we're still struggling to upload Menu via csv."
+   *
+   * The upload and the import are two calls, and only the first was tagged. So
+   * anything the IMPORTER refused fell through to "we couldn't read that file"
+   * — a sentence about the partner's spreadsheet, over a problem in our
+   * request. They try a different file, and a CSV instead of an Excel, and a
+   * shorter one, and every attempt fails identically.
+   *
+   * This component's upload branch was written to fix exactly that mistake one
+   * step earlier. It was left in place here.
+   */
+  const upload = async (user) => {
+    await user.click(await screen.findByRole('button', { name: /import a spreadsheet/i }))
+    const input = await screen.findByLabelText(/menu file/i)
+    await user.upload(
+      input,
+      new File(['heading,item_name,price\nMains,Bobotie,120'], 'menu.csv', { type: 'text/csv' }),
+    )
+  }
+
+  it('does not blame the spreadsheet when the importer refuses the request', async () => {
+    bench.importerWants = 'none'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    expect(await screen.findByText(/couldn’t start the import/i)).toBeInTheDocument()
+    expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/nothing is wrong with your file/i)).toBeInTheDocument()
+  })
+
+  /* Neither retrying nor swapping the file can help, so neither is offered —
+     the same rule the permission branch already follows. */
+  it('does not send them off to find another file', async () => {
+    bench.importerWants = 'none'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    await screen.findByText(/couldn’t start the import/i)
+    expect(screen.queryByRole('button', { name: /try another file/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /by hand/i })).toBeInTheDocument()
+  })
+
+  /**
+   * The importer declares `file_url`, not `file_name`. The portal has always
+   * sent a DOCNAME under the name `file_name`, so a bench that wants the URL
+   * refused every import — and said so in a TypeError the partner saw as a
+   * problem with their spreadsheet.
+   */
+  it('finds the parameter the importer actually declares', async () => {
+    bench.importerWants = 'file_url'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    await waitFor(() =>
+      expect(bench.calls.some((c) => c.method === 'start_menu_import' && c.args.file_url)).toBe(
+        true,
+      ),
+    )
+    expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
+  })
+})

@@ -72,6 +72,76 @@ export async function uploadMenuFile(file, onProgress) {
  * endpoint blocked until it was. The caller must not then offer to "check back
  * later" on something that has already happened.
  */
+/**
+ * How the bench is told WHICH uploaded file to read.
+ *
+ * ⚠️ Both halves of this are guesses, and both have already bitten.
+ *
+ * The docname: core `upload_file` returns it as `name`, while
+ * `upload_venue_photo` returns it as `file` — reading only `name` is what made
+ * every venue photo save 417 in #23. The same two shapes are read here.
+ *
+ * The parameter: `file_name` is what this code has always sent, carrying a
+ * DOCNAME, which is not what that name suggests. If the method wants the URL,
+ * or calls the argument something else, Frappe raises TypeError rather than
+ * ignoring it — so the shapes are tried in turn and a wrong-keyword error moves
+ * on instead of surfacing as "we couldn't read your file".
+ */
+const fileRefsFor = (uploaded) => {
+  const docname = uploaded?.name || uploaded?.file
+  const url = uploaded?.file_url
+  return [
+    docname && { file_name: docname },
+    url && { file_url: url },
+    docname && { file: docname },
+    url && { file_name: url },
+  ].filter(Boolean)
+}
+
+const isWrongParameter = (err) =>
+  /unexpected keyword argument|got an unexpected|missing \d+ required (positional|keyword)/i.test(
+    `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+  )
+
+/**
+ * Call the importer, trying each way of naming the file until one is accepted.
+ *
+ * Every error out of here is tagged `stage: 'import'`. That matters more than
+ * it looks: untagged, the caller classified it as a PARSE failure and told the
+ * partner "we couldn't read that file" — a sentence about their spreadsheet,
+ * over a problem in our request. `uploadMenuFile` above has a long comment
+ * about why that is the worst version of this bug. It was fixed one step
+ * earlier and left in place here.
+ */
+const callImporter = async (method, venueId, uploaded) => {
+  const refs = fileRefsFor(uploaded)
+  if (!refs.length) {
+    /* The upload came back with nothing to point at. That is our problem, not a
+       bad spreadsheet, and it must not be reported as one. */
+    const err = new Error('The file uploaded, but the server didn’t say where it put it.')
+    err.stage = 'upload'
+    throw err
+  }
+
+  let last = null
+  for (const ref of refs) {
+    try {
+      return await call(method, { venue_name: venueId, ...ref })
+    } catch (err) {
+      last = err
+      if (isWrongParameter(err)) continue
+      err.stage = 'import'
+      throw err
+    }
+  }
+  console.warn(
+    `[shotright] ${method} rejected every way we know of naming an uploaded file ` +
+      `(${refs.map((r) => Object.keys(r)[0]).join(', ')}). This is a backend contract gap.`,
+  )
+  if (last) last.stage = 'import'
+  throw last
+}
+
 export async function startMenuImport(venueId, file, onUploadProgress) {
   if (USE_MOCKS) return startMock(venueId, file, onUploadProgress)
 
@@ -80,20 +150,18 @@ export async function startMenuImport(venueId, file, onUploadProgress) {
   return withFallback(
     'start_menu_import',
     async () => {
-      const job = await call('shotright.api.start_menu_import', {
-        venue_name: venueId,
-        file_name: uploaded.name,
-      })
+      const job = await callImporter('shotright.api.start_menu_import', venueId, uploaded)
       remember(venueId, job.name)
       return { job, async: true }
     },
     async () => {
       // No background endpoint. Block, and hand back a finished job so the
       // caller renders the same result UI either way.
-      const result = await call('shotright.api.import_products_from_excel', {
-        venue_name: venueId,
-        file_name: uploaded.name,
-      })
+      const result = await callImporter(
+        'shotright.api.import_products_from_excel',
+        venueId,
+        uploaded,
+      )
       return {
         job: {
           name: null,
