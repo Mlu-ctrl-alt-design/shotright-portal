@@ -28,26 +28,34 @@ async function open({ rename = 'ignored' } = {}) {
   const page = await context.newPage()
   page.on('pageerror', (e) => console.log('   PAGEERROR', e.message))
 
-  const state = { venue_name: OLD, dress_code: 'Smart casual' }
+  /**
+   * This stub is a SERVER, so it stores what it is given.
+   *
+   * It used to echo fixed values for everything except the name and the dress
+   * code, which meant any field the form sent came back unchanged — and once
+   * the portal started reading a venue back to check the write landed, that
+   * read as "the opening hours didn't save" on a suite about renaming. The
+   * fake was the thing that was wrong: a real bench that accepts a field keeps
+   * it. Only the deliberate failures below are modelled as failures.
+   */
+  const state = {
+    venue_name: OLD,
+    dress_code: 'Smart casual',
+    address: '70 Juta St',
+    latitude: -26.19,
+    longitude: 28.03,
+    atmosphere_desc: '',
+    moods: ['MOOD-CHILLED'],
+    operating_hours: [],
+  }
   const updates = []
 
   await page.route('**/api/**', (r) => {
     const u = new URL(r.request().url())
     const p = u.pathname
-    const venue = () => ({
-      name: 'V-1',
-      venue_name: state.venue_name,
-      address: '70 Juta St',
-      latitude: -26.19,
-      longitude: 28.03,
-      dress_code: state.dress_code,
-      atmosphere_desc: '',
-      workflow_state: 'Approved',
-      // A venue must carry a mood and an open day or the form refuses to
-      // submit at all — see venueValidation.js.
-      moods: ['MOOD-CHILLED'],
-      operating_hours: [],
-    })
+    // A venue must carry a mood and an open day or the form refuses to submit
+    // at all — see venueValidation.js.
+    const venue = () => ({ name: 'V-1', workflow_state: 'Approved', ...state })
 
     if (p.startsWith('/api/resource/Mood')) return r.fulfill({ json: { data: [] } })
     if (p.includes('api.login'))
@@ -83,9 +91,16 @@ async function open({ rename = 'ignored' } = {}) {
         })
       const body = JSON.parse(r.request().postData() || '{}')
       updates.push(body)
-      if (body.dress_code) state.dress_code = body.dress_code
+
+      // Everything the method understands is stored, the way a bench would.
+      for (const [key, value] of Object.entries(body)) {
+        if (key === 'venue_name' || key === 'new_name' || key === 'new_venue_name') continue
+        state[key] = value
+      }
+
       // 'ignored' is the Frappe default for an undeclared kwarg: HTTP 200, no
-      // error, nothing written.
+      // error, nothing written. That is what this suite is about, so the RENAME
+      // is the one thing deliberately not stored unless the bench understands it.
       if (rename === 'works' && body.new_name) state.venue_name = body.new_name
       return r.fulfill({ json: { message: venue() } })
     }

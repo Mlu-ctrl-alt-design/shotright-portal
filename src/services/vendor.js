@@ -40,6 +40,7 @@ import { matchMood, FALLBACK_MOODS } from './moods'
 import { VENUE_LOOKUPS } from './lookups'
 import { normaliseProfile, toProfilePayload } from './profile'
 import { plainText } from '../utils/html'
+import { minutesSinceMidnight } from '../utils/time'
 
 const pick = (real, mock) => (USE_MOCKS ? mock : real)
 
@@ -966,6 +967,29 @@ const warnAboutRefused = (refused) => {
  */
 const UNORDERED_FIELDS = new Set(['moods'])
 
+/**
+ * Two sets of opening hours, compared as TIMES rather than as strings.
+ *
+ * The form holds "09:00" and the bench sends back "9:00:00" for the same
+ * moment, so a plain JSON comparison says every venue's hours changed on every
+ * save — which matters now that a read-back reports anything that did not
+ * change as "didn't stick". See `utils/time.js` for why the hour is unpadded.
+ */
+const sameHours = (a, b) => {
+  const rows = (list) =>
+    (Array.isArray(list) ? list : []).map((r) =>
+      [
+        r?.day_of_week,
+        Boolean(r?.closed),
+        minutesSinceMidnight(r?.open_time),
+        minutesSinceMidnight(r?.close_time),
+      ].join('|'),
+    )
+  const left = rows(a)
+  const right = rows(b)
+  return left.length === right.length && left.every((v, i) => v === right[i])
+}
+
 const sameSet = (a, b) => {
   const left = [...moodKeysOf(a)].sort()
   const right = [...moodKeysOf(b)].sort()
@@ -983,6 +1007,7 @@ const same = (a, b, field) => {
        shape-blindness, every save of a venue whose moods came back as objects
        would send `moods` and hit §00. */
     if (UNORDERED_FIELDS.has(field)) return sameSet(a, b)
+    if (field === 'operating_hours') return sameHours(a, b)
     try {
       return JSON.stringify(a) === JSON.stringify(b)
     } catch {
@@ -1053,11 +1078,54 @@ export const updateVenue = async (venueId, payload, existing) => {
 
   const refused = await writeVenue(body)
 
+  /**
+   * WHAT ACTUALLY LANDED.
+   *
+   * Reported from the live site: "some fields on the venue screen do not
+   * persist — e.g. the starting time, the moods." Neither was being reported as
+   * a failure, because neither WAS one as far as this code could tell: Frappe
+   * discards a kwarg its whitelisted method does not declare, silently, at HTTP
+   * 200. The save succeeds, the field is dropped, and the partner is told it
+   * worked. They find out when a customer turns up at nine for a ten o'clock
+   * opening.
+   *
+   * A 200 proves routing, not persistence — the same lesson as the venue
+   * photos and the rename. So: read the venue back and compare what we sent
+   * against what is now there. Anything that did not change is named, in the
+   * partner's words, next to the fields that were refused outright.
+   *
+   * `sent` excludes the identifier and the rename aliases: `venue_name` is how
+   * we said WHICH venue, and a bounced rename is reported by the named check
+   * below in a sentence that means more than "the name didn't stick".
+   */
+  const verifyDropped = (stored) => {
+    if (!stored) return []
+    const sent = Object.keys(body).filter(
+      (f) => f !== 'venue_name' && f !== 'new_name' && f !== 'new_venue_name',
+    )
+    return sent.filter((f) => {
+      if (refused.includes(f)) return false
+      /**
+       * ABSENT IS NOT DROPPED.
+       *
+       * A field the read-back does not return at all tells us nothing: the
+       * detail serialiser may simply not include it (they differ between
+       * endpoints on this bench — see `moodKeysOf`). Only a field that comes
+       * back with its OLD value is evidence that the write was discarded, and a
+       * warning we cannot justify is worse than none, because a warning that
+       * fires on ordinary saves is one people learn to click past.
+       */
+      if (stored[f] === undefined) return false
+      return !same(body[f], stored[f], f)
+    })
+  }
+
   if (!renaming) {
+    const stored = await getVenue(venueId)
     return {
-      venue: await getVenue(venueId),
+      venue: stored,
       renamed: null,
-      warnings: warnAboutRefused(refused),
+      warnings: warnAboutRefused([...refused, ...verifyDropped(stored)]),
     }
   }
 
@@ -1083,7 +1151,7 @@ export const updateVenue = async (venueId, payload, existing) => {
   // Both things can be true at once — the rename bounced AND the address was
   // refused — and a partner needs to hear both. "Everything else was saved" is
   // said once, by whichever message goes first, rather than twice.
-  const refusedWarnings = warnAboutRefused(refused)
+  const refusedWarnings = warnAboutRefused([...refused, ...verifyDropped(venue)])
   const renameWarning = renamed
     ? null
     : `The venue is still called “${venue?.venue_name || venueId}”. ` +

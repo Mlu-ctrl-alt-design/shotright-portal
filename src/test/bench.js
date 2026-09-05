@@ -57,6 +57,12 @@ export const VENUE_ONE = {
 }
 
 const initial = () => ({
+  /**
+   * Fields `update_venue` ACCEPTS and then does not store — Frappe's silent
+   * discard of an undeclared kwarg, at HTTP 200. e.g. ['operating_hours'].
+   */
+  silentlyDrops: [],
+
   /** Which methods exist. Flip to false to model "not deployed yet". */
   deploy: {
     login: true,

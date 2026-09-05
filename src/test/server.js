@@ -289,6 +289,21 @@ const apiHandlers = [
         )
       }
 
+      /**
+       * ⚠️ A FIELD THAT IS ACCEPTED AND NOT STORED.
+       *
+       * Frappe discards an undeclared kwarg silently at HTTP 200, so a field
+       * the whitelisted method has no parameter for is taken, acknowledged and
+       * dropped. This bench used to store everything it accepted, which made
+       * that failure — the one behind "the starting time and the moods don't
+       * persist" — impossible to write a test for.
+       *
+       * Fourth time a double that was tidier than the server has cost us a bug,
+       * after the File docname, the unpadded Time hour and the HTML in a menu
+       * description.
+       */
+      if ((bench.silentlyDrops || []).includes(key)) continue
+
       venue[key] = parsed
     }
     return ok({ ...venue })
