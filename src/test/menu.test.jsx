@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
+import MenuSkeleton from '../components/ui/MenuSkeleton'
 
 /**
  * A venue's menu — adding, editing and deleting.
@@ -312,5 +313,93 @@ describe('a description as the bench actually stores it', () => {
       await screen.findByText('Tomatoes, creamy burrata and a great summer starter.'),
     ).toBeInTheDocument()
     expect(screen.queryByText(/<p>/)).not.toBeInTheDocument()
+  })
+})
+
+describe('the menu comes first', () => {
+  /**
+   * This screen used to open on three empty forms — upload, add a heading, add
+   * an item — with the partner's own menu underneath all of them. The forms are
+   * now actions in the header, and the menu is the page.
+   */
+  it('folds the import away once there is a menu, and opens it on request', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addItem(user, { heading: 'Cocktails', item: 'Negroni', price: '85' })
+
+    await waitFor(() => expect(screen.queryByLabelText(/menu file/i)).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /import a spreadsheet/i }))
+    expect(await screen.findByLabelText(/menu file/i)).toBeInTheDocument()
+  })
+
+  it('counts what is on the menu, so the header says what the page holds', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addItem(user, { heading: 'Cocktails', item: 'Negroni', price: '85' })
+
+    expect(await screen.findByText(/1 item in 1 section$/i)).toBeInTheDocument()
+
+    await addItem(user, { heading: 'Cocktails', item: 'Old Fashioned', price: '110' })
+    expect(await screen.findByText(/2 items in 1 section$/i)).toBeInTheDocument()
+  })
+
+  /**
+   * A heading with nothing under it is a blank tab in the customer app. That is
+   * invisible from this screen unless it is said, and it is the single most
+   * likely thing to be wrong with a half-finished menu.
+   */
+  it('says when a section is empty, and what that means for customers', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addItem(user, { heading: 'Cocktails', item: 'Negroni', price: '85' })
+    await addHeading(user, 'Desserts')
+
+    expect(await screen.findByText(/desserts is empty, so customers see a blank tab/i)).toBeInTheDocument()
+
+    const card = (await screen.findByRole('heading', { name: 'Desserts' })).closest('section')
+    expect(within(card).getByText(/customers see this as an empty tab/i)).toBeInTheDocument()
+  })
+
+  /**
+   * The form is on screen at this point only because the menu is empty. Adding
+   * a heading makes it non-empty — so without holding it open, the form the
+   * partner is typing into disappears the moment it works.
+   */
+  it('keeps the section form open for the next one', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addHeading(user, 'Mains')
+
+    expect(await screen.findByRole('heading', { name: 'Cocktails' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Mains' })).toBeInTheDocument()
+  })
+})
+
+describe('while the menu is loading', () => {
+  /**
+   * The screen used to return a bare `<Spinner/>` INSTEAD of itself, so the
+   * heading and the layout vanished and snapped back — and a slow menu looked
+   * exactly like a broken one.
+   *
+   * Rendered directly rather than raced against MSW: the claim is about what
+   * the placeholder IS, and a timing window is not a good place to assert it.
+   */
+  it('keeps the page and its shape instead of replacing them', () => {
+    render(<MenuSkeleton />)
+
+    expect(screen.getByRole('heading', { name: /^menu$/i })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/loading your menu/i)
+    expect(screen.getByText('Sections')).toBeInTheDocument()
+  })
+
+  /* One live region carrying the words. A screen reader should hear "loading
+     your menu", not a description of forty grey boxes. */
+  it('does not read the placeholder boxes out to a screen reader', () => {
+    const { container } = render(<MenuSkeleton />)
+    const bones = container.querySelectorAll('.animate-pulse')
+
+    expect(bones.length).toBeGreaterThan(5)
+    bones.forEach((bone) => expect(bone).toHaveAttribute('aria-hidden', 'true'))
   })
 })

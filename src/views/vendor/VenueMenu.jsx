@@ -11,10 +11,10 @@ import {
   useImportMenu,
 } from '../../hooks/useVendor'
 import { Button, Input, Card, Alert, EmptyState } from '../../components/ui'
-import Spinner from '../../components/ui/Spinner'
 import { MENU_TEMPLATE_HEADERS, buildTemplateCsv } from '../../utils/menuImport'
 import { useMenuImport } from '../../hooks/useMenuImport'
 import MenuImportStatus from '../../components/ui/MenuImportStatus'
+import MenuSkeleton from '../../components/ui/MenuSkeleton'
 
 const zar = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' })
 
@@ -43,6 +43,10 @@ export default function VenueMenu() {
   const [drafts, setDrafts] = useState({})
   const [notice, setNotice] = useState(null)
   const [importError, setImportError] = useState(null)
+  /* Both folded away once there is a menu to look at, and both forced open
+     while there isn't — on an empty menu, putting one in IS the task. */
+  const [importOpen, setImportOpen] = useState(false)
+  const [addingSection, setAddingSection] = useState(false)
 
   const draftFor = (headingId) => drafts[headingId] || { item_name: '', price: '', description: '' }
   const setDraft = (headingId, patch) =>
@@ -53,6 +57,16 @@ export default function VenueMenu() {
     if (!newHeading.trim()) return
     await createHeading.mutateAsync(newHeading.trim())
     setNewHeading('')
+    /* The form deliberately STAYS OPEN. Adding four sections in a row is the
+       normal first-run task, and folding it away after each one turns that into
+       four extra clicks. It clears and keeps focus instead.
+
+       `setAddingSection(true)` matters on the FIRST one: until then the form is
+       on screen only because the menu is empty, and adding a heading makes it
+       non-empty — so without this the form the partner is typing into vanishes
+       from under them the moment it works. */
+    setAddingSection(true)
+    headingRef.current?.focus({ preventScroll: true })
   }
 
   const addItem = async (event, headingId) => {
@@ -102,8 +116,19 @@ export default function VenueMenu() {
    */
   const addManually = () => {
     menuImport.dismiss({ keepRunning: true })
-    headingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    headingRef.current?.focus({ preventScroll: true })
+    setAddingSection(true)
+    // The form may not be mounted yet when this runs.
+    requestAnimationFrame(() => {
+      headingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      headingRef.current?.focus({ preventScroll: true })
+    })
+  }
+
+  /* Opening the form and then leaving the partner to find it is not an
+     affordance, so focus follows the disclosure. */
+  const openSectionForm = () => {
+    setAddingSection(true)
+    requestAnimationFrame(() => headingRef.current?.focus({ preventScroll: true }))
   }
 
   const downloadTemplate = () => {
@@ -116,7 +141,7 @@ export default function VenueMenu() {
     URL.revokeObjectURL(url)
   }
 
-  if (isLoading) return <Spinner label="Loading menu…" />
+  if (isLoading) return <MenuSkeleton />
   if (error) {
     /* A 404 that ISN'T a missing endpoint means this venue is not reachable on
        the account we are signed in as. Frappe's own words for that are
@@ -142,23 +167,45 @@ export default function VenueMenu() {
     )
   }
 
+  const sections = headings
+  const totalItems = sections.reduce((n, h) => n + (h.items?.length || 0), 0)
+  const emptySections = sections.filter((h) => (h.items?.length || 0) === 0)
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* The menu is the subject of this page, so it comes first and the ways
+          of adding to it are actions in the header. This screen used to open on
+          three empty forms — upload, add a heading, add an item — with the
+          partner's own menu below all of them. */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-ink-900">Menu</h1>
-          <p className="mt-1 text-sm text-ink-500">{venue?.venue_name}</p>
+          <p className="mt-1 text-sm text-ink-500">
+            {sections.length === 0
+              ? venue?.venue_name
+              : `${totalItems} ${totalItems === 1 ? 'item' : 'items'} in ${sections.length} ${
+                  sections.length === 1 ? 'section' : 'sections'
+                }`}
+          </p>
         </div>
-        <Link to="/venues">
-          <Button variant="ghost">Back to venues</Button>
-        </Link>
+        {sections.length > 0 && (
+          <div className="flex flex-wrap gap-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setImportOpen((v) => !v)}
+              aria-expanded={importOpen}
+            >
+              Import a spreadsheet
+            </Button>
+            <Button size="sm" onClick={openSectionForm} aria-expanded={addingSection}>
+              Add a section
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* The reported "Not found" on opening a menu. A missing ENDPOINT is not
-          a missing menu, and saying so is the difference between "the portal
-          isn't finished" and "my restaurant's menu has been deleted". Named
-          precisely, because the fix is a one-line answer from whoever owns the
-          bench: what is this method actually called? */}
+      {/* A missing ENDPOINT is not a missing menu. */}
       {menuReadMissing && (
         <Alert variant="warning">
           <p className="font-bold">We can’t read this menu from the server yet</p>
@@ -172,128 +219,169 @@ export default function VenueMenu() {
       <Alert variant="success">{notice}</Alert>
       <Alert variant="danger">{importError}</Alert>
 
-      <Card title="Upload your menu">
-        <p className="text-sm text-ink-700">
-          Start from our template. Headings are created as they appear.
-        </p>
-        <p className="mt-1 text-xs text-ink-500">
-          Columns:{' '}
-          <code className="rounded bg-gray-100 px-1 font-mono text-xs">
-            {MENU_TEMPLATE_HEADERS.join(', ')}
-          </code>
-          . CSV or Excel.
-        </p>
+      {/* Open by default on an empty menu, because then it IS the task; folded
+          away once there is a menu, because then it is an occasional one. */}
+      {(importOpen || sections.length === 0) && (
+        <Card title="Import a spreadsheet">
+          <p className="text-sm text-ink-700">
+            Start from our template. Headings are created as they appear.
+          </p>
+          <p className="mt-1 text-xs text-ink-500">
+            Columns:{' '}
+            <code className="rounded bg-gray-100 px-1 font-mono text-xs">
+              {MENU_TEMPLATE_HEADERS.join(', ')}
+            </code>
+            . CSV or Excel.
+          </p>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button variant="secondary" size="sm" onClick={downloadTemplate}>
-            Download the template
-          </Button>
-          {/* UNTITLED UI: https://www.untitledui.com/react/components/file-upload */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            aria-label="Menu file"
-            accept=".csv,text/csv,.xlsx,.xls"
-            onChange={onUpload}
-            disabled={menuImport.busy}
-            className="block min-w-56 flex-1 text-sm text-ink-700 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100 disabled:opacity-60"
-          />
-        </div>
-
-        {menuImport.phase !== 'idle' && (
-          <div className="mt-4">
-            <MenuImportStatus
-              {...menuImport}
-              fileName={file?.name}
-              fileSize={file?.size}
-              onAddManually={addManually}
-              onCancel={() => menuImport.dismiss({ keepRunning: false })}
-              onDismiss={menuImport.reset}
-              onReplaceFile={() => {
-                // Stop watching, keep the rows already imported, and reopen the
-                // picker — a partner who realises they sent last season's menu
-                // should not have to hunt for the input again.
-                menuImport.dismiss({ keepRunning: false })
-                fileInputRef.current?.click()
-              }}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button variant="secondary" size="sm" onClick={downloadTemplate}>
+              Download the template
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              aria-label="Menu file"
+              accept=".csv,text/csv,.xlsx,.xls"
+              onChange={onUpload}
+              disabled={menuImport.busy}
+              className="block min-w-56 flex-1 text-sm text-ink-700 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100 disabled:opacity-60"
             />
           </div>
-        )}
-      </Card>
 
-      <Card title="Add a heading">
-        <form onSubmit={addHeading} className="flex flex-wrap items-end gap-3">
-          <Input
-            ref={headingRef}
-            label="Heading"
-            name="heading"
-            placeholder="Cocktails"
-            className="min-w-56 flex-1"
-            value={newHeading}
-            onChange={(e) => setNewHeading(e.target.value)}
-          />
-          <Button type="submit" loading={createHeading.isPending}>
-            Add heading
-          </Button>
-        </form>
-      </Card>
+          {menuImport.phase !== 'idle' && (
+            <div className="mt-4">
+              <MenuImportStatus
+                {...menuImport}
+                fileName={file?.name}
+                fileSize={file?.size}
+                onAddManually={addManually}
+                onCancel={() => menuImport.dismiss({ keepRunning: false })}
+                onDismiss={menuImport.reset}
+                onReplaceFile={() => {
+                  menuImport.dismiss({ keepRunning: false })
+                  fileInputRef.current?.click()
+                }}
+              />
+            </div>
+          )}
+        </Card>
+      )}
 
-      {headings.length === 0 ? (
+      {(addingSection || sections.length === 0) && (
+        <Card title="Add a section">
+          <form onSubmit={addHeading} className="flex flex-wrap items-end gap-3">
+            <Input
+              ref={headingRef}
+              label="Heading"
+              name="heading"
+              placeholder="Cocktails"
+              className="min-w-56 flex-1"
+              value={newHeading}
+              onChange={(e) => setNewHeading(e.target.value)}
+            />
+            <Button type="submit" loading={createHeading.isPending}>
+              Add heading
+            </Button>
+          </form>
+        </Card>
+      )}
+
+      {sections.length === 0 ? (
         <EmptyState
           title="No menu yet"
-          description="Add a heading like “Cocktails” or “Mains”, then list items under it."
+          description="Customers open the Menu tab more than any other."
         />
       ) : (
-        headings.map((heading) => (
-          <Card key={heading.name} title={heading.heading}>
-            {heading.items.length === 0 ? (
-              <p className="text-sm text-ink-500">No items under this heading yet.</p>
-            ) : (
-              <ul className="divide-y divide-gray-200">
-                {heading.items.map((item) => (
-                  <MenuItemRow
-                    key={item.name}
-                    item={item}
-                    zar={zar}
-                    onSave={(values) => updateItem.mutateAsync({ itemId: item.name, ...values })}
-                    onRemove={() => deleteItem.mutateAsync(item.name)}
-                  />
-                ))}
-              </ul>
+        <div className="grid items-start gap-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
+          {/* The rail is a summary, not navigation: the counts are the point.
+              A section with nothing under it is a blank tab in the customer app,
+              and that is invisible from here without them. */}
+          <Card title="Sections" className="hidden lg:block">
+            <ul className="-my-1 text-sm">
+              <li className="flex items-center justify-between gap-3 py-1.5 font-semibold">
+                <span>All items</span>
+                <span className="text-ink-500">{totalItems}</span>
+              </li>
+              {sections.map((section) => {
+                const count = section.items?.length || 0
+                return (
+                  <li
+                    key={section.name}
+                    className="flex items-center justify-between gap-3 py-1.5 text-ink-700"
+                  >
+                    <span className="truncate">{section.heading}</span>
+                    <span className={count === 0 ? 'font-semibold text-brand-700' : 'text-ink-500'}>
+                      {count}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+            {emptySections.length > 0 && (
+              <p className="mt-4 border-t border-brand-100 pt-3 text-xs text-ink-700">
+                {emptySections.length === 1
+                  ? `${emptySections[0].heading} is empty, so customers see a blank tab.`
+                  : `${emptySections.length} sections are empty, so customers see blank tabs.`}
+              </p>
             )}
-
-            <form
-              onSubmit={(e) => addItem(e, heading.name)}
-              className="mt-4 flex flex-wrap items-end gap-3 border-t border-gray-200 pt-4"
-            >
-              <Input
-                label="Item"
-                className="min-w-48 flex-1"
-                placeholder="Espresso Martini"
-                value={draftFor(heading.name).item_name}
-                onChange={(e) => setDraft(heading.name, { item_name: e.target.value })}
-              />
-              <Input
-                label="Price (ZAR)"
-                type="number"
-                min="0"
-                step="0.01"
-                className="w-32"
-                value={draftFor(heading.name).price}
-                onChange={(e) => setDraft(heading.name, { price: e.target.value })}
-              />
-              <Input
-                label="Description"
-                className="min-w-48 flex-1"
-                value={draftFor(heading.name).description}
-                onChange={(e) => setDraft(heading.name, { description: e.target.value })}
-              />
-              <Button type="submit" variant="secondary" loading={createItem.isPending}>
-                Add item
-              </Button>
-            </form>
           </Card>
-        ))
+
+          <div className="space-y-6">
+            {sections.map((section) => (
+              <Card key={section.name} title={section.heading}>
+                {section.items.length === 0 ? (
+                  <p className="text-sm text-ink-700">
+                    Nothing here yet — customers see this as an empty tab.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-gray-200">
+                    {section.items.map((item) => (
+                      <MenuItemRow
+                        key={item.name}
+                        item={item}
+                        zar={zar}
+                        onSave={(values) => updateItem.mutateAsync({ itemId: item.name, ...values })}
+                        onRemove={() => deleteItem.mutateAsync(item.name)}
+                      />
+                    ))}
+                  </ul>
+                )}
+
+                <form
+                  onSubmit={(e) => addItem(e, section.name)}
+                  className="mt-4 flex flex-wrap items-end gap-3 border-t border-gray-200 pt-4"
+                >
+                  <Input
+                    label="Item"
+                    className="min-w-48 flex-1"
+                    placeholder="Espresso Martini"
+                    value={draftFor(section.name).item_name}
+                    onChange={(e) => setDraft(section.name, { item_name: e.target.value })}
+                  />
+                  <Input
+                    label="Price (ZAR)"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="w-32"
+                    value={draftFor(section.name).price}
+                    onChange={(e) => setDraft(section.name, { price: e.target.value })}
+                  />
+                  <Input
+                    label="Description"
+                    className="min-w-48 flex-1"
+                    value={draftFor(section.name).description}
+                    onChange={(e) => setDraft(section.name, { description: e.target.value })}
+                  />
+                  <Button type="submit" variant="secondary" loading={createItem.isPending}>
+                    Add item
+                  </Button>
+                </form>
+              </Card>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
