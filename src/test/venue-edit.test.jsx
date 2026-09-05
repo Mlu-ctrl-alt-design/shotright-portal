@@ -360,6 +360,68 @@ describe('moods that arrive in an unexpected shape', () => {
     expect(opening).toHaveValue('09:00')
   })
 
+
+describe('a save the server accepted and did not keep', () => {
+  /**
+   * REPORTED FROM THE LIVE SITE: "some fields on the venue screen do not
+   * persist — e.g. the starting time, the moods."
+   *
+   * Neither was being reported as a failure, because as far as this code could
+   * tell neither WAS one. Frappe discards a kwarg its whitelisted method does
+   * not declare — silently, at HTTP 200. The save succeeds, the field is
+   * dropped, the partner is told it worked, and they find out when a customer
+   * turns up at nine for a ten o'clock opening.
+   *
+   * The fake bench could not model this until now: it stored everything it
+   * accepted. Fourth time a double tidier than the server has hidden a bug.
+   */
+  it('tells the partner when the opening time did not stick', async () => {
+    bench.silentlyDrops = ['operating_hours']
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const opening = await screen.findByLabelText(/Wednesday opening time/i)
+    await user.clear(opening)
+    await user.type(opening, '10:30')
+    await save(user)
+
+    expect(await screen.findByText(/the opening hours/i)).toBeInTheDocument()
+    /* And the bench really did drop it — otherwise this proves nothing. */
+    expect(venueById('VEN-00001').operating_hours[2].open_time).toBe('9:00:00')
+  })
+
+  it('says nothing when the save did stick', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const opening = await screen.findByLabelText(/Wednesday opening time/i)
+    await user.clear(opening)
+    await user.type(opening, '10:30')
+    await save(user)
+
+    await waitFor(() =>
+      expect(venueById('VEN-00001').operating_hours[2].open_time).toBe('10:30'),
+    )
+    expect(screen.queryByText(/couldn’t update/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * The false alarm this had to avoid. The form holds "09:00" and the bench
+   * sends back "9:00:00" for the same moment, so a plain string comparison
+   * would report every venue's hours as dropped on every single save — and a
+   * warning that fires every time is one people learn to click through.
+   */
+  it('does not cry wolf over Frappe’s own way of writing a time', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    expect(screen.queryByText(/the opening hours/i)).not.toBeInTheDocument()
+  })
+})
+
 })
 
   it('saves when detail 404s AND the dashboard row describes moods differently', async () => {

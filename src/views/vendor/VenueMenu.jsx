@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useParams, Link } from 'react-router-dom'
+import { clsx } from '../../utils/clsx'
 import {
   useVenue,
   useMenu,
@@ -47,6 +48,44 @@ export default function VenueMenu() {
      while there isn't — on an empty menu, putting one in IS the task. */
   const [importOpen, setImportOpen] = useState(false)
   const [addingSection, setAddingSection] = useState(false)
+  /**
+   * The last thing removed, so it can be put back.
+   *
+   * Lives HERE and not on the row: a successful delete unmounts the row, so a
+   * row-owned Undo would disappear at exactly the moment it was needed.
+   *
+   * ⚠️ Undo RE-CREATES rather than un-deletes — the item comes back with a new
+   * id, at the end of its section. The alternative was to hold the delete back
+   * for a few seconds so Undo could cancel it, and that was worse: the row
+   * would read as gone while the server still had it, which is the exact thing
+   * `delete a menu item` in the tests exists to prevent.
+   */
+  const [undone, setUndone] = useState(null)
+  const undoTimer = useRef(null)
+
+  useEffect(() => () => clearTimeout(undoTimer.current), [])
+
+  const rememberRemoval = (section, item) => {
+    clearTimeout(undoTimer.current)
+    setUndone({
+      sectionId: section.name,
+      sectionLabel: section.heading,
+      fields: {
+        item_name: item.item_name,
+        price: item.price,
+        description: item.description || '',
+      },
+    })
+    undoTimer.current = setTimeout(() => setUndone(null), 12000)
+  }
+
+  const undoRemoval = async () => {
+    if (!undone) return
+    clearTimeout(undoTimer.current)
+    const restoring = undone
+    setUndone(null)
+    await createItem.mutateAsync({ headingId: restoring.sectionId, ...restoring.fields })
+  }
 
   const draftFor = (headingId) => drafts[headingId] || { item_name: '', price: '', description: '' }
   const setDraft = (headingId, patch) =>
@@ -330,6 +369,22 @@ export default function VenueMenu() {
           <div className="space-y-6">
             {sections.map((section) => (
               <Card key={section.name} title={section.heading}>
+                {undone?.sectionId === section.name && (
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-brand-50 px-4 py-3">
+                    <p className="text-sm text-ink-900">
+                      Removed <span className="font-semibold">{undone.fields.item_name}</span>.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={undoRemoval}
+                      loading={createItem.isPending}
+                    >
+                      Undo
+                    </Button>
+                  </div>
+                )}
+
                 {section.items.length === 0 ? (
                   <p className="text-sm text-ink-700">
                     Nothing here yet — customers see this as an empty tab.
@@ -342,7 +397,15 @@ export default function VenueMenu() {
                         item={item}
                         zar={zar}
                         onSave={(values) => updateItem.mutateAsync({ itemId: item.name, ...values })}
-                        onRemove={() => deleteItem.mutateAsync(item.name)}
+                        onRemove={async () => {
+                          const result = await deleteItem.mutateAsync(item.name)
+                          /* `deleted: false` means the bench refused and the
+                             item is still there — nothing to undo. */
+                          if (!result || result.deleted !== false) {
+                            rememberRemoval(section, item)
+                          }
+                          return result
+                        }}
                       />
                     ))}
                   </ul>
@@ -409,8 +472,16 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
     price: String(item.price ?? ''),
     description: item.description || '',
   })
-  const [busy, setBusy] = useState(false)
+  /* idle | saving | saved | failed. One value rather than three booleans,
+     because the states are mutually exclusive and two of them used to be
+     representable at once. */
+  const [status, setStatus] = useState('idle')
   const [problem, setProblem] = useState(null)
+  const savedTimer = useRef(null)
+
+  useEffect(() => () => clearTimeout(savedTimer.current), [])
+
+  const busy = status === 'saving'
 
   const start = () => {
     setProblem(null)
@@ -423,8 +494,8 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
   }
 
   const save = async (event) => {
-    event.preventDefault()
-    setBusy(true)
+    event?.preventDefault()
+    setStatus('saving')
     setProblem(null)
     try {
       const result = await onSave({
@@ -436,18 +507,34 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
          for this. Their typed values stay on screen either way, so nothing has
          to be remembered and retyped from nothing. */
       if (result && result.saved === false) {
-        setProblem(
-          'We can’t change a menu item just yet. Your wording is still here, so you can copy ' +
-            'it into a new item and remove this one.',
-        )
+        setStatus('failed')
+        setProblem('We can’t change a menu item yet. Your wording is still here.')
         return
       }
       setEditing(false)
+      /* Said ON the row, briefly, rather than as a toast. A confirmation that
+         appears somewhere else and then leaves is a confirmation nobody sees. */
+      setStatus('saved')
+      savedTimer.current = setTimeout(() => setStatus('idle'), 4000)
     } catch (err) {
+      /* Deliberately stays in `editing`. The typed values are the partner's
+         work, and throwing them away to show an error message means they retype
+         from memory to try again. */
+      setStatus('failed')
       setProblem(err.message)
-    } finally {
-      setBusy(false)
     }
+  }
+
+  /* The way out of a failure that will not clear: put the row back as it was. */
+  const discard = () => {
+    setDraft({
+      item_name: item.item_name,
+      price: String(item.price ?? ''),
+      description: item.description || '',
+    })
+    setProblem(null)
+    setStatus('idle')
+    setEditing(false)
   }
 
   const remove = async () => {
@@ -455,10 +542,7 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
     try {
       const result = await onRemove()
       if (result && result.deleted === false) {
-        setProblem(
-          'We can’t remove menu items just yet, so this one is still on your menu. Nothing has ' +
-            'changed.',
-        )
+        setProblem('We can’t remove menu items yet, so this one is still on your menu.')
       }
     } catch (err) {
       setProblem(err.message)
@@ -467,13 +551,29 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
 
   if (!editing) {
     return (
-      <li className="flex items-center justify-between gap-4 py-3">
+      <li
+        className={clsx(
+          'flex items-center justify-between gap-4 rounded-xl px-2 py-3 transition-colors',
+          // The row stays exactly where it is and dims. A spinner over the list
+          // moves everything and hides the thing being changed.
+          status === 'saving' && 'opacity-55',
+          status === 'saved' && 'bg-green-50',
+        )}
+      >
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-ink-900">{item.item_name}</p>
           {item.description && <p className="truncate text-xs text-ink-500">{item.description}</p>}
           {problem && <p className="mt-1 text-xs font-medium text-red-700">{problem}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-4">
+          {status === 'saved' && (
+            <span className="flex items-center gap-1 text-xs font-semibold text-green-700">
+              <svg viewBox="0 0 20 20" className="size-3.5 fill-none stroke-current stroke-[2.2]" aria-hidden="true">
+                <path d="M4.5 10.5 8.5 14.5 15.5 6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Saved
+            </span>
+          )}
           <span className="text-sm font-medium text-ink-900">{zar.format(item.price)}</span>
           <button
             type="button"
@@ -520,13 +620,17 @@ function MenuItemRow({ item, zar, onSave, onRemove }) {
           className="min-w-40 flex-1"
         />
         <Button type="submit" size="sm" loading={busy}>
-          Save
+          {status === 'failed' ? 'Try again' : 'Save'}
         </Button>
-        <Button type="button" size="sm" variant="secondary" onClick={() => setEditing(false)}>
-          Cancel
+        <Button type="button" size="sm" variant="secondary" onClick={discard} disabled={busy}>
+          {status === 'failed' ? 'Discard the change' : 'Cancel'}
         </Button>
       </form>
-      {problem && <p className="mt-2 text-sm font-medium text-red-700">{problem}</p>}
+      {problem && (
+        <p className="mt-2 text-sm font-medium text-red-700" role="alert">
+          {problem} Nothing here has been sent, so you can change it and try again.
+        </p>
+      )}
     </li>
   )
 }
