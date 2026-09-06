@@ -3,6 +3,7 @@ import { useVenue, useMenu, useVenuePhotos } from '../../hooks/useVendor'
 import { Alert, Badge, Button, Card } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { bucketOf, stateLabel, stateTone } from '../../services/workflowState'
+import { spendFieldOf, formatSpend } from '../../services/averageSpend'
 
 /**
  * "How customers will see this."
@@ -29,6 +30,8 @@ export default function VenuePreview() {
   const { venueId } = useParams()
   const { data: venue, isLoading, error } = useVenue(venueId)
   const { data: photoData } = useVenuePhotos(venueId)
+  /* Read off the venue the bench sent, not guessed — see averageSpend.js. */
+  const spendField = spendFieldOf(venue)
   const { data: menuData } = useMenu(venueId)
 
   if (isLoading) return <Spinner label="Building your preview…" />
@@ -149,6 +152,21 @@ export default function VenuePreview() {
 
         <h3 className="mt-5 text-sm font-bold text-ink-900">Dress code</h3>
         <p className="mt-1 text-sm text-ink-700">{venue?.dress_code || 'Not set'}</p>
+
+        {/* Only when the bench carries the field. A preview that invents a row
+            the customer app will not show is worse than one that omits it —
+            this screen's whole job is "what a customer sees". */}
+        {spendField && (
+          <>
+            <h3 className="mt-5 text-sm font-bold text-ink-900">Average spend</h3>
+            <p className="mt-1 text-sm text-ink-700">
+              {formatSpend(venue?.[spendField]) || 'Not set'}
+              {formatSpend(venue?.[spendField]) && (
+                <span className="text-ink-500"> per person</span>
+              )}
+            </p>
+          </>
+        )}
 
         <h3 className="mt-5 text-sm font-bold text-ink-900">Open</h3>
         {(venue?.operating_hours || []).filter((h) => !h.closed).length ? (
