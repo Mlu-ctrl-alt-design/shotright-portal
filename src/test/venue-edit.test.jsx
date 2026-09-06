@@ -473,6 +473,93 @@ describe('moods, now that the bench has told us the shape', () => {
   })
 })
 
+
+describe('average spend', () => {
+  /**
+   * ⚠️ The fieldname is UNCONFIRMED. The backend says the field is on `Venue`
+   * and has not said what it is called, so the portal reads the name off the
+   * venue the bench actually sent rather than guessing one.
+   *
+   * Every blind guess this project has shipped has cost a bug — the File
+   * docname, the Time hour, `item_id`, `file_name`. This is the same class of
+   * question answered the safe way round.
+   */
+  it('saves what the partner typed, under the name the bench uses', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByLabelText(/average spend/i)
+    await user.clear(field)
+    await user.type(field, '320')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').average_spend).toBe(320))
+  })
+
+  it('follows the field when the bench calls it something else', async () => {
+    bench.spendField = 'avg_spend'
+    bench.venues[0].avg_spend = 250
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByLabelText(/average spend/i)
+    await user.clear(field)
+    await user.type(field, '410')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').avg_spend).toBe(410))
+  })
+
+  /**
+   * An input over something that cannot save is the failure this codebase keeps
+   * returning to, and it is worse here than most: a figure that looks saved and
+   * is not gets quoted to a customer.
+   */
+  it('does not render at all when the venue carries no such field', async () => {
+    bench.spendField = null
+    renderApp({ route: EDIT, signedIn: true })
+
+    await screen.findByLabelText(/dress code/i)
+    expect(screen.queryByLabelText(/average spend/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * ⚠️ THE OUTCOME TO EXPECT ON THE LIVE BENCH, until someone confirms
+   * otherwise. A field can sit on the doctype and still not be a parameter of
+   * the whitelisted method — and `update_venue` refuses an undeclared field by
+   * NAME rather than dropping it, so this is a legible failure rather than a
+   * silent one.
+   *
+   * The partner must be told. A figure that looks saved and is not gets quoted
+   * to a customer, and the rest of their edit still needs to land.
+   */
+  it('says so when the method will not take it, and saves the rest', async () => {
+    bench.venueWritable = bench.venueWritable.filter((f) => f !== 'average_spend')
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    const spend = screen.getByLabelText(/average spend/i)
+    await user.clear(spend)
+    await user.type(spend, '320')
+    await save(user)
+
+    expect(await screen.findByText(/couldn’t update the average spend/i)).toBeInTheDocument()
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+  })
+
+  /* An empty box is "I would rather not say" — a real answer. R0 average spend
+     would read as a free venue. */
+  it('sends nothing rather than zero when it is left blank', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByLabelText(/average spend/i)
+    await user.clear(field)
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').average_spend).toBeNull())
+  })
+})
+
 })
 
   it('saves when detail 404s AND the dashboard row describes moods differently', async () => {

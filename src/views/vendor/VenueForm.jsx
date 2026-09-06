@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { minutesSinceMidnight } from '../../utils/time'
+import { spendFieldOf, describeSpendGap, parseSpend } from '../../services/averageSpend'
 import {
   useVenue,
   useMoods,
@@ -129,6 +130,17 @@ export default function VenueForm() {
     })
   }, [existing, moods])
 
+  /**
+   * Which key this bench uses for average spend, read off the venue it sent
+   * rather than guessed. `null` means the field is not on this payload and the
+   * input does not render; the console line names what the payload DID carry,
+   * so one look at a live session gives the real name.
+   */
+  const spendField = spendFieldOf(existing)
+  useEffect(() => {
+    if (existing && !spendField) describeSpendGap(existing)
+  }, [existing, spendField])
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   const toggleMood = (moodName) =>
@@ -181,6 +193,9 @@ export default function VenueForm() {
       latitude: form.latitude === '' ? null : Number(form.latitude),
       longitude: form.longitude === '' ? null : Number(form.longitude),
     }
+    /* An empty box is "I would rather not say", which is a real answer and must
+       not become a zero — R0 average spend reads as a free venue. */
+    if (spendField) payload[spendField] = parseSpend(form[spendField])
 
     try {
       const result = isEdit
@@ -341,6 +356,27 @@ export default function VenueForm() {
             value={form.dress_code}
             onChange={set('dress_code')}
           />
+          {/* Shown only when the venue the bench sent actually carries the
+              field — see `services/averageSpend.js`. An input over something
+              that cannot save is the failure this codebase keeps returning to,
+              and it is worse here than most: a figure that looks saved and is
+              not will be quoted to a customer.
+
+              Held as a STRING and parsed on save, the same trap the menu price
+              field documents — a controlled input bound to a parsed number
+              throws away any keystroke that does not parse, so nobody can type
+              a decimal point. */}
+          {spendField && (
+            <Input
+              label="Average spend per person"
+              name={spendField}
+              inputMode="decimal"
+              placeholder="250"
+              hint="Roughly what one person spends on a normal visit. Leave it blank rather than guess."
+              value={form[spendField] ?? ''}
+              onChange={set(spendField)}
+            />
+          )}
           <Textarea
             label="Atmosphere"
             name="atmosphere_desc"

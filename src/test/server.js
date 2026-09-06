@@ -285,6 +285,15 @@ const apiHandlers = [
     if (!venue) return docMissing()
     const out = { ...venue, moods: shapeMoods(venue.moods) }
     for (const field of bench.detailOmits || []) delete out[field]
+
+    /* The average-spend key, renamed to whatever this bench calls it — or
+       removed entirely. The portal reads the name off this payload rather than
+       guessing, so the rename is the whole point of the switch. */
+    if (bench.spendField !== 'average_spend') {
+      const value = out.average_spend
+      delete out.average_spend
+      if (bench.spendField) out[bench.spendField] = value
+    }
     return ok(out)
   }),
 

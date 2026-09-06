@@ -39,6 +39,11 @@ export const VENUE_ONE = {
   latitude: -33.9249,
   longitude: 18.4241,
   dress_code: 'Smart casual',
+  /* ⚠️ The fieldname is UNCONFIRMED — the backend says the field is on `Venue`
+     and has not said what it is called. `bench.spendField` renames it so the
+     portal's resolution off the payload is tested rather than assumed, and
+     `null` models a bench that does not carry it at all. */
+  average_spend: 250,
   atmosphere_desc: 'Loud, warm, good for a long table.',
   workflow_state: 'Approved',
   moods: ['MOOD-CHILLED'],
@@ -76,6 +81,9 @@ const initial = () => ({
    * right name is testable.
    */
   itemIdParam: 'item_id',
+
+  /** Which key the venue payload carries for average spend; null for none. */
+  spendField: 'average_spend',
 
   /**
    * How this bench reports a method that is not there. 'attribute-error' is
@@ -257,6 +265,14 @@ const initial = () => ({
     'moods',
     'operating_hours',
     'new_name',
+    /* ⚠️ Writable ONLY because this bench is modelled as accepting it. On the
+       real one that is unconfirmed: a field can sit on the doctype and still
+       not be a parameter of the whitelisted method, and `update_venue` refuses
+       an undeclared field by name rather than dropping it. Take this out to
+       model that, and the partner should be told the average spend did not
+       save — not left thinking it did. */
+    'average_spend',
+    'avg_spend',
   ],
 
   session: null,

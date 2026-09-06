@@ -41,6 +41,7 @@ import { VENUE_LOOKUPS } from './lookups'
 import { normaliseProfile, toProfilePayload } from './profile'
 import { plainText } from '../utils/html'
 import { minutesSinceMidnight } from '../utils/time'
+import { SPEND_FIELDS } from './averageSpend'
 
 const pick = (real, mock) => (USE_MOCKS ? mock : real)
 
@@ -901,6 +902,11 @@ const VENUE_WRITE_FIELDS = [
   'atmosphere_desc',
   'moods',
   'operating_hours',
+  /* Average spend. All the candidate names are listed because only ONE of them
+     is ever set — the form resolves the real name off the venue the bench sent
+     (see `services/averageSpend.js`), so the others can never appear in a
+     payload and cost nothing here. */
+  ...SPEND_FIELDS,
 ]
 
 export const UPDATE_VENUE_METHOD = 'shotright.api.update_venue'
@@ -918,6 +924,7 @@ const FIELD_LABELS = {
   moods: 'the moods',
   operating_hours: 'the opening hours',
   venue_name: 'the venue name',
+  ...Object.fromEntries(SPEND_FIELDS.map((f) => [f, 'the average spend'])),
 }
 
 /**
