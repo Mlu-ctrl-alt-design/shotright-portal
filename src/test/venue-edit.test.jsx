@@ -143,6 +143,9 @@ describe('edit a venue', () => {
   })
 
   it('saves the rest of the edit when the mood list crashes the child table', async () => {
+    /* The old bench, kept as a regression guard: the workaround must still
+       work if a deployment ever goes back to it. */
+    bench.moodsAreChildRows = true
     /* When moods genuinely change we have to send them, and on today's bench
        that raises. Nothing is saved — the exception is raised before the write
        — so the rest of the edit is still to do. */
@@ -161,6 +164,9 @@ describe('edit a venue', () => {
   })
 
   it('never shows a raw Python TypeError to a partner', async () => {
+    /* The old bench, kept as a regression guard: the workaround must still
+       work if a deployment ever goes back to it. */
+    bench.moodsAreChildRows = true
     const { user } = renderApp({ route: EDIT, signedIn: true })
 
     await screen.findByLabelText(/dress code/i)
@@ -419,6 +425,51 @@ describe('a save the server accepted and did not keep', () => {
 
     await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
     expect(screen.queryByText(/the opening hours/i)).not.toBeInTheDocument()
+  })
+})
+
+
+describe('moods, now that the bench has told us the shape', () => {
+  /**
+   * ANSWERED 5 Sep. `Venue.moods` is a Table MultiSelect onto `Venue Mood`,
+   * whose single child field is `mood`, and bare names are accepted directly.
+   *
+   * The portal had been DROPPING moods from every edit on the theory that a
+   * wrong child-row key would make Frappe write empty rows and report success.
+   * That is real Frappe behaviour; it is not this endpoint's behaviour, and the
+   * caution cost the feature for weeks.
+   */
+  it('saves a changed mood selection', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /^lively$/i }))
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').moods).toContain('MOOD-LIVELY'))
+    expect(screen.queryByText(/couldn’t update the moods/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * ⚠️ Setting moods REPLACES the whole set — `Document.set()` clears the table
+   * before extending it. So an empty list is not "leave these alone", it is
+   * "delete every mood this venue has". The form will not submit without one,
+   * which makes an empty array here a bug on our side; sending it would turn
+   * that bug into data loss.
+   */
+  it('never sends an empty mood list, which would erase them', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    const sent = bench.calls.filter((c) => c.method === 'update_venue')
+    sent.forEach((c) => {
+      if ('moods' in c.args) expect(c.args.moods.length).toBeGreaterThan(0)
+    })
+    expect(venueById('VEN-00001').moods.length).toBeGreaterThan(0)
   })
 })
 

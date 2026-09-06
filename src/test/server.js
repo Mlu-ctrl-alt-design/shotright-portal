@@ -4,15 +4,46 @@ import { bench, headingsFor, venueById } from './bench'
 
 /* ------------------------------------------------------------ Frappe shapes */
 
-/** A missing whitelisted method. Names the method, as Frappe does. */
-const methodMissing = (method) =>
-  HttpResponse.json(
+/**
+ * A missing whitelisted method — as THIS bench actually reports one.
+ *
+ * ⚠️ Verified on shotright.thedaystar.co.za, 5 Sep. Asking for a name that is
+ * not in `shotright.api` does NOT return 404 "Method Not Found". It returns:
+ *
+ *   417  AttributeError: module 'shotright.api' has no attribute 'x'
+ *
+ * This mock returned the 404, which is what a Frappe bench returns when the
+ * MODULE path itself does not resolve — a different case. So every capability
+ * probe in the portal passed here and failed in production: `isMethodMissing`
+ * was gated on the status, and no fallback on the live site ever engaged.
+ *
+ * Sixth time this session a double disagreeing with the server has cost us a
+ * bug, and the widest-reaching of them.
+ *
+ * `bench.missingMethodStyle` keeps the old shape available, because a bench
+ * whose whole app is absent really does answer that way and the portal must
+ * still understand it.
+ */
+const methodMissing = (method) => {
+  if (bench.missingMethodStyle === 'not-found') {
+    return HttpResponse.json(
+      {
+        exc_type: 'DoesNotExistError',
+        exception: `frappe.exceptions.DoesNotExistError: Method Not Found: ${method}`,
+      },
+      { status: 404 },
+    )
+  }
+  const attribute = method.split('.').pop()
+  const module = method.split('.').slice(0, -1).join('.')
+  return HttpResponse.json(
     {
-      exc_type: 'DoesNotExistError',
-      exception: `frappe.exceptions.DoesNotExistError: Method Not Found: ${method}`,
+      exc_type: 'AttributeError',
+      exception: `AttributeError: module '${module}' has no attribute '${attribute}'`,
     },
-    { status: 404 },
+    { status: 417 },
   )
+}
 
 /** A missing DOCUMENT. Same status, same exc_type, no method named — which is
     exactly why `isMethodMissing` has to read the text. */
@@ -307,6 +338,31 @@ const apiHandlers = [
        * makes the test fail before the fix.
        */
       const parsed = key === 'moods' || key === 'operating_hours' ? parse(value, value) : value
+
+      /**
+       * ⚠️ WHAT THE BENCH REALLY DOES WITH MOODS, verified 5 Sep by trying to
+       * break it. `normalise_moods` reads a bare name, a `{mood: ...}` row, or
+       * a JSON string — and THROWS on anything else rather than writing empty
+       * rows and reporting success:
+       *
+       *   [{"name": "Romantic"}]  -> refused, existing set untouched
+       *   ["Nope"]                -> refused: Unknown mood: Nope
+       *
+       * The portal declined to send moods at all for weeks on the theory that a
+       * wrong key would silently erase them. That is real Frappe behaviour and
+       * it is not this endpoint's behaviour; modelling it here is what stops
+       * that caution being reinvented.
+       */
+      if (key === 'moods' && Array.isArray(parsed)) {
+        const unreadable = parsed.find(
+          (row) => !(typeof row === 'string' || (row && typeof row === 'object' && row.mood)),
+        )
+        if (unreadable) return validationError('Could not read that mood')
+        const names = parsed.map((row) => (typeof row === 'string' ? row : row.mood))
+        const unknown = names.find((n) => !bench.moods.some((m) => m.name === n || m.mood === n))
+        if (unknown) return validationError(`Unknown mood: ${unknown}`)
+      }
+
       if (
         bench.moodsAreChildRows &&
         key === 'moods' &&
@@ -551,47 +607,62 @@ const apiHandlers = [
   /* --------------------------------------------------------------- legal */
 
   /**
-   * The SECOND candidate name. Off unless a test turns it on, so it can stand
-   * in for "the real method is one of the other ones we guessed" — which is the
-   * only reason the portal carries a list.
+   * ⚠️ THE REAL CONTRACT, verified on the bench 5 Sep. Two endpoints, not one:
+   *
+   *   get_required_consents()          -> [{policy_type, version}]
+   *   get_legal_document(policy_type)  -> {name, policy_type, version, content,
+   *                                        published_on}
+   *
+   * This mock used to serve a single `get_legal_documents` returning everything
+   * at once — a method that has never existed on the bench, in a shape it has
+   * never used. The portal was written against the mock, so the whole legal
+   * feature was tested against a fiction.
    */
-  method('shotright.api.get_vendor_legal_documents', () =>
-    bench.legalListAltName
-      ? ok(
+  method('shotright.api.get_required_consents', () =>
+    bench.legalListRefuses
+      ? validationError('Could not read the consent list')
+      : ok(
           bench.legal.map((d) => ({
-            name: d.name,
-            title: d.title,
-            content: d.content ?? '',
-            required: d.required === undefined ? 1 : d.required,
-            accepted: d.accepted ? 1 : 0,
+            policy_type: d.policy_type || d.title,
+            version: d.version || '',
+            /* The live example carries only the type and the version. These are
+               here because the fixture may model a bench that says more, and
+               `normalise` reads an absent acceptance marker as NOT accepted —
+               the safe direction. */
+            ...(d.accepted ? { accepted: 1, accepted_on: d.accepted_on || '2026-09-01' } : {}),
+            ...(d.required === undefined ? {} : { required: d.required }),
           })),
-        )
-      : methodMissing('shotright.api.get_vendor_legal_documents'),
+        ),
   ),
 
   /**
-   * ⚠️ `bench.legalListRefuses` models what the LIVE bench did on 5 Sep: a 417
-   * on this exact method, with no arguments sent. A method that exists and
-   * throws is not a method that is missing, and the portal used to stop at the
-   * first one — hiding the candidates behind it.
+   * One document's text. `policy_type` is required — a Select, not free text.
+   *
+   * `Usage Policy` is a valid type with NOTHING PUBLISHED, so an empty answer
+   * is normal here rather than a failure, and the portal must show no tickbox
+   * over it rather than an error.
    */
-  method('shotright.api.get_legal_documents', () =>
-    bench.legalListRefuses
-      ? validationError('get_legal_documents() missing 1 required positional argument')
-      : ok(
-      bench.legal.map((d) => ({
-        name: d.name,
-        title: d.title,
-        document_type: d.document_type || '',
-        version: d.version || '',
-        effective_date: d.effective_date || '',
-        content: d.content ?? '',
-        required: d.required === undefined ? 1 : d.required,
-        accepted: d.accepted ? 1 : 0,
-        accepted_on: d.accepted_on || '',
-      })),
-    ),
-  ),
+  method('shotright.api.get_legal_document', (args) => {
+    if (!args.policy_type) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception:
+            "TypeError: get_legal_document() missing 1 required positional argument: 'policy_type'",
+        },
+        { status: 417 },
+      )
+    }
+    const doc = bench.legal.find((d) => (d.policy_type || d.title) === args.policy_type)
+    if (!doc || doc.content === undefined) return ok(null)
+    return ok({
+      name: `${args.policy_type}-${doc.version || '2026-01-01'}`,
+      policy_type: args.policy_type,
+      version: doc.publishedVersion || doc.version || '',
+      content: doc.content ?? '',
+      published_on: doc.effective_date || '2026-08-20 15:14:10',
+    })
+  }),
 
   /**
    * Accept, with the silent-no-op switch built in.
@@ -604,7 +675,20 @@ const apiHandlers = [
    */
   method('shotright.api.accept_legal_document', (args) => {
     const id = args.document || args.legal_document || args.name || args.document_name
-    const doc = bench.legal.find((d) => d.name === id)
+    /* Documents are addressed by `policy_type` on this bench, and the docname
+       the portal now holds is the one `get_legal_document` returned — which is
+       `<policy_type>-<version>`. Both resolve here.
+
+       ⚠️ The accept METHOD NAME is still a guess. The backend confirmed
+       `get_required_consents` and `get_legal_document` on 5 Sep and said nothing
+       about recording an acceptance, so `canEnforce` still refuses to gate on
+       it. This handler models what one would look like, not what one is. */
+    const doc = bench.legal.find(
+      (d) =>
+        d.name === id ||
+        (d.policy_type || d.title) === id ||
+        `${d.policy_type || d.title}-${d.version || ''}` === id,
+    )
     if (!doc) return docMissing()
     if (bench.legalAcceptSilentlyFails) return ok({ ok: true })
     doc.accepted = 1

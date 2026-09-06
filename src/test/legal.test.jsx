@@ -220,7 +220,7 @@ describe('what the portal refuses to enforce', () => {
        agreeing to OR record that they did — so we do not hold them to it. A
        venue reaching review unaccepted is something a human catches; a partner
        locked out of their own venues on a Friday night is not. */
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     renderApp({ route: '/', signedIn: true })
 
     await screen.findByRole('heading', { name: /welcome back, thabo/i })
@@ -228,7 +228,7 @@ describe('what the portal refuses to enforce', () => {
   })
 
   it('says so plainly on the legal screen rather than pretending all is well', async () => {
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     renderApp({ route: '/legal', signedIn: true })
 
     expect(await screen.findByText(/can’t show these right now/i)).toBeInTheDocument()
@@ -240,7 +240,7 @@ describe('what the portal refuses to enforce', () => {
   it('does not tell someone with nothing outstanding that they are up to date on an unreadable bench', async () => {
     /* "You're up to date" over a failed read is the same class of lie as an
        empty booking diary over a missing method. */
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     renderApp({ route: '/legal', signedIn: true })
 
     await screen.findByText(/can’t show these right now/i)
@@ -352,7 +352,7 @@ describe('submitting a venue with something outstanding', () => {
        stop a partner submitting on the strength of a question we could not ask.
        An unaccepted venue in the review queue is caught by a human; a partner
        who cannot submit because an endpoint is absent is not caught by anyone. */
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
     const name = await walkToReview(user)
     await user.click(screen.getByRole('button', { name: /^submit$/i }))
@@ -371,20 +371,32 @@ describe('when the bench answers 417', () => {
    * ran, and it threw. The portal sends no arguments to it at all, so the
    * likeliest cause is one it requires and we do not know about.
    */
-  it('keeps trying the other names instead of stopping at the first refusal', async () => {
-    bench.legalListRefuses = true
-    bench.legal = [{ name: 'TERMS', title: 'Partner terms', content: 'Read me.', required: 1 }]
-
-    /* The documents are under a DIFFERENT candidate name — which is the whole
-       reason the portal carries a list. One refusal used to hide it. */
-    bench.legalListAltName = true
+  /**
+   * ⚠️ `Usage Policy` is a valid policy type with NOTHING PUBLISHED behind it,
+   * confirmed on the bench 5 Sep. `get_legal_document` returns nothing for it
+   * rather than failing — so one unpublished policy must not take the readable
+   * ones off the screen, and it must not get a tickbox either.
+   *
+   * The list and the text are separate calls now, which is exactly what makes
+   * this failure possible: three documents, three fetches, and any one of them
+   * can come back empty.
+   */
+  it('shows the documents it could read, and no tickbox over the one it could not', async () => {
+    bench.legal = [
+      { name: 'TOS', policy_type: 'Terms of Service', version: '2.1', content: 'Read me.' },
+      { name: 'USAGE', policy_type: 'Usage Policy', version: '1.0' }, // never published
+    ]
 
     const { getLegalDocuments } = await import('../services/legal')
     const result = await getLegalDocuments()
 
     expect(result.available).toBe(true)
-    expect(result.documents).toHaveLength(1)
-    expect(result.method).toBe('shotright.api.get_vendor_legal_documents')
+    expect(result.documents).toHaveLength(2)
+
+    const readable = result.documents.find((d) => d.title === 'Terms of Service')
+    const unpublished = result.documents.find((d) => d.title === 'Usage Policy')
+    expect(readable.body).toMatch(/read me/i)
+    expect(unpublished.body).toBe('')
   })
 
   /**

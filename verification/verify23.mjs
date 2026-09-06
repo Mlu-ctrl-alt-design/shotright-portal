@@ -37,11 +37,20 @@ const VENUE = {
   moods: [],
 }
 
+/**
+ * ⚠️ THE REAL CONTRACT, from the bench 5 Sep. The list and the text are two
+ * separate calls, and `get_legal_documents` — which this stub used to serve —
+ * has never existed:
+ *
+ *   get_required_consents()          -> [{policy_type, version}]
+ *   get_legal_document(policy_type)  -> {name, policy_type, version, content,
+ *                                        published_on}
+ */
 const TERMS = {
-  name: 'LEGAL-TERMS',
-  title: 'Partner Terms of Service',
+  name: 'Terms of Service-2.1',
+  policy_type: 'Terms of Service',
   version: '2.1',
-  effective_date: '2026-08-01',
+  published_on: '2026-08-01',
   content: '<p>You agree to keep your <strong>menu prices</strong> current.</p>',
   required: 1,
   accepted: 0,
@@ -82,9 +91,38 @@ async function open({ docs = [TERMS], accept = 'writes', list = true } = {}) {
     if (p.includes('get_venue_photos')) return r.fulfill({ json: { message: [] } })
     if (p.includes('get_venue_bookings')) return r.fulfill({ json: { message: [] } })
 
-    if (p.includes('get_legal_documents')) {
-      if (!list) return r.fulfill(missing('shotright.api.get_legal_documents'))
-      return r.fulfill({ json: { message: state } })
+    // The consent list: policy types and versions, never the text.
+    if (p.includes('get_required_consents')) {
+      if (!list) return r.fulfill(missing('shotright.api.get_required_consents'))
+      return r.fulfill({
+        json: {
+          message: state.map((d) => ({
+            policy_type: d.policy_type,
+            version: d.version,
+            required: d.required,
+            ...(d.accepted ? { accepted: 1, accepted_on: d.accepted_on } : {}),
+          })),
+        },
+      })
+    }
+
+    // One document's text, addressed by policy type.
+    if (p.includes('get_legal_document')) {
+      const type = new URL(r.request().url()).searchParams.get('policy_type')
+      const doc = state.find((d) => d.policy_type === type)
+      return r.fulfill({
+        json: {
+          message: doc
+            ? {
+                name: doc.name,
+                policy_type: doc.policy_type,
+                version: doc.version,
+                content: doc.content,
+                published_on: doc.published_on,
+              }
+            : null,
+        },
+      })
     }
 
     if (p.includes('accept_legal_document')) {
@@ -97,7 +135,9 @@ async function open({ docs = [TERMS], accept = 'writes', list = true } = {}) {
           json: { exc_type: 'ValidationError', exception: 'frappe.exceptions.ValidationError' },
         })
       if (accept === 'writes') {
-        const doc = state.find((d) => d.name === body.document)
+        const doc = state.find(
+          (d) => d.name === body.document || d.policy_type === body.document,
+        )
         if (doc) {
           doc.accepted = 1
           doc.accepted_on = '2026-08-07 10:15:00'
@@ -287,7 +327,9 @@ const goLegal = async (page) => {
   await page.getByRole('link', { name: /Read and accept/i }).click()
   await page.waitForURL(/\/legal/)
   await settle(page)
-  check(/Partner Terms of Service/.test(await text(page)), 'and it leads to the documents')
+  /* The bench carries no separate title — `policy_type` IS the name a partner
+     reads, and "Terms of Service" is one of the three valid values. */
+  check(/Terms of Service/.test(await text(page)), 'and it leads to the documents')
   check((await page.getByRole('status').count()) === 0, 'where it stops repeating itself')
 
   await context.close()

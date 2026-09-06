@@ -52,10 +52,12 @@ const pick = (real, mock) => (USE_MOCKS ? mock : real)
  * exactly how partners ended up looking at fixture venues — the portal asks the
  * bench what it can do and adapts.
  *
- * A missing whitelisted method is a 404 from Frappe. Anything else (403, 417, a
- * network failure, a real validation error) is a genuine error and is rethrown:
- * treating a permission failure as "feature absent" would silently downgrade
- * the product instead of reporting a misconfiguration.
+ * WHAT COUNTS AS MISSING is `isMethodMissing`, not a bare 404 — this bench
+ * answers a name that is not in `shotright.api` with a 417 AttributeError, so
+ * gating on the status alone meant no fallback here ever engaged. Anything else
+ * (403, a network failure, a real validation error) is a genuine error and is
+ * rethrown: treating a permission failure as "feature absent" would silently
+ * downgrade the product instead of reporting a misconfiguration.
  *
  * The verdict is cached per method for the tab, so a missing endpoint costs one
  * request rather than one per keystroke.
@@ -69,7 +71,16 @@ export async function withFallback(method, real, whenMissing) {
     capabilities.set(method, true)
     return result
   } catch (err) {
-    if (err?.status === 404) {
+    /**
+     * A 404 OR this bench's 417 AttributeError. Both, deliberately.
+     *
+     * The 404 has always been enough here — a bench that resolves the module
+     * and not the method answers that way, and `withFallback` is asking "is
+     * this endpoint here", where a bare DoesNotExistError is answer enough.
+     * Requiring `isMethodMissing` alone would have narrowed that, which is not
+     * what the AttributeError work was for.
+     */
+    if (err?.status === 404 || isMethodMissing(err, method)) {
       capabilities.set(method, false)
       /**
        * The method name goes to the CONSOLE, not to the partner.
@@ -1016,11 +1027,17 @@ const writeVenue = async (body) => {
  * passes them straight to `venue.update` and does not. That asymmetry is the
  * bug and it belongs on the bench, so this is a workaround rather than a fix.
  *
- * WE DO NOT GUESS THE CHILD-ROW SHAPE. Sending `[{mood: id}]` would work if the
- * child field happens to be called `mood` — and if it is called anything else,
- * Frappe writes empty rows and reports success, which would silently erase a
- * venue's moods. That is strictly worse than not saving them. So: drop the
- * field, save the rest, and tell the partner exactly which part didn't land.
+ * ⚠️ RESOLVED 5 Sep, and this branch is now a backstop rather than the path.
+ * The child field is `mood`, and `update_venue` takes bare names — verified
+ * live. Moods are sent again; see `updateVenue`.
+ *
+ * The reason this code refused to guess was that a wrong child-row key would
+ * make Frappe write empty rows and report success, silently erasing a venue's
+ * moods. That reasoning was WRONG FOR THIS ENDPOINT, and the backend proved it
+ * by trying to break it: `normalise_moods` throws on any row it cannot read, so
+ * `[{name: "Romantic"}]` and an unknown mood both come back 417 with a message
+ * and the existing set untouched. The general Frappe behaviour was real; it
+ * just did not apply here, and the caution cost the feature.
  */
 const CHILD_TABLE_CRASH = /does not support item assignment|_init_child/i
 
@@ -1172,6 +1189,28 @@ export const updateVenue = async (venueId, payload, existing) => {
   for (const field of VENUE_WRITE_FIELDS) {
     if (payload[field] === undefined) continue
     if (current && same(payload[field], current[field], field)) continue
+
+    if (field === 'moods') {
+      /**
+       * ⚠️ ANSWERED BY THE BACKEND, 5 Sep. `Venue.moods` is a Table MultiSelect
+       * onto `Venue Mood`, whose single child field is `mood` — and bare names
+       * are accepted directly, so `["Romantic", "Chill & Casual"]` is all this
+       * needs to be. `moodKeysOf` already reads `mood` first, so whatever shape
+       * a venue came back in becomes names here.
+       *
+       * SETTING MOODS REPLACES THE WHOLE SET — `Document.set()` clears the
+       * table before extending it. So an empty list is not "leave them alone",
+       * it is "delete every mood this venue has". The form will not submit
+       * without one, which means an empty array here is a bug on our side, and
+       * sending it would turn that bug into data loss. Omitted instead: the
+       * unchanged-field rule above already covers the ordinary case.
+       */
+      const names = moodKeysOf(payload.moods)
+      if (!names.length) continue
+      body.moods = names
+      continue
+    }
+
     body[field] = payload[field]
   }
   if (renaming) {
@@ -1741,6 +1780,29 @@ export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
          * bytes — but fixable by the partner, so the message says how rather
          * than apologising.
          */
+        /**
+         * ⚠️ CHECKED BEFORE THE FORMAT BRANCH, because on this bench a method
+         * that is not deployed arrives as a 417 AttributeError — the same
+         * status a rejected file uses.
+         *
+         * Without this, an endpoint that does not exist was reported to the
+         * partner as a problem with their photo, complete with advice about
+         * iPhone formats. They would then convert a perfectly good JPEG,
+         * upload it again, and be told the same thing.
+         *
+         * `blocksUpload`, because no file and no retry can fix it.
+         */
+        if (isMethodMissing(err, PHOTO_UPLOAD_METHOD)) {
+          const unavailable = new Error(
+            'We can’t add photos to a venue just yet. Everything else about this venue saves ' +
+              'normally.',
+          )
+          unavailable.retryable = false
+          unavailable.blocksUpload = true
+          unavailable.cause = err
+          throw unavailable
+        }
+
         if (err?.status === 417) {
           const rejected = new Error(
             `The server wouldn’t accept ${file.name}. If it came off an iPhone, ` +

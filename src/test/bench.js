@@ -77,6 +77,13 @@ const initial = () => ({
    */
   itemIdParam: 'item_id',
 
+  /**
+   * How this bench reports a method that is not there. 'attribute-error' is
+   * what shotright.thedaystar.co.za actually does (417); 'not-found' is the
+   * 404 a bench answers when the module path itself does not resolve.
+   */
+  missingMethodStyle: 'attribute-error',
+
   /** Which methods exist. Flip to false to model "not deployed yet". */
   deploy: {
     login: true,
@@ -147,11 +154,18 @@ const initial = () => ({
   },
 
   /**
-   * `moods` is a child table on `Venue`, so `venue.update()` cannot take a list
-   * of plain strings — see the handler. Production behaviour; set false to
-   * model a bench that has been fixed.
+   * ⚠️ DEFAULT FLIPPED 5 Sep, on the backend's word and their own break-test.
+   *
+   * `update_venue` DOES take a list of bare mood names — `normalise_moods`
+   * accepts a name, a `{mood: ...}` row or a JSON string, and throws on
+   * anything else. The 28 Jul TypeError this modelled is history.
+   *
+   * Leaving it on was not neutral: every test in the suite ran against a bench
+   * that crashed on the shape the real one accepts, so the portal's workaround
+   * (drop moods, warn the partner) looked correct and moods have not saved on
+   * an edit for weeks. Set true to model the old bench.
    */
-  moodsAreChildRows: true,
+  moodsAreChildRows: false,
 
   /** Fields `get_venue_detail` leaves out that `get_vendor_dashboard` returns. */
   detailOmits: [],
