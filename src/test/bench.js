@@ -85,6 +85,9 @@ const initial = () => ({
   /** Which key the venue payload carries for average spend; null for none. */
   spendField: 'average_spend',
 
+  /** A venue name `create_venue` will refuse, for testing a bulk import. */
+  createVenueRefuses: null,
+
   /**
    * How this bench reports a method that is not there. 'attribute-error' is
    * what shotright.thedaystar.co.za actually does (417); 'not-found' is the

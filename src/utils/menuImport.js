@@ -212,7 +212,7 @@ export async function parseMenuFile(file, onStage) {
 }
 
 /** Minimal RFC4180-ish CSV reader: handles quotes, escaped quotes and CRLF. */
-function parseCsv(text) {
+export function parseCsv(text) {
   const rows = []
   let row = []
   let field = ''
