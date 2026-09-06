@@ -34,7 +34,7 @@ describe('reading the file', () => {
 
     await upload(user, csv(GOOD))
 
-    expect(await screen.findByText(/1 ready to add/i)).toBeInTheDocument()
+    expect(await screen.findByText(/1 ready/i)).toBeInTheDocument()
     expect(screen.getByText(/nothing has been created yet/i)).toBeInTheDocument()
     expect(bench.venues).toHaveLength(before)
   })
@@ -62,7 +62,7 @@ describe('reading the file', () => {
     await upload(user, csv(GOOD + '\n' + GOOD))
 
     expect(await screen.findByText(/same name as line 2/i)).toBeInTheDocument()
-    expect(screen.getByText(/1 ready to add/i)).toBeInTheDocument()
+    expect(screen.getByText(/1 ready/i)).toBeInTheDocument()
   })
 
   /* Excel writes times several ways and partners type others. All the same
@@ -75,7 +75,7 @@ describe('reading the file', () => {
       csv('Late Bar,1 Main Rd,,,Chilled,Casual,Busy,09:00,' + written + ',09:00,' + written),
     )
 
-    expect(await screen.findByText(/1 ready to add/i)).toBeInTheDocument()
+    expect(await screen.findByText(/1 ready/i)).toBeInTheDocument()
   })
 
   /**
@@ -94,35 +94,71 @@ describe('reading the file', () => {
     )
 
     expect(await screen.findByText(/Save As/i)).toBeInTheDocument()
-    expect(screen.queryByText(/ready to add/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/ready$/i)).not.toBeInTheDocument()
   })
 })
 
 describe('creating them', () => {
-  it('creates every ready row, and says so line by line', async () => {
+  /**
+   * ⚠️ DRAFTS, NOT VENUES, and this is the assertion that says so. A venue made
+   * from a spreadsheet has no photographs, and a listing with no picture asks
+   * someone to choose an evening on the strength of a name — so eleven rows
+   * used to become eleven things a reviewer had to send back.
+   *
+   * A draft goes on the platform and waits. The partner opens one, finds their
+   * own nine fields filled in, adds photos and submits through the flow that
+   * already requires one rather than around it.
+   */
+  it('creates drafts and no venues at all', async () => {
     const { user } = renderApp({ route: ROUTE, signedIn: true })
-    const before = bench.venues.length
+    const venuesBefore = bench.venues.length
 
     await upload(user, csv(GOOD + '\n' + YARD))
-    await user.click(await screen.findByRole('button', { name: /add 2 venues/i }))
+    await user.click(await screen.findByRole('button', { name: /create 2 drafts/i }))
 
-    await waitFor(() => expect(bench.venues).toHaveLength(before + 2))
-    expect(await screen.findByText(/2 venues added/i)).toBeInTheDocument()
-    expect(bench.venues.some((v) => v.venue_name === 'Corner Kitchen')).toBe(true)
-    expect(bench.venues.some((v) => v.venue_name === 'The Yard')).toBe(true)
+    expect(await screen.findByText(/2 drafts ready/i)).toBeInTheDocument()
+    expect(bench.drafts.map((d) => d.venue_name)).toEqual(
+      expect.arrayContaining(['Corner Kitchen', 'The Yard']),
+    )
+    /* The whole point: nothing has gone for review. */
+    expect(bench.venues).toHaveLength(venuesBefore)
+    expect(screen.getByText(/nothing has gone for review yet/i)).toBeInTheDocument()
+  })
+
+  /* The spreadsheet's own values have to survive into the draft, or the partner
+     opens it and retypes what they already sent us. */
+  it('carries the row into the draft the wizard will resume', async () => {
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await upload(user, csv(GOOD))
+    await user.click(await screen.findByRole('button', { name: /create 1 draft/i }))
+
+    await screen.findByText(/1 draft ready/i)
+    const saved = bench.drafts.at(-1)
+    const payload = typeof saved.payload === 'string' ? JSON.parse(saved.payload) : saved.payload
+    expect(payload.details.venue_name).toBe('Corner Kitchen')
+    expect(payload.details.address).toBe('12 Long St')
+    expect(payload.hours.weekday).toEqual({ start: '17:00', end: '23:00' })
+    expect(payload.moods.moods[0].label).toBe('Chilled')
+    /* Nobody has looked at the menu or the review step, so neither is complete
+       — marking one is how a partner submits a venue believing they saw it. */
+    const completed =
+      typeof saved.completed === 'string' ? JSON.parse(saved.completed) : saved.completed
+    expect(completed).not.toContain('review')
+    expect(completed).not.toContain('menu')
   })
 
   /* A blocked row is never sent, so a file that is half wrong still gets the
      half that is right. */
   it('sends only the rows that were ready', async () => {
     const { user } = renderApp({ route: ROUTE, signedIn: true })
-    const before = bench.venues.length
+    const before = bench.drafts.length
 
     await upload(user, csv(GOOD + '\nBroken,,,,Nope,Casual,x,17:00,23:00,17:00,23:00'))
-    await user.click(await screen.findByRole('button', { name: /add 1 venue/i }))
+    await user.click(await screen.findByRole('button', { name: /create 1 draft/i }))
 
-    await waitFor(() => expect(bench.venues).toHaveLength(before + 1))
-    expect(bench.venues.some((v) => v.venue_name === 'Broken')).toBe(false)
+    await waitFor(() => expect(bench.drafts).toHaveLength(before + 1))
+    expect(bench.drafts.some((d) => d.venue_name === 'Broken')).toBe(false)
   })
 
   /**
@@ -130,25 +166,26 @@ describe('creating them', () => {
    * customer searching nearby. `createVenue` already warns about that for a
    * single venue; arriving in a spreadsheet must not make it quieter.
    */
-  it('passes on the warning about a venue with no map location', async () => {
+  it('carries the note about a venue with no map location into the result', async () => {
     const { user } = renderApp({ route: ROUTE, signedIn: true })
 
     await upload(user, csv('No Pin,4 Bree St,,,Chilled,Casual,Quiet,17:00,23:00,17:00,23:00'))
-    await user.click(await screen.findByRole('button', { name: /add 1 venue/i }))
+    await user.click(await screen.findByRole('button', { name: /create 1 draft/i }))
 
-    expect(await screen.findByText(/1 venue added/i)).toBeInTheDocument()
-    expect(screen.getByText(/will not appear when customers search/i)).toBeInTheDocument()
+    expect(await screen.findByText(/1 draft ready/i)).toBeInTheDocument()
+    expect(screen.getByText(/no map location/i)).toBeInTheDocument()
   })
 
-  /* Photos are required before a venue can go for review, and this path cannot
-     carry one. Said once, plainly, rather than discovered later. */
-  it('says the new venues still need a photo', async () => {
+  /* The point of drafts, said once, with somewhere to go. */
+  it('sends them to add photos rather than leaving it implied', async () => {
     const { user } = renderApp({ route: ROUTE, signedIn: true })
 
     await upload(user, csv(GOOD))
-    await user.click(await screen.findByRole('button', { name: /add 1 venue/i }))
+    await user.click(await screen.findByRole('button', { name: /create 1 draft/i }))
 
-    expect(await screen.findByText(/still needs at least one photo/i)).toBeInTheDocument()
+    expect(await screen.findByText(/add photos and send it for review/i)).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: 'Corner Kitchen' })
+    expect(link.getAttribute('href')).toMatch(/\/venues\/new\?draft=/)
   })
 
   /**
@@ -156,18 +193,45 @@ describe('creating them', () => {
    * partner with four of eleven created, no record of which four, and a file
    * they dare not upload again.
    */
-  it('keeps going past a venue the server refused, and names it', async () => {
-    bench.createVenueRefuses = 'The Yard'
+  it('keeps going past a draft the server refused, and names it', async () => {
+    bench.draftSaveRefuses = 'The Yard'
     const { user } = renderApp({ route: ROUTE, signedIn: true })
-    const before = bench.venues.length
+    const before = bench.drafts.length
 
     await upload(user, csv(YARD + '\n' + GOOD))
-    await user.click(await screen.findByRole('button', { name: /add 2 venues/i }))
+    await user.click(await screen.findByRole('button', { name: /create 2 drafts/i }))
 
-    expect(await screen.findByText(/1 venue added/i)).toBeInTheDocument()
-    await waitFor(() => expect(bench.venues).toHaveLength(before + 1))
+    expect(await screen.findByText(/1 draft ready/i)).toBeInTheDocument()
+    await waitFor(() => expect(bench.drafts).toHaveLength(before + 1))
 
     const notAdded = screen.getByRole('heading', { name: /not added/i }).parentElement
     expect(within(notAdded).getByText('The Yard')).toBeInTheDocument()
+  })
+})
+
+describe('the round trip', () => {
+  /**
+   * The claim this whole feature rests on: a row becomes a draft, and that
+   * draft opens in the wizard with the partner's own values in it.
+   *
+   * Asserting the saved payload is not enough — it proves we wrote a shape we
+   * invented, not that the wizard reads it. The shapes are mirrored by hand
+   * from `VenueWizard`'s INITIAL_DETAILS and INITIAL_HOURS, and a key that only
+   * exists on one side is exactly the kind of quiet mismatch this project keeps
+   * paying for.
+   */
+  it('opens in the wizard with the spreadsheet already filled in', async () => {
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await upload(user, csv(GOOD))
+    await user.click(await screen.findByRole('button', { name: /create 1 draft/i }))
+    await screen.findByText(/1 draft ready/i)
+
+    await user.click(screen.getByRole('link', { name: 'Corner Kitchen' }))
+
+    /* The details step, because that is where a photograph belongs. */
+    const name = await screen.findByLabelText(/venue name/i, {}, { timeout: 5000 })
+    expect(name).toHaveValue('Corner Kitchen')
+    expect(screen.getByLabelText(/^address/i)).toHaveValue('12 Long St')
   })
 })

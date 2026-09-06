@@ -716,13 +716,21 @@ const apiHandlers = [
 
   /* -------------------------------------------------------------- drafts */
   method('shotright.api.save_venue_draft', (args) => {
+    /* A bulk import saves many drafts in one run, and one refusal must not end
+       it. `bench.draftSaveRefuses` names one this bench will not take. */
+    if (bench.draftSaveRefuses && args.venue_name === bench.draftSaveRefuses) {
+      return validationError('That draft could not be saved.')
+    }
     const id = args.draft_id || `DRAFT-${bench.drafts.length + 1}`
     const existing = bench.drafts.find((d) => d.draft_id === id)
     const row = {
       draft_id: id,
       name: id,
       venue_name: args.venue_name || '',
-      step: Number(args.step) || 0,
+      /* The wizard sends a step KEY ('details'), not an index. `Number()` on
+         that is NaN, which fell through to 0 and silently sent every resumed
+         draft back to step one. */
+      step: args.step ?? 0,
       completed: args.completed ?? 0,
       payload: typeof args.payload === 'string' ? args.payload : JSON.stringify(args.payload || {}),
       modified: '2026-07-28 10:00:00',

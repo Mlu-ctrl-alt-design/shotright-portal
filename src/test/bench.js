@@ -88,6 +88,9 @@ const initial = () => ({
   /** A venue name `create_venue` will refuse, for testing a bulk import. */
   createVenueRefuses: null,
 
+  /** A venue name `save_venue_draft` will refuse, for the same reason. */
+  draftSaveRefuses: null,
+
   /**
    * How this bench reports a method that is not there. 'attribute-error' is
    * what shotright.thedaystar.co.za actually does (417); 'not-found' is the
