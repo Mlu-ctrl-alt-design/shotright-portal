@@ -298,6 +298,12 @@ const apiHandlers = [
   }),
 
   method('shotright.api.create_venue', (args) => {
+    /* A bulk import creates many venues in one run, and one refusal must not
+       end it. `bench.createVenueRefuses` names a venue this bench will not
+       take, so that can be tested. */
+    if (bench.createVenueRefuses && args.venue_name === bench.createVenueRefuses) {
+      return validationError('That venue could not be created.')
+    }
     const id = `VEN-${String(bench.venues.length + 1).padStart(5, '0')}`
     const venue = {
       name: id,

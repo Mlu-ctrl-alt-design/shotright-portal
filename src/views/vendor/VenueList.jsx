@@ -110,9 +110,18 @@ export default function VenueList() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-ink-900">My venues</h1>
-        <Link to="/venues/new">
-          <Button>Add venue</Button>
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          {/* Secondary, and deliberately so. One venue is the normal case; a
+              spreadsheet is for the partner who arrives with eleven, and making
+              it the loud option would send everyone else to a CSV template to
+              add a single restaurant. */}
+          <Link to="/venues/import">
+            <Button variant="secondary">Add from a spreadsheet</Button>
+          </Link>
+          <Link to="/venues/new">
+            <Button>Add venue</Button>
+          </Link>
+        </div>
       </div>
 
       {/* Scrolls rather than wraps: four tabs fit at 390px, but a fifth state
