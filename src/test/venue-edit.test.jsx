@@ -560,6 +560,74 @@ describe('average spend', () => {
   })
 })
 
+
+describe('renaming a venue', () => {
+  /**
+   * REPORTED 13 Sep: "venue name update — the backend throws an error."
+   *
+   * ⚠️ It did, and the portal was the cause. Both `new_name` AND
+   * `new_venue_name` went up in the same call, and `update_venue` validates its
+   * kwargs rather than dropping them — `Cannot update field(s): …` — so the
+   * second, speculative alias took the WHOLE SAVE down with it. A partner
+   * changing their dress code and their name lost both, to an alias they never
+   * asked for.
+   *
+   * Third time this exact shape this month, after `item_id` and the menu
+   * importer's `file_name`. Hedging works for multipart fields, where an extra
+   * part is ignored. On a whitelisted method every undeclared name is fatal.
+   */
+  it('sends one rename parameter at a time, never two', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByRole('textbox', { name: /venue name/i })
+    await user.clear(field)
+    await user.type(field, 'Corner Kitchen and Bar')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').venue_name).toBe('Corner Kitchen and Bar'))
+
+    for (const call of bench.calls.filter((c) => c.method === 'update_venue')) {
+      const aliases = ['new_name', 'new_venue_name', 'rename_to'].filter((a) => a in call.args)
+      expect(aliases.length).toBeLessThanOrEqual(1)
+    }
+  })
+
+  /* The list is a list for a reason: a bench that calls it something else has
+     to keep working, and the refusal names the parameter it rejected. */
+  it('finds the parameter a differently-written bench declares', async () => {
+    bench.renameParam = 'new_venue_name'
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByRole('textbox', { name: /venue name/i })
+    await user.clear(field)
+    await user.type(field, 'The Corner')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').venue_name).toBe('The Corner'))
+  })
+
+  /**
+   * The part that matters most. A bench that cannot rename at all must not take
+   * the rest of the edit down with it — that was the actual damage.
+   */
+  it('saves everything else even when no rename parameter is accepted', async () => {
+    bench.renameParam = null
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    const name = screen.getByRole('textbox', { name: /venue name/i })
+    await user.clear(name)
+    await user.type(name, 'A New Name')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    expect(venueById('VEN-00001').venue_name).toBe('Corner Kitchen & Bar')
+    expect(await screen.findByText(/still called/i)).toBeInTheDocument()
+  })
+})
+
 })
 
   it('saves when detail 404s AND the dashboard row describes moods differently', async () => {

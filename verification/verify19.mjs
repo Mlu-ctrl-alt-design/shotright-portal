@@ -132,12 +132,35 @@ const save = async (page) => {
   await page.getByLabel(/Dress code/i).fill('Smart')
   const body = await save(page)
 
-  check(attempts.length === 2, "the refusal is retried once, without the fields it named")
-  check(
-    !('new_name' in attempts[1]) && !('new_venue_name' in attempts[1]),
-    'and the retry drops exactly those',
+  /**
+   * ⚠️ THE SHAPE CHANGED, AND FOR THIS EXACT CASE. The rename used to ride
+   * along with the dress code, carrying BOTH aliases — so a bench that refuses
+   * them threw on the whole call and the partner's real edit only landed on a
+   * retry. Reported 13 Sep as "venue name update throws an error".
+   *
+   * The rename is its own call now, one alias at a time. So the dress code goes
+   * up cleanly on the first request and is never at the mercy of a rename
+   * parameter nobody has confirmed.
+   */
+  const fieldCalls = attempts.filter((a) =>
+    ['new_name', 'new_venue_name', 'rename_to'].every((alias) => !(alias in a)),
   )
-  check(attempts[1].dress_code === 'Smart', 'while keeping the edit the partner actually made')
+  const renameCalls = attempts.filter((a) =>
+    ['new_name', 'new_venue_name', 'rename_to'].some((alias) => alias in a),
+  )
+
+  check(
+    fieldCalls.some((a) => a.dress_code === 'Smart'),
+    'the edit the partner actually made goes up on its own, not behind a rename',
+  )
+  check(
+    renameCalls.every(
+      (a) =>
+        ['new_name', 'new_venue_name', 'rename_to'].filter((alias) => alias in a).length === 1,
+    ),
+    'and each rename attempt carries exactly one alias, never two',
+  )
+  check(renameCalls.length > 1, 'a refused alias is followed by the next one, not given up on')
   check(stored.dress_code === 'Smart', 'which then saves, instead of the whole edit being lost')
   check(/still called “Corner Kitchen & Bar”/.test(body), 'the rename is reported as not taken')
   check(

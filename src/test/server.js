@@ -329,13 +329,22 @@ const apiHandlers = [
 
     // Unlike everything else on this bench, update_venue REFUSES unknown
     // fields rather than dropping them. Reproduced from production.
-    const refused = Object.keys(rest).filter((k) => !bench.venueWritable.includes(k))
+    /* ⚠️ Exactly ONE rename parameter is accepted, and which one is switchable.
+       The portal used to send `new_name` and `new_venue_name` together, and
+       this method validates its kwargs rather than dropping them — so the
+       second alias took the whole save down with it, including fields the
+       partner had actually changed. */
+    const renameParams = ['new_name', 'new_venue_name', 'rename_to']
+    const writable = bench.venueWritable.filter((f) => !renameParams.includes(f))
+    if (bench.renameParam) writable.push(bench.renameParam)
+
+    const refused = Object.keys(rest).filter((k) => !writable.includes(k))
     if (refused.length) {
       return validationError(`Cannot update field(s): ${[...refused, 'cmd'].sort().join(', ')}`)
     }
 
     for (const [key, value] of Object.entries(rest)) {
-      if (key === 'new_name') {
+      if (key === bench.renameParam) {
         venue.venue_name = value
         continue
       }

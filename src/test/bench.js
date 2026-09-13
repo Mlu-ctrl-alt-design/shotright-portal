@@ -92,6 +92,14 @@ const initial = () => ({
   draftSaveRefuses: null,
 
   /**
+   * Which parameter `update_venue` declares for a new name. Unconfirmed on the
+   * real bench — reported 13 Sep as "venue name update throws an error" — so
+   * the portal tries the candidates one at a time and this is how that is
+   * tested. `null` models a bench that cannot rename at all.
+   */
+  renameParam: 'new_name',
+
+  /**
    * How this bench reports a method that is not there. 'attribute-error' is
    * what shotright.thedaystar.co.za actually does (417); 'not-found' is the
    * 404 a bench answers when the module path itself does not resolve.
