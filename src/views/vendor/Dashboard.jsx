@@ -79,7 +79,12 @@ export default function Dashboard() {
 
       {/* Each tile is a link to the tab it counts. "3 pending" raises the
           question "which three?" and the tile is where that gets asked. */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* ⚠️ TWO COLUMNS ON A PHONE, not one. Four numbers in four full-width
+          cards pushed "Your venues" — the reason anybody opens this page —
+          about 700px down a 844px screen, so a partner landed on four large
+          rectangles and had to scroll to find their own venues. A count needs a
+          quarter of a phone's width, not all of it. */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard as={Link} to="/venues" label="Total venues" value={stats.total} />
         <MetricCard
           as={Link}

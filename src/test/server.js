@@ -329,13 +329,22 @@ const apiHandlers = [
 
     // Unlike everything else on this bench, update_venue REFUSES unknown
     // fields rather than dropping them. Reproduced from production.
-    const refused = Object.keys(rest).filter((k) => !bench.venueWritable.includes(k))
+    /* ⚠️ Exactly ONE rename parameter is accepted, and which one is switchable.
+       The portal used to send `new_name` and `new_venue_name` together, and
+       this method validates its kwargs rather than dropping them — so the
+       second alias took the whole save down with it, including fields the
+       partner had actually changed. */
+    const renameParams = ['new_name', 'new_venue_name', 'rename_to']
+    const writable = bench.venueWritable.filter((f) => !renameParams.includes(f))
+    if (bench.renameParam) writable.push(bench.renameParam)
+
+    const refused = Object.keys(rest).filter((k) => !writable.includes(k))
     if (refused.length) {
       return validationError(`Cannot update field(s): ${[...refused, 'cmd'].sort().join(', ')}`)
     }
 
     for (const [key, value] of Object.entries(rest)) {
-      if (key === 'new_name') {
+      if (key === bench.renameParam) {
         venue.venue_name = value
         continue
       }
@@ -716,13 +725,21 @@ const apiHandlers = [
 
   /* -------------------------------------------------------------- drafts */
   method('shotright.api.save_venue_draft', (args) => {
+    /* A bulk import saves many drafts in one run, and one refusal must not end
+       it. `bench.draftSaveRefuses` names one this bench will not take. */
+    if (bench.draftSaveRefuses && args.venue_name === bench.draftSaveRefuses) {
+      return validationError('That draft could not be saved.')
+    }
     const id = args.draft_id || `DRAFT-${bench.drafts.length + 1}`
     const existing = bench.drafts.find((d) => d.draft_id === id)
     const row = {
       draft_id: id,
       name: id,
       venue_name: args.venue_name || '',
-      step: Number(args.step) || 0,
+      /* The wizard sends a step KEY ('details'), not an index. `Number()` on
+         that is NaN, which fell through to 0 and silently sent every resumed
+         draft back to step one. */
+      step: args.step ?? 0,
       completed: args.completed ?? 0,
       payload: typeof args.payload === 'string' ? args.payload : JSON.stringify(args.payload || {}),
       modified: '2026-07-28 10:00:00',

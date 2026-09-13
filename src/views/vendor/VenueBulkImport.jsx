@@ -9,7 +9,7 @@ import {
   buildVenueTemplateCsv,
   parseVenueFile,
 } from '../../utils/venueImport'
-import { importVenues } from '../../services/venueImport'
+import { importVenueDrafts } from '../../services/venueImport'
 
 /**
  * Many venues from one spreadsheet.
@@ -55,7 +55,7 @@ export default function VenueBulkImport() {
   const run = async () => {
     if (!parsed?.ready.length) return
     setProgress({ done: 0, total: parsed.ready.length, current: null })
-    const outcome = await importVenues(parsed.ready, { onProgress: setProgress })
+    const outcome = await importVenueDrafts(parsed.ready, { onProgress: setProgress })
     setProgress(null)
     setResult(outcome)
     setParsed(null)
@@ -80,7 +80,8 @@ export default function VenueBulkImport() {
         <div>
           <h1 className="text-2xl font-semibold text-ink-900">Add venues from a spreadsheet</h1>
           <p className="mt-1 text-sm text-ink-500">
-            One row per venue. Nothing is created until you have seen what we read.
+            One row per venue. They arrive as drafts, so you can add photos before anything goes
+            for review.
           </p>
         </div>
         <Link to="/venues">
@@ -100,9 +101,10 @@ export default function VenueBulkImport() {
         <Card title="What happened">
           <p className="text-sm text-ink-900">
             <span className="font-bold">
-              {result.created.length} {result.created.length === 1 ? 'venue' : 'venues'} added
+              {result.created.length} {result.created.length === 1 ? 'draft' : 'drafts'} ready
             </span>
-            {result.failed.length > 0 && `, ${result.failed.length} refused`}.
+            {result.failed.length > 0 && `, ${result.failed.length} refused`}. Nothing has gone
+            for review yet.
           </p>
 
           {result.created.length > 0 && (
@@ -111,8 +113,10 @@ export default function VenueBulkImport() {
                 <li key={row.lineNumber} className="flex flex-wrap items-baseline gap-x-3 py-2">
                   <span className="text-xs tabular-nums text-ink-500">Line {row.lineNumber}</span>
                   {row.id ? (
+                    /* Straight into the wizard on the step a photograph belongs
+                       to, with their own nine fields already filled in. */
                     <Link
-                      to={`/venues/${row.id}`}
+                      to={`/venues/new?draft=${encodeURIComponent(row.id)}`}
                       className="text-sm font-medium text-brand-ink underline"
                     >
                       {row.name}
@@ -123,9 +127,9 @@ export default function VenueBulkImport() {
                   {/* `createVenue`'s own warnings, said here rather than
                       swallowed — a venue with no map location is invisible to
                       customers whether it arrived one at a time or in a file. */}
-                  {row.warnings.map((w) => (
-                    <span key={w} className="w-full text-xs text-brand-800">
-                      {w}
+                  {row.notes.map((n) => (
+                    <span key={n} className="w-full text-xs text-ink-500">
+                      {n}
                     </span>
                   ))}
                 </li>
@@ -148,16 +152,28 @@ export default function VenueBulkImport() {
             </div>
           )}
 
-          {/* A venue with no photo cannot go live, and this path cannot carry
-              one. Said once, plainly, with somewhere to go. */}
+          {/* The point of drafts. Open one, add photographs, submit — through
+              the flow that already requires a photo rather than around it. */}
           {result.created.length > 0 && (
-            <Alert variant="warning" className="mt-5">
-              Each of these still needs at least one photo before it can go to our reviewers.
+            <Alert variant="info" className="mt-5">
+              Open each one to add photos and send it for review. Nothing here is live, and
+              nothing is waiting on our reviewers.
+            </Alert>
+          )}
+
+          {/* ⚠️ `saveDraft` falls back to this browser's storage when the bench
+              has no draft endpoint. Right for one draft; a different promise for
+              eleven, and a partner told "they're saved" who opens their phone
+              and finds nothing has been failed by us. */}
+          {result.created.length > 0 && !result.portable && (
+            <Alert variant="warning" className="mt-3">
+              These are saved in this browser, not on your account yet — so finish them here, on
+              this device, rather than on your phone.
             </Alert>
           )}
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <Button onClick={() => navigate('/venues')}>See your venues</Button>
+            <Button onClick={() => navigate('/')}>See your drafts</Button>
             <Button variant="secondary" onClick={() => setResult(null)}>
               Upload another file
             </Button>
@@ -198,11 +214,11 @@ export default function VenueBulkImport() {
       {progress && (
         <Card title="Adding your venues">
           <p className="text-sm text-ink-900" role="status">
-            {progress.done} of {progress.total} added
+            {progress.done} of {progress.total} saved
             {progress.current ? ` — ${progress.current}` : ''}
           </p>
           <p className="mt-1 text-xs text-ink-500">
-            Leaving this page stops the ones that haven’t been added yet. The ones already added
+            Leaving this page stops the ones that haven’t been saved yet. The ones already saved
             are safe.
           </p>
         </Card>
@@ -214,7 +230,7 @@ export default function VenueBulkImport() {
           title={`${fileName} — ${parsed.rows.length} ${parsed.rows.length === 1 ? 'row' : 'rows'}`}
         >
           <p className="text-sm text-ink-900">
-            <span className="font-bold">{parsed.ready.length} ready to add</span>
+            <span className="font-bold">{parsed.ready.length} ready</span>
             {parsed.blocked.length > 0 && `, ${parsed.blocked.length} need a look`}. Nothing has
             been created yet.
           </p>
@@ -247,7 +263,9 @@ export default function VenueBulkImport() {
 
           <div className="mt-5 flex flex-wrap gap-3">
             <Button onClick={run} disabled={!parsed.ready.length}>
-              {parsed.ready.length === 1 ? 'Add 1 venue' : `Add ${parsed.ready.length} venues`}
+              {parsed.ready.length === 1
+                ? 'Create 1 draft'
+                : `Create ${parsed.ready.length} drafts`}
             </Button>
             <Button variant="secondary" onClick={() => fileInput.current?.click()}>
               Upload a different file

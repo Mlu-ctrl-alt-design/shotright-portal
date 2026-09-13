@@ -1151,6 +1151,56 @@ const same = (a, b, field) => {
  *                 current name (which is not the docname), and working out what
  *                 the partner actually changed.
  */
+
+/**
+ * What this bench calls the new name.
+ *
+ * `new_name` is what `frappe.rename_doc` calls it and is the likeliest; the
+ * others are the plausible spellings. Tried ONE AT A TIME — see `updateVenue`
+ * for why sending them together was the bug being fixed.
+ */
+export const VENUE_RENAME_PARAMS = ['new_name', 'new_venue_name', 'rename_to']
+
+/**
+ * Rename a venue, or report that this bench cannot.
+ *
+ * @returns null when one of the aliases was accepted, or the list of aliases
+ *          that were refused when none was. The caller checks the venue
+ *          afterwards regardless: a 200 from Frappe means the request routed,
+ *          not that anything changed.
+ */
+const renameVenue = async (venueId, wanted) => {
+  const refusedAliases = []
+
+  for (const param of VENUE_RENAME_PARAMS) {
+    try {
+      await call(UPDATE_VENUE_METHOD, { venue_name: venueId, [param]: wanted })
+      return null
+    } catch (err) {
+      const refused = parseRefused(err) || []
+      const wrongName =
+        refused.includes(param) ||
+        /unexpected keyword argument|missing \d+ required (positional|keyword)/i.test(
+          `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+        )
+      if (wrongName) {
+        refusedAliases.push(param)
+        continue
+      }
+      /* A real refusal — a name already taken, a permission, a validation rule
+         on the value itself. That is an answer about THIS rename, not about the
+         parameter, and it must not be retried around the list. */
+      throw err
+    }
+  }
+
+  console.warn(
+    `[shotright] ${UPDATE_VENUE_METHOD} refused every rename parameter we know of ` +
+      `(${refusedAliases.join(', ')}). Renaming a venue needs a parameter name from the backend.`,
+  )
+  return refusedAliases
+}
+
 export const updateVenue = async (venueId, payload, existing) => {
   if (USE_MOCKS) {
     const venue = await mockBackend.updateVenue(venueId, payload)
@@ -1220,14 +1270,36 @@ export const updateVenue = async (venueId, payload, existing) => {
 
     body[field] = payload[field]
   }
-  if (renaming) {
-    body.new_name = wanted
-    body.new_venue_name = wanted
-  }
   // Last, so nothing above can reach it.
   body.venue_name = venueId
 
+  /* Sent even when only the identifier is in it. Skipping an empty update looks
+     like free efficiency and is not: two suites inspect what a save PUTS ON THE
+     WIRE, and a save that sends nothing gives them nothing to inspect. It also
+     means the read-back below never runs on a save the partner did make and we
+     wrongly read as unchanged — which is the failure `same()` exists to guard,
+     and the one we would stop being able to see. */
   const refused = await writeVenue(body)
+
+  /**
+   * ⚠️ THE RENAME IS ITS OWN CALL NOW, AND SENDS ONE NAME AT A TIME.
+   *
+   * Reported: "venue name update — the backend throws an error." It did, and
+   * this is why. Both `new_name` AND `new_venue_name` went up together, and
+   * `update_venue` does not quietly drop a kwarg it has not declared — it
+   * validates and throws `Cannot update field(s): …`. So the two speculative
+   * aliases took the WHOLE SAVE down, and a partner changing their dress code
+   * lost that too, to a rename they had not asked for.
+   *
+   * The same mistake as `item_id` and the menu importer's `file_name`, and the
+   * same fix: hedging works for multipart fields, where an extra part is
+   * ignored. On a whitelisted method every name it does not declare is fatal,
+   * so they go one at a time and a refusal moves to the next.
+   *
+   * Separate from the field update because the two failures are unrelated. A
+   * bench with no rename parameter should still save an address.
+   */
+  const renameRefused = renaming ? await renameVenue(venueId, wanted) : null
 
   /**
    * WHAT ACTUALLY LANDED.
@@ -1245,15 +1317,14 @@ export const updateVenue = async (venueId, payload, existing) => {
    * against what is now there. Anything that did not change is named, in the
    * partner's words, next to the fields that were refused outright.
    *
-   * `sent` excludes the identifier and the rename aliases: `venue_name` is how
-   * we said WHICH venue, and a bounced rename is reported by the named check
-   * below in a sentence that means more than "the name didn't stick".
+   * `sent` excludes the identifier: `venue_name` is how we said WHICH venue.
+   * The rename is no longer in `body` at all — it is its own call now — and a
+   * bounced one is reported by the named check below, in a sentence that means
+   * more than "the name didn't stick".
    */
   const verifyDropped = (stored) => {
     if (!stored) return []
-    const sent = Object.keys(body).filter(
-      (f) => f !== 'venue_name' && f !== 'new_name' && f !== 'new_venue_name',
-    )
+    const sent = Object.keys(body).filter((f) => f !== 'venue_name')
     return sent.filter((f) => {
       if (refused.includes(f)) return false
       /**
