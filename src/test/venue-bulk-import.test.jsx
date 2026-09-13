@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
+import { VENUES_XLSX_BASE64 } from './fixtures/venuesXlsx'
 
 const ROUTE = '/venues/import'
 const HEADER =
@@ -79,22 +80,42 @@ describe('reading the file', () => {
   })
 
   /**
-   * `file.text()` on a real .xlsx returns binary, which parses into nonsense
-   * rows and then blames the partner for them. Refused with the two clicks that
-   * fix it instead.
+   * ⚠️ A REAL .XLSX, not the letters PK in a file called one.
+   *
+   * This used to refuse Excel and tell the partner to Save As CSV — which
+   * worked, and asked a restaurant owner to learn a file format before they
+   * could list their venues. They were asked for a spreadsheet, and a
+   * spreadsheet is what Excel saves.
+   *
+   * The old test faked the binary, so it only ever proved we rejected it. This
+   * fixture is a genuine OOXML package, which is the only way to know the
+   * reader is wired up correctly.
    */
-  it('does not pretend to read a real Excel file', async () => {
+  it('reads a real Excel file', async () => {
     const { user } = renderApp({ route: ROUTE, signedIn: true })
 
+    const bytes = Uint8Array.from(atob(VENUES_XLSX_BASE64), (c) => c.charCodeAt(0))
     await upload(
       user,
-      new File(['PKbinary'], 'venues.xlsx', {
+      new File([bytes], 'venues.xlsx', {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       }),
     )
 
-    expect(await screen.findByText(/Save As/i)).toBeInTheDocument()
-    expect(screen.queryByText(/ready$/i)).not.toBeInTheDocument()
+    expect(await screen.findByText(/2 ready/i, {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(screen.getByText('Corner Kitchen')).toBeInTheDocument()
+    expect(screen.getByText('The Yard')).toBeInTheDocument()
+  })
+
+  /* `.xls` is a different format and needs a much heavier parser. Said plainly,
+     because "Save As .xlsx" is a real instruction and "we couldn't read that"
+     is not. */
+  it('is specific about the older .xls format rather than just failing', async () => {
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await upload(user, new File(['old binary'], 'venues.xls', { type: 'application/vnd.ms-excel' }))
+
+    expect(await screen.findByText(/older \.xls format/i)).toBeInTheDocument()
   })
 })
 
@@ -230,6 +251,43 @@ describe('the round trip', () => {
     await user.click(screen.getByRole('link', { name: 'Corner Kitchen' }))
 
     /* The details step, because that is where a photograph belongs. */
+    const name = await screen.findByLabelText(/venue name/i, {}, { timeout: 5000 })
+    expect(name).toHaveValue('Corner Kitchen')
+    expect(screen.getByLabelText(/^address/i)).toHaveValue('12 Long St')
+  })
+})
+
+describe('end to end, from Excel to a draft the wizard opens', () => {
+  /**
+   * The whole path in one test, because every link in it has broken at least
+   * once: the reader returns a shape we did not expect, the `accept` attribute
+   * filters the file before our code sees it, the draft payload does not match
+   * what the wizard reads back.
+   *
+   * A partner exports from Excel, uploads, reviews, creates — and lands in the
+   * wizard on their own venue with the fields already filled in.
+   */
+  it('Excel file in, wizard open on the venue out', async () => {
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    const bytes = Uint8Array.from(atob(VENUES_XLSX_BASE64), (c) => c.charCodeAt(0))
+    await upload(
+      user,
+      new File([bytes], 'venues.xlsx', {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }),
+    )
+
+    await screen.findByText(/2 ready/i, {}, { timeout: 5000 })
+    await user.click(await screen.findByRole('button', { name: /create 2 drafts/i }))
+
+    expect(await screen.findByText(/2 drafts ready/i)).toBeInTheDocument()
+    expect(bench.drafts.map((d) => d.venue_name)).toEqual(
+      expect.arrayContaining(['Corner Kitchen', 'The Yard']),
+    )
+
+    await user.click(screen.getByRole('link', { name: 'Corner Kitchen' }))
+
     const name = await screen.findByLabelText(/venue name/i, {}, { timeout: 5000 })
     expect(name).toHaveValue('Corner Kitchen')
     expect(screen.getByLabelText(/^address/i)).toHaveValue('12 Long St')

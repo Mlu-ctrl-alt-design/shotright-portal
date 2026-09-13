@@ -187,19 +187,80 @@ function readRow(cells, header, lineNumber, moodIndex) {
  * @returns `{rows, ready, blocked, duplicates}` — every row, in file order,
  *          each carrying the line number it had in the partner's own file.
  */
-export async function parseVenueFile(file, { moods = [] } = {}) {
+/**
+ * Rows out of whatever the partner actually had.
+ *
+ * ⚠️ `.xlsx` IS THE COMMON CASE, not the exception. They were asked for a
+ * spreadsheet; a spreadsheet is what Excel saves, and Excel saves `.xlsx`.
+ * Telling them to File → Save As → CSV worked, and it asked a restaurant owner
+ * to learn a file format before they could list their venues.
+ *
+ * The reader is loaded ONLY when an Excel file is picked. It is the largest
+ * dependency in the portal, and the CSV path — which is what the template
+ * produces — must not pay for it.
+ *
+ * `.xls` is NOT the same format and this cannot read it: the old binary format
+ * needs a much heavier parser. Said plainly rather than failing oddly, because
+ * "Save As .xlsx" is a real instruction and "we couldn't read that" is not.
+ */
+const readRows = async (file) => {
   const name = file?.name || ''
-  if (/\.xlsx?$/i.test(name)) {
-    /* Deliberately not a silent failure: `file.text()` on a real .xlsx returns
-       binary, which parses into nonsense rows and blames the partner for it. */
+
+  /* `.xls` is deliberately SELECTABLE in the picker. `accept` filters before
+     any of our code runs, so leaving it out meant the partner's file was greyed
+     out with no explanation — the same trap as the HEIC photos. Better to take
+     it and say the one useful sentence about it. */
+  if (/\.xls$/i.test(name)) {
     throw new Error(
-      `${name} is an Excel file. In Excel choose File → Save As and pick CSV, then upload that — ` +
-        `the template downloads as a CSV, so a sheet built from it is already the right kind.`,
+      `${name} is in Excel's older .xls format, which we can't read. Open it in Excel, ` +
+        `choose File → Save As, and pick Excel Workbook (.xlsx) or CSV.`,
     )
   }
 
-  const text = await file.text()
-  const rows = parseCsv(text)
+  if (/\.xlsx$/i.test(name)) {
+    /* The `/browser` entry specifically. This package publishes no root export
+       — only `./browser`, `./node`, `./universal` and `./web-worker` — so a
+       bare import fails the build outright rather than at runtime, which is the
+       good version of that mistake. */
+    const { default: readXlsxFile } = await import('read-excel-file/browser')
+    /* Every cell as a STRING. The library otherwise types a column for us, and
+       its guesses are wrong in the two places that matter here: it reads a time
+       cell as a Date in the browser's timezone, and a phone-shaped number in an
+       address as a number. Everything downstream already parses from text. */
+    const result = await readXlsxFile(file)
+
+    /**
+     * ⚠️ TWO SHAPES. This reader returns rows for a single-sheet read, and an
+     * array of `{sheet, data}` when it hands back every sheet — which is what
+     * it did here, and `row.map is not a function` was the whole error.
+     *
+     * Be generous about the shape you READ. The first sheet is the one the
+     * template produces and the one a partner fills in; a workbook with the
+     * venues on sheet two is a problem we have not been given yet.
+     */
+    const rows = Array.isArray(result?.[0]?.data) ? result[0].data : result
+
+    return (rows || []).map((row) =>
+      (row || []).map((cell) => {
+        if (cell === null || cell === undefined) return ''
+        /* Excel stores a time as a fraction of a day and this comes back as a
+           Date. `17:00` must not become `1899-12-30T17:00:00`. */
+        if (cell instanceof Date) {
+          const pad = (n) => String(n).padStart(2, '0')
+          return `${pad(cell.getHours())}:${pad(cell.getMinutes())}`
+        }
+        return String(cell)
+      }),
+    )
+  }
+
+  /* Deliberately not `file.text()` on anything: on a binary file it returns
+     mojibake that parses into nonsense rows and blames the partner for them. */
+  return parseCsv(await file.text())
+}
+
+export async function parseVenueFile(file, { moods = [] } = {}) {
+  const rows = await readRows(file)
   if (!rows.length) throw new Error('That file is empty.')
 
   const header = rows[0].map((h) => h.trim().toLowerCase())
