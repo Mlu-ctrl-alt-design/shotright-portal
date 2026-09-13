@@ -91,7 +91,11 @@ async function open({ docs = [TERMS], accept = 'writes', list = true } = {}) {
     if (p.includes('get_venue_photos')) return r.fulfill({ json: { message: [] } })
     if (p.includes('get_venue_bookings')) return r.fulfill({ json: { message: [] } })
 
-    // The consent list: policy types and versions, never the text.
+    /* The consent list: policy types and versions, never the text — and
+       ⚠️ NEVER AN ACCEPTANCE MARKER. It is the list of ACTIVE POLICIES, not
+       user-scoped, identical for a partner who has signed everything and one
+       who has signed nothing. This stub used to echo `accepted` back from the
+       fixture, which is the whole of the 13 Sep bug modelled as if it worked. */
     if (p.includes('get_required_consents')) {
       if (!list) return r.fulfill(missing('shotright.api.get_required_consents'))
       return r.fulfill({
@@ -100,8 +104,20 @@ async function open({ docs = [TERMS], accept = 'writes', list = true } = {}) {
             policy_type: d.policy_type,
             version: d.version,
             required: d.required,
-            ...(d.accepted ? { accepted: 1, accepted_on: d.accepted_on } : {}),
           })),
+        },
+      })
+    }
+
+    /* The user-scoped half, and the only endpoint that can tell an accepted
+       document from an unaccepted one. Answers [] once everything is signed —
+       which is the proof the screen reads before it claims anything. */
+    if (p.includes('get_outstanding_consents')) {
+      return r.fulfill({
+        json: {
+          message: state
+            .filter((d) => !d.accepted)
+            .map((d) => ({ policy_type: d.policy_type, version: d.version })),
         },
       })
     }
@@ -125,18 +141,27 @@ async function open({ docs = [TERMS], accept = 'writes', list = true } = {}) {
       })
     }
 
-    if (p.includes('accept_legal_document')) {
+    /* ⚠️ `accept_terms`, not `accept_legal_document` — that name has never
+       existed on the bench, and the portal no longer probes it. Anything it
+       did probe would now fall through to the 404 at the bottom of this
+       router, which is what the "one write" check below is really measuring. */
+    if (p.includes('accept_terms')) {
       const body = JSON.parse(r.request().postData() || '{}')
       writes.push(body)
-      if (accept === 'missing') return r.fulfill(missing('shotright.api.accept_legal_document'))
+      if (accept === 'missing') return r.fulfill(missing('shotright.api.accept_terms'))
       if (accept === 'throws')
         return r.fulfill({
           status: 417,
           json: { exc_type: 'ValidationError', exception: 'frappe.exceptions.ValidationError' },
         })
       if (accept === 'writes') {
+        /* `policy_type` + `version` is the endpoint's primary contract and
+           wins when present; the docname is the documented fallback. */
         const doc = state.find(
-          (d) => d.name === body.document || d.policy_type === body.document,
+          (d) =>
+            (body.policy_type && d.policy_type === body.policy_type) ||
+            d.name === body.document ||
+            d.policy_type === body.document,
         )
         if (doc) {
           doc.accepted = 1

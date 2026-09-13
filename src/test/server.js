@@ -54,11 +54,40 @@ const docMissing = () =>
   )
 
 /** `frappe.throw`. Note the HTML — Frappe messages are markup. */
+/**
+ * ⚠️ `exc` WAS MISSING HERE, AND THAT OMISSION SHIPPED A BUG. Added 13 Sep.
+ *
+ * A real Frappe error body carries THREE things, and the portal's
+ * `normalizeError` joins all three into `err.detail`:
+ *
+ *   exception         "frappe.exceptions.ValidationError: <message>"
+ *   _server_messages  the clean message, JSON inside JSON
+ *   exc               a JSON ARRAY of the traceback — it opens `["Traceback…`
+ *
+ * This double sent the first two. So `err.detail` ended at the message, and
+ * `parseRefused`'s old `([^"\\\n]+)` — "everything up to the first quote" —
+ * had nothing after the field list to run into. Every test passed. On the live
+ * bench the `exc` array follows, the capture swallowed the space and the `[`,
+ * and `Cannot update field(s): new_name` came back as `['new_name [']`: a
+ * partner renaming a venue got a raw 417 instead of the retry that works.
+ *
+ * The traceback is the shape Frappe actually sends, ending with the exception
+ * line, because a double that cannot produce the bug cannot prove the fix.
+ */
+const traceback = (html) =>
+  JSON.stringify([
+    'Traceback (most recent call last):\n' +
+      '  File "apps/frappe/frappe/app.py", line 120, in application\n' +
+      '    response = frappe.api.handle(request)\n' +
+      `frappe.exceptions.ValidationError: ${html}\n`,
+  ])
+
 const validationError = (html) =>
   HttpResponse.json(
     {
       exc_type: 'ValidationError',
       exception: `frappe.exceptions.ValidationError: ${html}`,
+      exc: traceback(html),
       _server_messages: JSON.stringify([JSON.stringify({ message: html })]),
     },
     { status: 417 },
@@ -340,7 +369,18 @@ const apiHandlers = [
 
     const refused = Object.keys(rest).filter((k) => !writable.includes(k))
     if (refused.length) {
-      return validationError(`Cannot update field(s): ${[...refused, 'cmd'].sort().join(', ')}`)
+      /* ⚠️ `cmd` USED TO BE APPENDED HERE, AND IT HID THE RENAME BUG. Fixed
+         13 Sep. It was real once — Frappe's routing key leaked through the
+         backend's `**form_dict` — but `api.update_venue` has stripped
+         FRAPPE_TRANSPORT_KEYS (`cmd`, `csrf_token`, `_`) since 5 Sep, so the
+         live message names ONLY the fields the caller sent.
+
+         That mattered far more than it looks. Padding the list to two entries
+         meant the refused name was never last, and `parseRefused`'s old
+         pattern only corrupted the LAST entry. The rename — the one caller
+         that sends a single field — was the only case that broke, and this
+         double could not produce it. */
+      return validationError(`Cannot update field(s): ${[...refused].sort().join(', ')}`)
     }
 
     for (const [key, value] of Object.entries(rest)) {
@@ -646,14 +686,18 @@ const apiHandlers = [
     bench.legalListRefuses
       ? validationError('Could not read the consent list')
       : ok(
+          /* ⚠️ 13 Sep — THIS USED TO LEAK AN `accepted` FLAG, AND THE REAL
+             ONE NEVER HAS. `get_required_consents` is the list of ACTIVE
+             POLICIES: not user-scoped, `{policy_type, version}` and nothing
+             else, identical for a partner who has signed everything and one
+             who has signed nothing. While this double echoed the fixture's
+             `accepted` back, the portal's read-back appeared to work — and on
+             the bench it could never work, so a recorded consent was reported
+             to the partner as "your acceptance didn't save", nine times for
+             one user. Who has accepted what is `get_outstanding_consents`. */
           bench.legal.map((d) => ({
             policy_type: d.policy_type || d.title,
             version: d.version || '',
-            /* The live example carries only the type and the version. These are
-               here because the fixture may model a bench that says more, and
-               `normalise` reads an absent acceptance marker as NOT accepted —
-               the safe direction. */
-            ...(d.accepted ? { accepted: 1, accepted_on: d.accepted_on || '2026-09-01' } : {}),
             ...(d.required === undefined ? {} : { required: d.required }),
           })),
         ),
@@ -697,7 +741,33 @@ const apiHandlers = [
    * that" rather than showing a tick. A test double that cannot reproduce the
    * bug cannot prove the fix.
    */
-  method('shotright.api.accept_legal_document', (args) => {
+  /**
+   * WHICH POLICIES THIS USER STILL OWES. User-scoped, and the only endpoint
+   * that can tell an accepted document from an unaccepted one.
+   *
+   * Answers `[]` once everything is signed — which is what `acceptDocument`
+   * reads back as its proof.
+   */
+  method('shotright.api.get_outstanding_consents', () =>
+    bench.legalOutstandingRefuses
+      ? validationError('Could not read outstanding consents')
+      : ok(
+          bench.legal
+            .filter((d) => !d.accepted)
+            .map((d) => ({ policy_type: d.policy_type || d.title, version: d.version || '' })),
+        ),
+  ),
+
+  /**
+   * ⚠️ 13 Sep — RENAMED FROM `accept_legal_document`, WHICH HAS NEVER EXISTED.
+   *
+   * `accept_terms` is the one way to record a consent. The three names the
+   * portal used to probe first (`accept_legal_document`, `accept_legal_documents`,
+   * `record_legal_acceptance`) are deliberately absent from this file: MSW runs
+   * with `onUnhandledRequest: 'error'`, so if they are ever reinstated the suite
+   * fails loudly instead of quietly firing three 417s at a partner's browser.
+   */
+  method('shotright.api.accept_terms', (args) => {
     const id = args.document || args.legal_document || args.name || args.document_name
     /* Documents are addressed by `policy_type` on this bench, and the docname
        the portal now holds is the one `get_legal_document` returned — which is
@@ -707,12 +777,16 @@ const apiHandlers = [
        `get_required_consents` and `get_legal_document` on 5 Sep and said nothing
        about recording an acceptance, so `canEnforce` still refuses to gate on
        it. This handler models what one would look like, not what one is. */
-    const doc = bench.legal.find(
-      (d) =>
-        d.name === id ||
-        (d.policy_type || d.title) === id ||
-        `${d.policy_type || d.title}-${d.version || ''}` === id,
-    )
+    /* `policy_type` + `version` is the endpoint's primary contract and wins
+       when both are present; the docname is the documented fallback. */
+    const doc = args.policy_type
+      ? bench.legal.find((d) => (d.policy_type || d.title) === args.policy_type)
+      : bench.legal.find(
+          (d) =>
+            d.name === id ||
+            (d.policy_type || d.title) === id ||
+            `${d.policy_type || d.title}-${d.version || ''}` === id,
+        )
     if (!doc) return docMissing()
     if (bench.legalAcceptSilentlyFails) return ok({ ok: true })
     doc.accepted = 1

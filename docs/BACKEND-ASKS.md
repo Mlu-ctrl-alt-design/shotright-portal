@@ -384,6 +384,26 @@ falls back to `frappe.client.delete` on `Product Item`, which needs the Vendor
 role to have delete permission on that doctype. Please confirm the doctype name
 and either grant it or add `delete_product_item(item_id)`.
 
+### 1b. `update_venue` renames a venue — ✅ ANSWERED 13 Sep, and the last of it was ours
+
+> **Closed.** The parameter is **`new_venue_name`**, it is deployed, and it
+> works. `Venue` is autonamed `VEN-.#####` and `venue_name` is only its title
+> field, so a rename is a plain field write and never a `frappe.rename_doc` —
+> links, bookings and photos all keep pointing at the same venue.
+>
+> The remaining failure was ours. `update_venue` refuses a field it does not
+> declare, so the first candidate (`new_name`) comes back
+> `Cannot update field(s): new_name` — correct, and the portal is meant to read
+> that and retry. Our parser was reading the traceback into the field name, so
+> a single-field refusal never matched and the retry never happened: the partner
+> got a raw 417. Fixed 13 Sep; see DEV-LOG.
+>
+> One thing worth keeping: the message now names **only** the fields the caller
+> sent, because `api.update_venue` strips `FRAPPE_TRANSPORT_KEYS`. Please keep
+> it that way — `cmd` in that list is what made this bug invisible to our tests.
+
+<details><summary>Original ask, kept for the reasoning</summary>
+
 ### 1b. Can `update_venue` rename a venue — and what is it called?
 
 > **Reported 27 Jul: editing a venue's name doesn't stick.**
@@ -410,6 +430,8 @@ Two other things the portal stopped doing on this call, worth knowing: it no
 longer sends the whole loaded venue back (including **`workflow_state`** — a
 client setting its own approval state), only an explicit list of writable
 fields.
+
+</details>
 
 ### 2. `update_vendor_profile` has no `phone` — ✅ reported deployed 27 Jul
 
@@ -916,6 +938,44 @@ accept  accept_legal_document · accept_legal_documents
         record_legal_acceptance · accept_terms
 ```
 
+> ### ✅ CLOSED 13 Sep — the contract is known, and the bug was ours
+>
+> Three endpoints, all deployed the whole time:
+>
+> ```
+> get_required_consents()           -> [{policy_type, version}]   the active policies
+> get_outstanding_consents()        -> [{policy_type, version}]   what THIS user still owes
+> get_legal_document(policy_type)   -> {name, policy_type, version, content, published_on}
+> accept_terms(policy_type, version | <docname>)  -> records it
+> ```
+>
+> **We were reading acceptance off the wrong one.** `get_required_consents` is
+> not user-scoped and carries no acceptance marker, so our read-back could never
+> confirm anything: `accept_terms` returned 200, the row was written, and the
+> screen said *"your acceptance didn't save."* One partner has **nine** POPIA
+> Consent Records because of it — nine real clicks on a screen that lied.
+> `get_outstanding_consents` is the proof, and it is what we read now.
+>
+> **We also stopped probing three names that do not exist** — every acceptance
+> used to fire `accept_legal_document`, `accept_legal_documents` and
+> `record_legal_acceptance` first, three guaranteed 417s, before the real call.
+>
+> Two things still open on your side:
+>
+> - **`Terms of Service` is a `<p>terms</p>` stub** and `Usage Policy` has
+>   nothing published. Partners are being asked to accept twelve characters.
+> - **Nothing exposes an acceptance date.** `Consent Record.accepted_at` exists
+>   and no endpoint returns it, so the screen can confirm *that* someone
+>   accepted but never *when*. `get_outstanding_consents` returning the accepted
+>   rows too, with their dates, would close it.
+> - **`record_consent` is not idempotent.** Every call inserts another row for
+>   the same `(user, policy_type, version)`. That is what turned our retry loop
+>   into nine audit rows. Since `ConsentRecord.on_trash` refuses deletion —
+>   correctly, it is the POPIA trail — the nine cannot be tidied away, only
+>   prevented from recurring.
+
+<details><summary>Original ask, kept for the reasoning</summary>
+
 **The shape we read**, with aliases so near-misses land:
 
 ```
@@ -989,9 +1049,11 @@ redirect, so five steps of work survive being sent to the legal screen.
    sign-up, it needs either a declared field on `register_vendor` or a
    guest-readable list endpoint — tell us which and we'll wire it.
 
-Covered by `src/test/legal.test.jsx` (24 checks) and
+Covered by `src/test/legal.test.jsx` (27 checks) and
 `verification/verify23.mjs` (37 checks), including a fake bench that reproduces
 the silent-200 write so the read-back is provably wired.
+
+</details>
 
 ### 20. Google Places proxy — "find my venue" onboarding
 

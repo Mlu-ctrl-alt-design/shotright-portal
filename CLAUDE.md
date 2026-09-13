@@ -10,7 +10,7 @@
 So, every time:
 
 ```bash
-npm test          # RTL + vitest — 63 checks, ~18s. Run this on every change.
+npm test          # RTL + vitest — 282 checks, ~65s. Run this on every change.
 npm run build && npx vite preview --port 4173 --host 127.0.0.1 &
 npm run test:e2e  # 21 Playwright suites against the production bundle
 ```

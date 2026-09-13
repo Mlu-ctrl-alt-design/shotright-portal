@@ -17,7 +17,128 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 23 Aug 2026, later (latest) — the venue list gets a face, and its actions stop shouting
+## 13 Sep 2026 (latest) — two 417s, one regex, and a test double that could not fail
+
+Reported: "when I try to rename a venue it throws a 417 error, same as when I
+accept terms of service." Both reproduced from the bench's own nginx log. The
+backend was correct in both cases. Both bugs were ours, and both were invisible
+to 280 passing tests because the fake bench was kinder than the real one.
+
+### The rename
+
+```
+POST shotright.api.update_venue  200   ← the field save
+POST shotright.api.update_venue  417   ← the rename, and then it stops
+```
+
+`renameVenue` sends one candidate parameter at a time. `new_name` is refused —
+`Cannot update field(s): new_name` — and the loop is meant to read that and try
+`new_venue_name`, which is the one the bench declares and which works. It never
+got there.
+
+`parseRefused` searched `err.detail`, which is `[exception, message, exc]`
+joined — and `exc` is a JSON **array**, opening `["Traceback…`. The capture
+class was `([^"\\\n]+)`: everything up to the first quote. Nothing stood
+between the end of the field list and that `[`, so the capture ran on through
+the space and swallowed the bracket:
+
+```
+Cannot update field(s): new_name ["Traceback…
+                        ^^^^^^^^^^ captured  →  ['new_name [']
+```
+
+`refused.includes('new_name')` was false, so a plain parameter refusal read as a
+real error and threw. Matched as field names now (`[A-Za-z0-9_]`), and
+`err.message` — the clean `_server_messages` string, with no traceback attached
+— is searched first.
+
+**Why this survived a year.** With several refused fields only the LAST entry is
+spoilt, and `writeVenue` kept stripping the rest, so the self-heal appeared to
+work. The rename is the one caller that sends a single field, so the only entry
+it got back was the broken one.
+
+### The terms
+
+The acceptance was never failing. `accept_terms` answered **200** every time and
+the row was written — mlumanda@gmail.com has **nine** POPIA Consent Records, one
+per retry, each a real click on a screen that said it had not worked.
+
+The read-back was asking the wrong endpoint. `get_required_consents` is the list
+of ACTIVE POLICIES: not user-scoped, `{policy_type, version}` and nothing else,
+identical for a partner who has signed everything and one who has signed
+nothing. So `normalise` read `accepted` as false forever and `acceptDocument`
+returned `not-persisted` over a perfectly good record.
+`get_outstanding_consents` is the user-scoped half and had been deployed the
+whole time. It now supplies the proof, and it answers `[]` for this user.
+
+Three names above `accept_terms` in `LEGAL_ACCEPT_METHODS` were also removed.
+They are absent from the bench **by design** — the backend says so in as many
+words — so every acceptance fired three guaranteed 417s into the partner's
+network tab before the real call. Those are the red rows in the screenshot, and
+they were never the failure.
+
+`policy_type` + `version` now leads the accept payload: it is the endpoint's
+documented contract and it records what the partner was *asked* to accept. The
+docname aliases stay as the fallback.
+
+No acceptance **date** is shown any more. Neither endpoint returns one — the
+bench stores `accepted_at` on the Consent Record and exposes it nowhere — and
+the screen has always printed a date only when the server gives it one.
+
+### What actually let both of these ship
+
+Three places where `src/test/` was a friendlier bench than the real one. This is
+the part worth remembering.
+
+1. **`validationError` sent no `exc`.** A real Frappe error body carries
+   `exception`, `_server_messages` AND the `exc` traceback array. This double
+   sent the first two, so `err.detail` ended at the message and the old regex
+   had nothing to run into. Every test passed. The double now sends all three.
+2. **`update_venue` appended `cmd` to every refusal.** True once — Frappe's
+   routing key leaked through `**form_dict` — but `api.update_venue` has
+   stripped `FRAPPE_TRANSPORT_KEYS` since 5 Sep. Padding the list to two entries
+   meant the refused name was never last, which is exactly the case the old
+   regex got right. Removed.
+3. **`bench.renameParam` defaulted to `'new_name'`** — the FIRST candidate the
+   portal tries. So every rename test succeeded on the first attempt and the
+   refuse-then-retry path, the only path the live site ever takes, was never
+   run. It defaults to `'new_venue_name'` now, the parameter the bench actually
+   declares.
+
+And `get_required_consents` echoed an `accepted` flag back from the fixture that
+the real endpoint has never sent — which is the whole of bug two, modelled as if
+it worked.
+
+With those four corrected and the source reverted, **13 tests fail**, seven of
+them tests that already existed. That is the measure of how far the double had
+drifted.
+
+### Tests
+
+282 pass (was 280). Three new: acceptance confirmed from the user-scoped list;
+`accept_terms` is asked and the three dead names are not; nothing is marked
+accepted when the outstanding call cannot be reached. Production build clean.
+
+### Owed to somebody
+
+- **Nine duplicate Consent Records for one user, deliberately left alone.**
+  They are truthful — nine real clicks — and `ConsentRecord.on_trash` refuses
+  deletion because the table is the POPIA audit trail. Deleting them would
+  destroy evidence to tidy up noise. The backend fix is to make `record_consent`
+  idempotent per `(user, policy_type, version)` so it stops accumulating;
+  raised, not done here, and it belongs in `shotright`, not the portal.
+- **Terms of Service is still a `<p>terms</p>` stub** on the bench, and
+  `Usage Policy` still has nothing published. Partners are being asked to accept
+  twelve characters.
+- The e2e `verification/*.mjs` suites hardcode
+  `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`, a path from whichever
+  machine they were written on. They cannot run anywhere else without that exact
+  directory being created by hand. Worth replacing with Playwright's own
+  resolution.
+
+---
+
+## 23 Aug 2026, later — the venue list gets a face, and its actions stop shouting
 
 Requested: the cover image per venue on the list, and one visible action with
 the rest behind an overflow.
