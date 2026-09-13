@@ -3,6 +3,7 @@ import { useDashboard } from '../../hooks/useVendor'
 import { Badge, Button, EmptyState, Alert, OverflowMenu, OverflowMenuItem } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { clsx } from '../../utils/clsx'
+import { useIsPhone } from '../../hooks/useIsPhone'
 import { inBucket, stateLabel, stateTone, unrecognisedStates } from '../../services/workflowState'
 
 /**
@@ -63,6 +64,7 @@ const EMPTY = {
 }
 
 export default function VenueList() {
+  const isPhone = useIsPhone()
   const [params] = useSearchParams()
   // The dashboard payload, not `useVenues` — it carries the venue list AND the
   // backend's own counts, which lets the mismatch check below exist. It is also
@@ -203,7 +205,65 @@ export default function VenueList() {
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-gray-200">
+        <>
+        {isPhone ? (
+        <>
+        {/* ⚠️ PHONE FIRST, AND THE TABLE IS NOT RENDERED HERE.
+            Measured at 390px: the table is 534px wide inside a horizontal
+            scroller, so "Dress code" was clipped and the whole Actions column —
+            Edit, Why?, Progress and the ⋯ menu — sat off-screen with no hint
+            that anything scrolled. A partner on a phone could not reach a
+            single action on their own venue.
+
+            A table is the right shape for four columns on a laptop and the
+            wrong one on a 390px screen. Same data, stacked. */}
+        <ul className="space-y-3">
+          {venues.map((venue) => (
+            <li
+              key={venue.name}
+              className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200"
+            >
+              <div className="flex items-start gap-3">
+                {venue.cover_image ? (
+                  <img
+                    src={venue.cover_image}
+                    alt=""
+                    aria-hidden="true"
+                    loading="lazy"
+                    className="h-12 w-16 shrink-0 rounded-lg object-cover ring-1 ring-gray-200"
+                  />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-lg font-bold text-brand-600 ring-1 ring-gray-200"
+                  >
+                    {(venue.venue_name || '?').trim().charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-ink-900">{venue.venue_name}</p>
+                  <p className="mt-0.5 text-xs text-ink-500">{venue.address}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge tone={stateTone(venue.workflow_state)}>
+                      {stateLabel(venue.workflow_state)}
+                    </Badge>
+                    {/* Dress code earns its place only when there is one — an
+                        em dash per card is three lines of nothing. */}
+                    {venue.dress_code && (
+                      <span className="text-xs text-ink-700">{venue.dress_code}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center justify-end border-t border-gray-100 pt-2">
+                <VenueActions venue={venue} />
+              </div>
+            </li>
+          ))}
+        </ul>
+        </>
+        ) : (
+          <div className="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-gray-200">
           {/* UNTITLED UI: https://www.untitledui.com/react/components/tables */}
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <caption className="sr-only">
@@ -267,71 +327,97 @@ export default function VenueList() {
                         along?", and an approved one gets Edit. Everything else
                         (and Edit itself, when it is not the primary) waits in
                         the overflow, one click away instead of zero. */}
-                    <div className="flex items-center justify-end gap-2">
-                      {inBucket(venue, 'declined') ? (
-                        <Link
-                          to={`/venues/${venue.name}/review`}
-                          aria-label={`Why ${venue.venue_name} was declined`}
-                          className="font-bold text-red-700 hover:underline"
-                        >
-                          Why?
-                        </Link>
-                      ) : inBucket(venue, 'pending') ? (
-                        <Link
-                          to={`/venues/${venue.name}/review`}
-                          aria-label={`Progress of ${venue.venue_name}`}
-                          className="font-medium text-brand-600 hover:underline"
-                        >
-                          Progress
-                        </Link>
-                      ) : (
-                        <Link
-                          to={`/venues/${venue.name}/edit`}
-                          aria-label={`Edit ${venue.venue_name}`}
-                          className="font-medium text-brand-600 hover:underline"
-                        >
-                          Edit
-                        </Link>
-                      )}
-                      <OverflowMenu label={`More actions for ${venue.venue_name}`}>
-                        {/* Every venue gets Preview. A partner fills in eleven
-                            fields across five steps and never sees the thing
-                            they are making — the first look as a customer
-                            would see it must not be after it is live. */}
-                        <OverflowMenuItem
-                          as={Link}
-                          to={`/venues/${venue.name}/preview`}
-                          aria-label={`Preview ${venue.venue_name} as customers see it`}
-                        >
-                          Preview
-                        </OverflowMenuItem>
-                        <OverflowMenuItem
-                          as={Link}
-                          to={`/venues/${venue.name}/menu`}
-                          aria-label={`Menu for ${venue.venue_name}`}
-                        >
-                          Menu
-                        </OverflowMenuItem>
-                        {/* Edit moves here only when the primary slot is
-                            taken by a state-specific answer. */}
-                        {(inBucket(venue, 'declined') || inBucket(venue, 'pending')) && (
-                            <OverflowMenuItem
-                              as={Link}
-                              to={`/venues/${venue.name}/edit`}
-                              aria-label={`Edit ${venue.venue_name}`}
-                            >
-                              Edit
-                            </OverflowMenuItem>
-                          )}
-                      </OverflowMenu>
-                    </div>
+                    <VenueActions venue={venue} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        )}
+        </>
       )}
     </div>
   )
 }
+
+/**
+ * The actions for one venue, in one place.
+ *
+ * ⚠️ Shared by the table and the phone cards ON PURPOSE. These were about to be
+ * written twice — which is how the two stop agreeing, and how a declined venue
+ * ends up offering "Edit" on a phone and "Why?" on a laptop.
+ *
+ * ONE action in the open, the rest behind "⋯". Five links per row made every
+ * row shout; the primary slot answers "what would this partner do next?" — a
+ * declined venue's first question is "why?", a pending one's is "how far
+ * along?", and an approved one gets Edit. Everything else (and Edit itself,
+ * when it is not the primary) waits in the overflow, one click away.
+ *
+ * `min-h-11` is 44px, the floor for something you tap with a thumb. On a laptop
+ * these were 20px-tall text links, which is fine for a mouse and is not a
+ * target on a phone.
+ */
+function VenueActions({ venue }) {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      {inBucket(venue, 'declined') ? (
+        <Link
+          to={`/venues/${venue.name}/review`}
+          aria-label={`Why ${venue.venue_name} was declined`}
+          className="inline-flex min-h-11 items-center px-1 font-bold text-red-700 hover:underline sm:min-h-0"
+        >
+          Why?
+        </Link>
+      ) : inBucket(venue, 'pending') ? (
+        <Link
+          to={`/venues/${venue.name}/review`}
+          aria-label={`Progress of ${venue.venue_name}`}
+          className="inline-flex min-h-11 items-center px-1 font-medium text-brand-600 hover:underline sm:min-h-0"
+        >
+          Progress
+        </Link>
+      ) : (
+        <Link
+          to={`/venues/${venue.name}/edit`}
+          aria-label={`Edit ${venue.venue_name}`}
+          className="inline-flex min-h-11 items-center px-1 font-medium text-brand-600 hover:underline sm:min-h-0"
+        >
+          Edit
+        </Link>
+      )}
+      <OverflowMenu label={`More actions for ${venue.venue_name}`}>
+        {/* Every venue gets Preview. A partner fills in eleven
+            fields across five steps and never sees the thing
+            they are making — the first look as a customer
+            would see it must not be after it is live. */}
+        <OverflowMenuItem
+          as={Link}
+          to={`/venues/${venue.name}/preview`}
+          aria-label={`Preview ${venue.venue_name} as customers see it`}
+        >
+          Preview
+        </OverflowMenuItem>
+        <OverflowMenuItem
+          as={Link}
+          to={`/venues/${venue.name}/menu`}
+          aria-label={`Menu for ${venue.venue_name}`}
+        >
+          Menu
+        </OverflowMenuItem>
+        {/* Edit moves here only when the primary slot is
+            taken by a state-specific answer. */}
+        {(inBucket(venue, 'declined') || inBucket(venue, 'pending')) && (
+            <OverflowMenuItem
+              as={Link}
+              to={`/venues/${venue.name}/edit`}
+              aria-label={`Edit ${venue.venue_name}`}
+            >
+              Edit
+            </OverflowMenuItem>
+          )}
+      </OverflowMenu>
+    </div>
+  )
+}
+
