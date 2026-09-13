@@ -192,7 +192,7 @@ export default function VenueBulkImport() {
             <code className="rounded bg-gray-100 px-1 font-mono text-xs">
               {VENUE_TEMPLATE_HEADERS.join(', ')}
             </code>
-            . Save as CSV.
+. Excel or CSV.
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button variant="secondary" size="sm" onClick={download}>
@@ -202,7 +202,7 @@ export default function VenueBulkImport() {
               ref={fileInput}
               type="file"
               aria-label="Venue spreadsheet"
-              accept=".csv,text/csv"
+              accept=".csv,text/csv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               onChange={onFile}
               className="block min-w-56 flex-1 text-sm text-ink-700 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100"
             />
@@ -283,7 +283,7 @@ export default function VenueBulkImport() {
             ref={fileInput}
             type="file"
             aria-label="Venue spreadsheet"
-            accept=".csv,text/csv"
+            accept=".csv,text/csv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={onFile}
             className="hidden"
           />
