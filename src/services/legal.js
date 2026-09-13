@@ -78,12 +78,86 @@ export const LEGAL_DOCUMENT_METHOD = 'shotright.api.get_legal_document'
  */
 export const POLICY_TYPES = ['POPIA Notice', 'Terms of Service', 'Usage Policy']
 
-export const LEGAL_ACCEPT_METHODS = [
-  'shotright.api.accept_legal_document',
-  'shotright.api.accept_legal_documents',
-  'shotright.api.record_legal_acceptance',
-  'shotright.api.accept_terms',
-]
+/**
+ * ⚠️ CORRECTED 13 Sep, from the bench's own access log.
+ *
+ * `accept_terms` is the ONE endpoint, and the three names above it were dead
+ * probes. Every attempt cost three guaranteed 417s before the real call:
+ *
+ *   POST accept_legal_document    417   ← no such method
+ *   POST accept_legal_documents   417   ← no such method
+ *   POST record_legal_acceptance  417   ← no such method
+ *   POST accept_terms             200   ← the acceptance, recorded
+ *
+ * The backend states plainly that those three "still 417 on purpose" and that
+ * `accept_terms` is the only way to record a consent, so they are not a fallback
+ * chain, they are three red rows in a partner's network tab on the one screen
+ * where a partner is least inclined to trust us. Removed.
+ *
+ * Kept as a list for the same reason `LEGAL_LIST_METHODS` is: the mechanism
+ * costs nothing and one hardcoded name is what produced seventeen wrong guesses.
+ */
+export const LEGAL_ACCEPT_METHODS = ['shotright.api.accept_terms']
+
+/**
+ * WHICH DOCUMENTS THIS USER STILL OWES, as the bench sees it.
+ *
+ * ⚠️ 13 Sep. `get_required_consents` is the list of ACTIVE POLICIES. It is not
+ * user-scoped and it never carries an acceptance marker — every row is
+ * `{policy_type, version}` and nothing else. So `normalise` read `accepted` as
+ * false for every document, on every load, no matter what the user had already
+ * signed: `acceptDocument` recorded the consent, read the list back, found the
+ * same two rows as before, and reported `not-persisted`. The partner was told
+ * "your acceptance didn't save" over a row that had saved perfectly — nine times
+ * for one user, once per retry, each one a fresh Consent Record.
+ *
+ * `get_outstanding_consents` is the user-scoped half, and it was deployed the
+ * whole time. It answers `[]` once everything is accepted, which is exactly the
+ * proof rule 1 at the top of this file asks for.
+ *
+ * Returns null — NOT an empty set — when we could not ask. An unanswered
+ * question must never read as "nothing outstanding", which would tick every box
+ * on the screen off the back of a failed request.
+ */
+export const LEGAL_OUTSTANDING_METHOD = 'shotright.api.get_outstanding_consents'
+
+const consentKey = (policyType, version) => `${policyType || ''}|${version || ''}`
+
+const outstandingConsents = async () => {
+  try {
+    const rows = await callGet(LEGAL_OUTSTANDING_METHOD, {})
+    if (!Array.isArray(rows)) return null
+    return new Set(rows.map((row) => consentKey(row?.policy_type, row?.version)))
+  } catch (error) {
+    console.warn(
+      `[shotright] ${LEGAL_OUTSTANDING_METHOD} answered ${error?.status || 'an error'}: ` +
+        `${error?.message || 'no message'}. Acceptance cannot be confirmed, so every ` +
+        `document stays unaccepted — the cautious direction.`,
+    )
+    return null
+  }
+}
+
+/**
+ * Mark the documents this user has already accepted.
+ *
+ * Absent from `outstanding` means accepted. `null` means we could not ask, and
+ * then nothing is marked: same reasoning as `accepted` in `normalise`, the cost
+ * of being wrong this way is asking someone to accept twice.
+ *
+ * A document we cannot KEY is never marked. "Absent from the outstanding list"
+ * only means accepted if we are asking the list the right question, and a
+ * document with no policy type would be absent from it for the wrong reason —
+ * which is the one direction this screen must never be wrong in.
+ */
+const markAccepted = (documents, outstanding) =>
+  outstanding === null
+    ? documents
+    : documents.map((d) => {
+        if (d.accepted) return d
+        if (!d.kind || !d.version) return d
+        return outstanding.has(consentKey(d.kind, d.version)) ? d : { ...d, accepted: true }
+      })
 
 /**
  * WHERE ACCEPTANCE IS ENFORCED.
@@ -270,7 +344,11 @@ export const getLegalDocuments = async () => {
     if (payload === undefined) continue
 
     const rows = Array.isArray(payload) ? payload : payload?.documents || payload?.data || []
-    const documents = await withText(rows)
+    /* Two calls, in parallel: the texts, and what this user still owes. The
+       second is the only thing on this screen that can tell an accepted
+       document from an unaccepted one — see LEGAL_OUTSTANDING_METHOD. */
+    const [withTexts, outstandingSet] = await Promise.all([withText(rows), outstandingConsents()])
+    const documents = markAccepted(withTexts, outstandingSet)
     return {
       available: true,
       documents,
@@ -329,11 +407,17 @@ export const acceptDocument = async (document) => {
              with it: "they accepted" is a weaker record than "they accepted
              v2.1 on this date". */
           await call(method, {
+            /* `policy_type` + `version` is `accept_terms`'s primary contract,
+               and it records exactly what the partner was ASKED to accept —
+               the consent row wins on version, see `withText`. The docname
+               aliases stay as the fallback for a document we only know by
+               name; the endpoint ignores them when the pair is present. */
+            policy_type: document.kind || undefined,
+            version: document.version || undefined,
             document: document.id,
             legal_document: document.id,
             name: document.id,
             document_name: document.id,
-            version: document.version || undefined,
             accepted: 1,
           })
           return true

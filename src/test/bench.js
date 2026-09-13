@@ -92,12 +92,18 @@ const initial = () => ({
   draftSaveRefuses: null,
 
   /**
-   * Which parameter `update_venue` declares for a new name. Unconfirmed on the
-   * real bench — reported 13 Sep as "venue name update throws an error" — so
-   * the portal tries the candidates one at a time and this is how that is
-   * tested. `null` models a bench that cannot rename at all.
+   * Which parameter `update_venue` declares for a new name.
+   *
+   * ⚠️ CONFIRMED 13 Sep, against the bench: it is `new_venue_name`, and the
+   * default here used to be `new_name` — the FIRST candidate the portal tries.
+   * So every rename test passed on the first attempt and the refuse-then-retry
+   * path, which is the only path the live site ever takes, was never run.
+   *
+   * `new_venue_name` is the second candidate, so the default fixture now walks
+   * the same road a partner does: `new_name` refused, retry, renamed. `null`
+   * models a bench that cannot rename at all.
    */
-  renameParam: 'new_name',
+  renameParam: 'new_venue_name',
 
   /**
    * How this bench reports a method that is not there. 'attribute-error' is
@@ -151,12 +157,15 @@ const initial = () => ({
     update_product_item: false,
     delete_product_item: false,
 
-    /* Legal documents were announced on 7 Aug with no method name attached, so
-       the portal is guessing at names. `true` here models the guess landing;
-       tests that want the not-deployed path set them false. Both paths matter
-       and both are covered. */
-    get_legal_documents: true,
-    accept_legal_document: true,
+    /* ⚠️ 13 Sep — THE REAL NAMES, from the bench's own access log. The portal
+       is no longer guessing: `get_required_consents` lists the active policies,
+       `get_outstanding_consents` says which of them THIS user still owes, and
+       `accept_terms` records one. The old keys named two methods that have
+       never existed (`get_legal_documents`, `accept_legal_document`), so a
+       test setting them false proved nothing about the live bench. */
+    get_required_consents: true,
+    get_outstanding_consents: true,
+    accept_terms: true,
 
     /* The Places proxy. No method name has been agreed, so this models the
        guess landing; tests that want the wizard without it set them false. */
@@ -312,11 +321,21 @@ const initial = () => ({
    */
   legal: [],
 
-  /** The live 417: `get_legal_documents` exists and throws. */
+  /** The live 417: the consent list exists and throws. */
   legalListRefuses: false,
 
   /** The documents live under the second candidate name instead. */
   legalListAltName: false,
+
+  /**
+   * ⚠️ 13 Sep — `get_outstanding_consents` cannot be reached.
+   *
+   * The portal must then mark NOTHING as accepted, because an unanswered
+   * question is not a clean bill of health. Modelled separately from
+   * `legalListRefuses` because the two halves fail independently on the bench:
+   * the list is guest-readable, the outstanding call is user-scoped.
+   */
+  legalOutstandingRefuses: false,
 
   /**
    * THE FAILURE THIS SUITE EXISTS FOR: accept returns 200 and writes nothing.

@@ -91,7 +91,21 @@ describe('reading before agreeing', () => {
 })
 
 describe('recording an acceptance', () => {
-  it('records it, and says so with the date', async () => {
+  it('records it, and confirms it from the user-scoped consent list', async () => {
+    /* ⚠️ THE REGRESSION FOR 13 SEP. `accept_terms` returned 200 and the row was
+       written — nine times, for one partner, once per retry — and the screen
+       said "your acceptance didn't save" every time.
+
+       The read-back asked `get_required_consents`, which is the list of ACTIVE
+       POLICIES: not user-scoped, no acceptance marker, identical before and
+       after. So `accepted` was false forever and no acceptance could ever be
+       confirmed. `get_outstanding_consents` is the half that knows, and this
+       double no longer echoes an `accepted` flag the real one never sends — so
+       this test can only pass by reading the right endpoint.
+
+       No date asserted: neither endpoint returns one. The bench records
+       `accepted_at` on the Consent Record and exposes it nowhere, and the
+       screen prints a date only when the server gives it one. */
     seed(TERMS)
     const { user } = renderApp({ route: '/legal', signedIn: true })
 
@@ -99,7 +113,38 @@ describe('recording an acceptance', () => {
     await user.click(screen.getByRole('button', { name: /^accept$/i }))
 
     expect(await screen.findByText(/you accepted this \(version 2\.1\)/i)).toBeInTheDocument()
-    expect(screen.getByText(/7 august 2026/i)).toBeInTheDocument()
+    expect(screen.queryByText(/couldn’t record that/i)).not.toBeInTheDocument()
+  })
+
+  it('asks accept_terms, and nothing else', async () => {
+    /* Three names above `accept_terms` used to be probed first, and all three
+       are absent from the bench BY DESIGN — so every acceptance fired three
+       guaranteed 417s into a partner's network tab, on the one screen where a
+       partner is least inclined to trust us. */
+    seed(TERMS)
+    const { user } = renderApp({ route: '/legal', signedIn: true })
+
+    await user.click(await screen.findByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: /^accept$/i }))
+    await screen.findByText(/you accepted this/i)
+
+    const tried = bench.calls.map((c) => c.method)
+    expect(tried).toContain('accept_terms')
+    expect(tried).not.toContain('accept_legal_document')
+    expect(tried).not.toContain('accept_legal_documents')
+    expect(tried).not.toContain('record_legal_acceptance')
+  })
+
+  it('marks nothing accepted when the bench cannot say what is outstanding', async () => {
+    /* An unanswered question is not a clean bill of health. If the user-scoped
+       half is unreachable the screen must keep asking, not tick every box off
+       the back of a failed request. */
+    seed({ ...TERMS, accepted: 1 })
+    bench.legalOutstandingRefuses = true
+    renderApp({ route: '/legal', signedIn: true })
+
+    expect(await screen.findByRole('checkbox')).toBeInTheDocument()
+    expect(screen.queryByText(/you accepted this/i)).not.toBeInTheDocument()
   })
 
   it('sends the version along with the acceptance', async () => {
@@ -110,8 +155,13 @@ describe('recording an acceptance', () => {
     await user.click(screen.getByRole('button', { name: /^accept$/i }))
     await screen.findByText(/you accepted this/i)
 
-    const write = bench.calls.find((c) => c.method === 'accept_legal_document')
+    const write = bench.calls.find((c) => c.method === 'accept_terms')
     expect(write.args.version).toBe('2.1')
+    /* `policy_type` + `version` is the endpoint's primary contract — it names
+       what the partner was ASKED to accept, not merely which row we held. The
+       value is whatever the consent list called it; these fixtures carry no
+       explicit `policy_type`, so the double answers with the title. */
+    expect(write.args.policy_type).toBe('Partner Terms of Service')
     expect(bench.legal[0].accepted_version).toBe('2.1')
   })
 
@@ -135,7 +185,7 @@ describe('recording an acceptance', () => {
 
   it('says nothing was saved when accepting isn’t deployed', async () => {
     seed(TERMS)
-    bench.deploy.accept_legal_document = false
+    bench.deploy.accept_terms = false
     const { user } = renderApp({ route: '/legal', signedIn: true })
 
     await user.click(await screen.findByRole('checkbox'))

@@ -953,10 +953,36 @@ const FIELD_LABELS = {
  * named, retry once, and report what could not be saved instead of failing the
  * lot. It self-heals the day the allow-list is fixed.
  */
-const REFUSED_FIELDS = /Cannot update field\(s\):\s*([^"\\\n]+)/i
+/**
+ * ⚠️ 13 Sep — THIS PATTERN USED TO READ THE TRACEBACK INTO THE LAST FIELD NAME.
+ *
+ * It was `([^"\\\n]+)`: everything up to the first quote. `err.detail` is
+ * `[data.exception, data.message, data.exc].join(' ')`, and `data.exc` is a JSON
+ * ARRAY — it opens `["Traceback (most recent call last):…`. There is no quote
+ * between the end of the field list and that `[`, so the capture ran straight on
+ * through the space and swallowed the bracket:
+ *
+ *   Cannot update field(s): new_name ["Traceback…
+ *                           ^^^^^^^^^^ captured
+ *
+ * With SEVERAL refused fields only the last entry was spoilt — `['address',
+ * 'cmd', 'new_name [']` — so `writeVenue` kept stripping the first two and the
+ * bug stayed invisible for weeks. The rename is the one caller that sends a
+ * SINGLE field, so the only entry it got back was the broken one:
+ * `refused.includes('new_name')` was false, `renameVenue` read a plain parameter
+ * refusal as a real error and threw, and a partner renaming a venue got a raw
+ * 417 instead of the retry on `new_venue_name` that would have worked.
+ *
+ * Matched as field names now, not as "text up to a quote". Frappe fieldnames are
+ * `[A-Za-z0-9_]`, so the list cannot run past its own last entry whatever
+ * follows it in the payload — and `err.message` (the clean `_server_messages`
+ * string, which carries no traceback) is searched first.
+ */
+const REFUSED_FIELDS =
+  /Cannot update field\(s\):\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)/i
 
 const parseRefused = (err) => {
-  const text = `${err?.detail || ''} ${err?.message || ''}`
+  const text = `${err?.message || ''} ${err?.detail || ''}`
   const match = text.match(REFUSED_FIELDS)
   if (!match) return null
   return match[1]
