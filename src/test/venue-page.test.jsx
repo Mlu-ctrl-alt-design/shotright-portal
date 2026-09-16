@@ -64,7 +64,9 @@ describe('one venue, one place', () => {
     // The tabs are still there, so the partner is inside the venue rather than
     // having been thrown to an unrelated page.
     expect(await screen.findByRole('navigation', { name: /venue sections/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/^heading$/i)).toBeInTheDocument()
+    // findBy, not getBy: the menu screen is code-split (23 Aug), so its chunk
+    // mounts a beat after the tab click.
+    expect(await screen.findByLabelText(/^heading$/i)).toBeInTheDocument()
   })
 
   it('keeps every old URL working', async () => {

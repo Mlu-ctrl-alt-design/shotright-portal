@@ -71,6 +71,21 @@ export const useCreateVenue = () => {
 }
 
 /**
+ * Queue a Draft (or Declined) listing for moderation. Invalidates the same
+ * caches as creation: the submit is what changes the state those lists show.
+ */
+export const useSubmitVenueForReview = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: vendorApi.submitVenueForReview,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['venues'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+/**
  * `currentName` is the venue's name as the server holds it — NOT `venueId`,
  * which is its docname and may be `VEN-0001`. The service needs both to tell a
  * rename apart from an ordinary save; see `updateVenue`.
