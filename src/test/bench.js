@@ -39,19 +39,85 @@ export const VENUE_ONE = {
   latitude: -33.9249,
   longitude: 18.4241,
   dress_code: 'Smart casual',
+  /* ⚠️ The fieldname is UNCONFIRMED — the backend says the field is on `Venue`
+     and has not said what it is called. `bench.spendField` renames it so the
+     portal's resolution off the payload is tested rather than assumed, and
+     `null` models a bench that does not carry it at all. */
+  average_spend: 250,
   atmosphere_desc: 'Loud, warm, good for a long table.',
   workflow_state: 'Approved',
   moods: ['MOOD-CHILLED'],
+  /* ⚠️ Frappe's ACTUAL wire format for a Time field, not a tidied-up version of
+     it. A Time is serialised as `str(timedelta)`, which zero-pads the minutes
+     and NOT the hour — so nine in the morning arrives as "9:00:00". This
+     fixture used to say "17:00", a shape the bench never sends, and that is the
+     whole reason a bug that blanked every morning opening time got through: the
+     one venue in the fake world opened in the evening, in a format with nothing
+     to trip over. Wednesday exists to keep a single-digit hour in the suite. */
   operating_hours: [
-    { day_of_week: 'Monday', open_time: '17:00', close_time: '23:00', closed: 0 },
-    { day_of_week: 'Tuesday', open_time: '17:00', close_time: '23:00', closed: 0 },
+    { day_of_week: 'Monday', open_time: '17:00:00', close_time: '23:00:00', closed: 0 },
+    { day_of_week: 'Tuesday', open_time: '17:00:00', close_time: '23:00:00', closed: 0 },
+    { day_of_week: 'Wednesday', open_time: '9:00:00', close_time: '23:00:00', closed: 0 },
   ],
 }
 
 const initial = () => ({
+  /**
+   * Fields `update_venue` ACCEPTS and then does not store — Frappe's silent
+   * discard of an undeclared kwarg, at HTTP 200. e.g. ['operating_hours'].
+   */
+  silentlyDrops: [],
+
+  /**
+   * Which parameter the menu importer declares for the uploaded file. The
+   * portal does not know, so it tries `file_name`, `file_url` and `file` in
+   * turn. `'none'` is an importer that takes none of them.
+   */
+  importerWants: 'file_name',
+
+  /**
+   * Which argument the Product Item methods declare. `item_id` is what the live
+   * bench told us on 5 Sep; the others exist so the portal's search for the
+   * right name is testable.
+   */
+  itemIdParam: 'item_id',
+
+  /** Which key the venue payload carries for average spend; null for none. */
+  spendField: 'average_spend',
+
+  /** A venue name `create_venue` will refuse, for testing a bulk import. */
+  createVenueRefuses: null,
+
+  /** A venue name `save_venue_draft` will refuse, for the same reason. */
+  draftSaveRefuses: null,
+
+  /**
+   * Which parameter `update_venue` declares for a new name.
+   *
+   * ⚠️ CONFIRMED 13 Sep, against the bench: it is `new_venue_name`, and the
+   * default here used to be `new_name` — the FIRST candidate the portal tries.
+   * So every rename test passed on the first attempt and the refuse-then-retry
+   * path, which is the only path the live site ever takes, was never run.
+   *
+   * `new_venue_name` is the second candidate, so the default fixture now walks
+   * the same road a partner does: `new_name` refused, retry, renamed. `null`
+   * models a bench that cannot rename at all.
+   */
+  renameParam: 'new_venue_name',
+
+  /**
+   * How this bench reports a method that is not there. 'attribute-error' is
+   * what shotright.thedaystar.co.za actually does (417); 'not-found' is the
+   * 404 a bench answers when the module path itself does not resolve.
+   */
+  missingMethodStyle: 'attribute-error',
+
   /** Which methods exist. Flip to false to model "not deployed yet". */
   deploy: {
     login: true,
+    /* Off: the live bench has never told the portal it has this, and until it
+       does no sign-in button may appear. Flip it on to model one that does. */
+    login_with_google: false,
     register_vendor: true,
     get_vendor_dashboard: true,
     get_venue_detail: true,
@@ -93,12 +159,15 @@ const initial = () => ({
     update_product_item: false,
     delete_product_item: false,
 
-    /* Legal documents were announced on 7 Aug with no method name attached, so
-       the portal is guessing at names. `true` here models the guess landing;
-       tests that want the not-deployed path set them false. Both paths matter
-       and both are covered. */
-    get_legal_documents: true,
-    accept_legal_document: true,
+    /* ⚠️ 13 Sep — THE REAL NAMES, from the bench's own access log. The portal
+       is no longer guessing: `get_required_consents` lists the active policies,
+       `get_outstanding_consents` says which of them THIS user still owes, and
+       `accept_terms` records one. The old keys named two methods that have
+       never existed (`get_legal_documents`, `accept_legal_document`), so a
+       test setting them false proved nothing about the live bench. */
+    get_required_consents: true,
+    get_outstanding_consents: true,
+    accept_terms: true,
 
     /* The Places proxy. No method name has been agreed, so this models the
        guess landing; tests that want the wizard without it set them false. */
@@ -118,11 +187,18 @@ const initial = () => ({
   },
 
   /**
-   * `moods` is a child table on `Venue`, so `venue.update()` cannot take a list
-   * of plain strings — see the handler. Production behaviour; set false to
-   * model a bench that has been fixed.
+   * ⚠️ DEFAULT FLIPPED 5 Sep, on the backend's word and their own break-test.
+   *
+   * `update_venue` DOES take a list of bare mood names — `normalise_moods`
+   * accepts a name, a `{mood: ...}` row or a JSON string, and throws on
+   * anything else. The 28 Jul TypeError this modelled is history.
+   *
+   * Leaving it on was not neutral: every test in the suite ran against a bench
+   * that crashed on the shape the real one accepts, so the portal's workaround
+   * (drop moods, warn the partner) looked correct and moods have not saved on
+   * an edit for weeks. Set true to model the old bench.
    */
-  moodsAreChildRows: true,
+  moodsAreChildRows: false,
 
   /** Fields `get_venue_detail` leaves out that `get_vendor_dashboard` returns. */
   detailOmits: [],
@@ -214,6 +290,14 @@ const initial = () => ({
     'moods',
     'operating_hours',
     'new_name',
+    /* ⚠️ Writable ONLY because this bench is modelled as accepting it. On the
+       real one that is unconfirmed: a field can sit on the doctype and still
+       not be a parameter of the whitelisted method, and `update_venue` refuses
+       an undeclared field by name rather than dropping it. Take this out to
+       model that, and the partner should be told the average spend did not
+       save — not left thinking it did. */
+    'average_spend',
+    'avg_spend',
   ],
 
   session: null,
@@ -238,6 +322,22 @@ const initial = () => ({
    * path are unaffected on a bench with nothing to accept.
    */
   legal: [],
+
+  /** The live 417: the consent list exists and throws. */
+  legalListRefuses: false,
+
+  /** The documents live under the second candidate name instead. */
+  legalListAltName: false,
+
+  /**
+   * ⚠️ 13 Sep — `get_outstanding_consents` cannot be reached.
+   *
+   * The portal must then mark NOTHING as accepted, because an unanswered
+   * question is not a clean bill of health. Modelled separately from
+   * `legalListRefuses` because the two halves fail independently on the bench:
+   * the list is guest-readable, the outstanding call is user-scoped.
+   */
+  legalOutstandingRefuses: false,
 
   /**
    * THE FAILURE THIS SUITE EXISTS FOR: accept returns 200 and writes nothing.

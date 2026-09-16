@@ -91,7 +91,21 @@ describe('reading before agreeing', () => {
 })
 
 describe('recording an acceptance', () => {
-  it('records it, and says so with the date', async () => {
+  it('records it, and confirms it from the user-scoped consent list', async () => {
+    /* ⚠️ THE REGRESSION FOR 13 SEP. `accept_terms` returned 200 and the row was
+       written — nine times, for one partner, once per retry — and the screen
+       said "your acceptance didn't save" every time.
+
+       The read-back asked `get_required_consents`, which is the list of ACTIVE
+       POLICIES: not user-scoped, no acceptance marker, identical before and
+       after. So `accepted` was false forever and no acceptance could ever be
+       confirmed. `get_outstanding_consents` is the half that knows, and this
+       double no longer echoes an `accepted` flag the real one never sends — so
+       this test can only pass by reading the right endpoint.
+
+       No date asserted: neither endpoint returns one. The bench records
+       `accepted_at` on the Consent Record and exposes it nowhere, and the
+       screen prints a date only when the server gives it one. */
     seed(TERMS)
     const { user } = renderApp({ route: '/legal', signedIn: true })
 
@@ -99,7 +113,38 @@ describe('recording an acceptance', () => {
     await user.click(screen.getByRole('button', { name: /^accept$/i }))
 
     expect(await screen.findByText(/you accepted this \(version 2\.1\)/i)).toBeInTheDocument()
-    expect(screen.getByText(/7 august 2026/i)).toBeInTheDocument()
+    expect(screen.queryByText(/couldn’t record that/i)).not.toBeInTheDocument()
+  })
+
+  it('asks accept_terms, and nothing else', async () => {
+    /* Three names above `accept_terms` used to be probed first, and all three
+       are absent from the bench BY DESIGN — so every acceptance fired three
+       guaranteed 417s into a partner's network tab, on the one screen where a
+       partner is least inclined to trust us. */
+    seed(TERMS)
+    const { user } = renderApp({ route: '/legal', signedIn: true })
+
+    await user.click(await screen.findByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: /^accept$/i }))
+    await screen.findByText(/you accepted this/i)
+
+    const tried = bench.calls.map((c) => c.method)
+    expect(tried).toContain('accept_terms')
+    expect(tried).not.toContain('accept_legal_document')
+    expect(tried).not.toContain('accept_legal_documents')
+    expect(tried).not.toContain('record_legal_acceptance')
+  })
+
+  it('marks nothing accepted when the bench cannot say what is outstanding', async () => {
+    /* An unanswered question is not a clean bill of health. If the user-scoped
+       half is unreachable the screen must keep asking, not tick every box off
+       the back of a failed request. */
+    seed({ ...TERMS, accepted: 1 })
+    bench.legalOutstandingRefuses = true
+    renderApp({ route: '/legal', signedIn: true })
+
+    expect(await screen.findByRole('checkbox')).toBeInTheDocument()
+    expect(screen.queryByText(/you accepted this/i)).not.toBeInTheDocument()
   })
 
   it('sends the version along with the acceptance', async () => {
@@ -110,8 +155,13 @@ describe('recording an acceptance', () => {
     await user.click(screen.getByRole('button', { name: /^accept$/i }))
     await screen.findByText(/you accepted this/i)
 
-    const write = bench.calls.find((c) => c.method === 'accept_legal_document')
+    const write = bench.calls.find((c) => c.method === 'accept_terms')
     expect(write.args.version).toBe('2.1')
+    /* `policy_type` + `version` is the endpoint's primary contract — it names
+       what the partner was ASKED to accept, not merely which row we held. The
+       value is whatever the consent list called it; these fixtures carry no
+       explicit `policy_type`, so the double answers with the title. */
+    expect(write.args.policy_type).toBe('Partner Terms of Service')
     expect(bench.legal[0].accepted_version).toBe('2.1')
   })
 
@@ -135,7 +185,7 @@ describe('recording an acceptance', () => {
 
   it('says nothing was saved when accepting isn’t deployed', async () => {
     seed(TERMS)
-    bench.deploy.accept_legal_document = false
+    bench.deploy.accept_terms = false
     const { user } = renderApp({ route: '/legal', signedIn: true })
 
     await user.click(await screen.findByRole('checkbox'))
@@ -220,7 +270,7 @@ describe('what the portal refuses to enforce', () => {
        agreeing to OR record that they did — so we do not hold them to it. A
        venue reaching review unaccepted is something a human catches; a partner
        locked out of their own venues on a Friday night is not. */
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     renderApp({ route: '/', signedIn: true })
 
     await screen.findByRole('heading', { name: /welcome back, thabo/i })
@@ -228,7 +278,7 @@ describe('what the portal refuses to enforce', () => {
   })
 
   it('says so plainly on the legal screen rather than pretending all is well', async () => {
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     renderApp({ route: '/legal', signedIn: true })
 
     expect(await screen.findByText(/can’t show these right now/i)).toBeInTheDocument()
@@ -240,7 +290,7 @@ describe('what the portal refuses to enforce', () => {
   it('does not tell someone with nothing outstanding that they are up to date on an unreadable bench', async () => {
     /* "You're up to date" over a failed read is the same class of lie as an
        empty booking diary over a missing method. */
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     renderApp({ route: '/legal', signedIn: true })
 
     await screen.findByText(/can’t show these right now/i)
@@ -352,11 +402,65 @@ describe('submitting a venue with something outstanding', () => {
        stop a partner submitting on the strength of a question we could not ask.
        An unaccepted venue in the review queue is caught by a human; a partner
        who cannot submit because an endpoint is absent is not caught by anyone. */
-    bench.deploy.get_legal_documents = false
+    bench.deploy.get_required_consents = false
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
     const name = await walkToReview(user)
     await user.click(screen.getByRole('button', { name: /^submit$/i }))
 
     await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
+  })
+})
+
+describe('when the bench answers 417', () => {
+  /**
+   * SEEN ON THE LIVE SITE, 5 Sep:
+   *
+   *   GET /api/method/shotright.api.get_legal_documents  →  417
+   *
+   * 417 is Frappe's ValidationError — the request reached the bench, the method
+   * ran, and it threw. The portal sends no arguments to it at all, so the
+   * likeliest cause is one it requires and we do not know about.
+   */
+  /**
+   * ⚠️ `Usage Policy` is a valid policy type with NOTHING PUBLISHED behind it,
+   * confirmed on the bench 5 Sep. `get_legal_document` returns nothing for it
+   * rather than failing — so one unpublished policy must not take the readable
+   * ones off the screen, and it must not get a tickbox either.
+   *
+   * The list and the text are separate calls now, which is exactly what makes
+   * this failure possible: three documents, three fetches, and any one of them
+   * can come back empty.
+   */
+  it('shows the documents it could read, and no tickbox over the one it could not', async () => {
+    bench.legal = [
+      { name: 'TOS', policy_type: 'Terms of Service', version: '2.1', content: 'Read me.' },
+      { name: 'USAGE', policy_type: 'Usage Policy', version: '1.0' }, // never published
+    ]
+
+    const { getLegalDocuments } = await import('../services/legal')
+    const result = await getLegalDocuments()
+
+    expect(result.available).toBe(true)
+    expect(result.documents).toHaveLength(2)
+
+    const readable = result.documents.find((d) => d.title === 'Terms of Service')
+    const unpublished = result.documents.find((d) => d.title === 'Usage Policy')
+    expect(readable.body).toMatch(/read me/i)
+    expect(unpublished.body).toBe('')
+  })
+
+  /**
+   * And whatever happens, nobody is locked out. A document we cannot read is
+   * not a document anyone can be asked to accept, and gating on a capability
+   * the bench cannot fulfil traps every partner behind a button that cannot
+   * work.
+   */
+  it('does not block a partner over a document it could not fetch', async () => {
+    bench.legalListRefuses = true
+
+    const { getLegalDocuments, canEnforce } = await import('../services/legal')
+    const standing = await getLegalDocuments()
+
+    expect(canEnforce(standing)).toBe(false)
   })
 })

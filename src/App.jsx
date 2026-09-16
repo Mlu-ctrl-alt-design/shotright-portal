@@ -31,6 +31,7 @@ const VenueOverview = lazy(() => import('./views/vendor/VenueOverview'))
 const VenueBookings = lazy(() => import('./views/vendor/VenueBookings'))
 const Profile = lazy(() => import('./views/vendor/Profile'))
 const Legal = lazy(() => import('./views/vendor/Legal'))
+const VenueBulkImport = lazy(() => import('./views/vendor/VenueBulkImport'))
 
 export default function App() {
   const rehydrate = useAuthStore((s) => s.rehydrate)
@@ -79,6 +80,7 @@ export default function App() {
           {/* The designs route "Add New" into the five-step wizard. VenueForm
               stays behind the edit route until the wizard can also edit. */}
           <Route path="/venues/new" element={<VenueWizard />} />
+          <Route path="/venues/import" element={<VenueBulkImport />} />
           {/* Kept as redirects rather than deleted. These were real pages, so
               they are in partners' history and bookmarks; letting them fall
               through to the catch-all would silently dump someone on the

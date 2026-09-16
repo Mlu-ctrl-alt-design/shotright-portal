@@ -85,8 +85,7 @@ function DocumentCard({ document, onAccepted }) {
         <Alert variant="warning" className="mt-4">
           <p className="font-bold">We can’t show you this document right now</p>
           <p className="mt-1">
-            We won’t ask you to agree to something you can’t read. Please try again shortly — and
-            nothing about your venues changes in the meantime.
+            We won’t ask you to agree to something you can’t read. Try again shortly.
           </p>
         </Alert>
       )}

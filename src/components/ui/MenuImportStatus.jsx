@@ -102,8 +102,8 @@ export default function MenuImportStatus({
   phase,
   job,
   error,
-  /* 'permission' | 'upload' | 'parse'. Decides whether the message is about
-     the partner's file or about us — see the failed branch below. */
+  /* 'permission' | 'upload' | 'import' | 'parse'. Decides whether the message
+     is about the partner's file or about us — see the failed branch below. */
   failure,
   elapsed,
   estimate,
@@ -145,6 +145,20 @@ export default function MenuImportStatus({
      */
     const permission = failure === 'permission'
     const upload = failure === 'upload' || permission
+    /**
+     * ⚠️ THE FILE ARRIVED AND THE SERVER WOULD NOT TAKE IT.
+     *
+     * A separate outcome from a parse failure, and it was not one until now:
+     * the importer's errors were untagged, so they fell through to "we couldn't
+     * read that file" — a sentence about the partner's spreadsheet, over a
+     * problem in our request. They then try a different file, and a CSV instead
+     * of an Excel, and a shorter one, and every attempt fails identically.
+     *
+     * The same mistake this component's upload branch was written to fix, one
+     * step further along. Neither retrying nor replacing the file helps here,
+     * so neither is offered.
+     */
+    const ours = failure === 'import'
 
     return (
       <Alert variant="danger">
@@ -153,25 +167,30 @@ export default function MenuImportStatus({
             ? 'We couldn’t upload your menu'
             : upload
               ? 'Your menu didn’t reach us'
-              : 'We couldn’t read that file'}
+              : ours
+                ? 'Your file arrived, but we couldn’t start the import'
+                : 'We couldn’t read that file'}
         </p>
         <p className="mt-1">
           {permission
             ? 'This is a problem on our side, not with your file — there’s nothing wrong with it and nothing to fix. Adding items by hand works normally in the meantime, and anything you add is kept.'
             : upload
               ? 'The file didn’t finish uploading, so nothing has changed on your menu. If you’re on a patchy connection it’s worth trying again.'
-              : error || job?.error_message || 'Something went wrong.'}
+              : ours
+                ? 'Nothing is wrong with your file and a different one won’t help — this is ours to fix. Adding items by hand works normally in the meantime.'
+                : error || job?.error_message || 'Something went wrong.'}
         </p>
         <div className="mt-3 flex flex-wrap gap-3">
-          {/* Not offered on a permission refusal. The tenth file is refused
-              exactly like the first, and pretending otherwise wastes an
-              afternoon. Same rule the photo uploader already follows. */}
-          {!permission && (
+          {/* Not offered on a permission refusal, or when the server refused the
+              request itself. The tenth file is refused exactly like the first,
+              and pretending otherwise wastes an afternoon. Same rule the photo
+              uploader already follows. */}
+          {!permission && !ours && (
             <Button size="sm" variant="secondary" onClick={onReplaceFile || onDismiss}>
               {upload ? 'Try again' : 'Try another file'}
             </Button>
           )}
-          <Button size="sm" variant={permission ? 'secondary' : 'ghost'} onClick={onAddManually}>
+          <Button size="sm" variant={permission || ours ? 'secondary' : 'ghost'} onClick={onAddManually}>
             Add items by hand instead
           </Button>
         </div>

@@ -272,7 +272,21 @@ const photoCard = async (page) => {
   await page.goto(`${BASE}/venues`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(400)
 
+  /* Preview moved behind the row's "⋯" when the venue list went to one action
+     in the open (see `VenueList`). The panel is only rendered while the
+     disclosure is expanded, so asking for the link on a closed row finds
+     nothing — which is the design, not a fault. Open it, then look. */
   const link = page.getByRole('link', { name: /Preview Corner Kitchen & Bar as customers see it/i })
+  check(!(await link.count()), 'the row is not five links wide by default')
+
+  const more = page.getByRole('button', { name: /More actions for Corner Kitchen & Bar/i })
+  check(await more.count(), 'the secondary actions are one click away, and named')
+  check(
+    (await more.first().getAttribute('aria-expanded')) === 'false',
+    'and announced as a collapsed disclosure rather than a mystery glyph',
+  )
+
+  await more.first().click()
   check(await link.count(), 'every venue row offers a preview')
   await link.first().click()
   await page.waitForURL(/\/venues\/V-1\/preview/)

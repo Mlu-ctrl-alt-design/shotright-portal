@@ -39,6 +39,9 @@ import { mockBackend } from './mockBackend'
 import { matchMood, FALLBACK_MOODS } from './moods'
 import { VENUE_LOOKUPS } from './lookups'
 import { normaliseProfile, toProfilePayload } from './profile'
+import { plainText } from '../utils/html'
+import { minutesSinceMidnight } from '../utils/time'
+import { SPEND_FIELDS } from './averageSpend'
 
 const pick = (real, mock) => (USE_MOCKS ? mock : real)
 
@@ -50,10 +53,12 @@ const pick = (real, mock) => (USE_MOCKS ? mock : real)
  * exactly how partners ended up looking at fixture venues — the portal asks the
  * bench what it can do and adapts.
  *
- * A missing whitelisted method is a 404 from Frappe. Anything else (403, 417, a
- * network failure, a real validation error) is a genuine error and is rethrown:
- * treating a permission failure as "feature absent" would silently downgrade
- * the product instead of reporting a misconfiguration.
+ * WHAT COUNTS AS MISSING is `isMethodMissing`, not a bare 404 — this bench
+ * answers a name that is not in `shotright.api` with a 417 AttributeError, so
+ * gating on the status alone meant no fallback here ever engaged. Anything else
+ * (403, a network failure, a real validation error) is a genuine error and is
+ * rethrown: treating a permission failure as "feature absent" would silently
+ * downgrade the product instead of reporting a misconfiguration.
  *
  * The verdict is cached per method for the tab, so a missing endpoint costs one
  * request rather than one per keystroke.
@@ -67,7 +72,16 @@ export async function withFallback(method, real, whenMissing) {
     capabilities.set(method, true)
     return result
   } catch (err) {
-    if (err?.status === 404) {
+    /**
+     * A 404 OR this bench's 417 AttributeError. Both, deliberately.
+     *
+     * The 404 has always been enough here — a bench that resolves the module
+     * and not the method answers that way, and `withFallback` is asking "is
+     * this endpoint here", where a bare DoesNotExistError is answer enough.
+     * Requiring `isMethodMissing` alone would have narrowed that, which is not
+     * what the AttributeError work was for.
+     */
+    if (err?.status === 404 || isMethodMissing(err, method)) {
       capabilities.set(method, false)
       /**
        * The method name goes to the CONSOLE, not to the partner.
@@ -96,6 +110,7 @@ export async function withFallback(method, real, whenMissing) {
 export const __resetCapabilities = () => {
   capabilities.clear()
   photoSupport = null
+  googleSupport = null
 }
 
 /* --------------------------------------------------------------------- auth */
@@ -131,6 +146,110 @@ export const login = (email, password) =>
       return result
     },
   )()
+
+/**
+ * Signing in with Google.
+ *
+ * WE DO NOT KNOW WHAT THE BENCH CALLS THIS. The mobile app has Google sign-in,
+ * so something exists; the portal has never been told its name. Rather than
+ * guess one and ship a button that 404s, the same shape used everywhere else
+ * here applies — a list of candidates, tried in order, and the feature simply
+ * does not appear when none of them is deployed.
+ *
+ * THE PARAMETER NAME IS ALSO A GUESS, and unlike a form field a wrong kwarg on
+ * a whitelisted method is fatal: Frappe raises TypeError rather than ignoring
+ * it. So each method is tried with each name, and an unexpected-keyword error
+ * moves on to the next rather than surfacing.
+ */
+export const GOOGLE_AUTH_METHODS = [
+  'shotright.api.login_with_google',
+  'shotright.api.google_login',
+  'shotright.api.login_google',
+  'shotright.api.social_login',
+]
+
+const GOOGLE_CREDENTIAL_PARAMS = ['credential', 'id_token', 'token']
+
+const isWrongParameter = (err) =>
+  /unexpected keyword argument|got an unexpected|missing \d+ required positional/i.test(
+    `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+  )
+
+/**
+ * Is there anything on the other end?
+ *
+ * Probed by calling each candidate with NO credential. A method that is not
+ * there answers 404 `DoesNotExistError`; a method that is there rejects the
+ * empty call with a validation error, and that rejection is the proof we want.
+ * `isMethodMissing` reads the exception text, which is the only thing that
+ * separates a missing METHOD from a missing DOCUMENT on this bench.
+ *
+ * No credential is sent, so a probe cannot log anybody in or out.
+ *
+ * Cached for the tab: the login screen must not fire four requests per render.
+ */
+let googleSupport = null
+
+export const googleAuthSupported = () => {
+  if (USE_MOCKS) return Promise.resolve(true)
+  if (!googleSupport) {
+    googleSupport = (async () => {
+      for (const method of GOOGLE_AUTH_METHODS) {
+        try {
+          await call(method, {})
+          return true
+        } catch (err) {
+          if (!isMethodMissing(err, method)) return true
+        }
+      }
+      return false
+    })()
+  }
+  return googleSupport
+}
+
+/**
+ * Exchange a Google ID token for the portal's own api_key/api_secret.
+ *
+ * The token is Google's claim about who this is; only the bench can check it
+ * against Google's signing keys, so nothing here inspects or trusts it. What
+ * comes back is the same shape as `login`, including the `otp_required` branch
+ * — a Google account can still belong to a partner who has not finished
+ * verifying, and walking them past that is how someone ends up on a dashboard
+ * with nothing to authenticate with.
+ */
+export const loginWithGoogle = async (credential) => {
+  if (!credential) throw new Error('Google didn’t give us anything to sign in with.')
+
+  if (USE_MOCKS) {
+    setAuthToken({ api_key: 'mock', api_secret: 'mock' })
+    return { api_key: 'mock', api_secret: 'mock' }
+  }
+
+  let lastError = null
+  for (const method of GOOGLE_AUTH_METHODS) {
+    for (const param of GOOGLE_CREDENTIAL_PARAMS) {
+      try {
+        const result = await call(method, { [param]: credential })
+        if (result?.otp_required) {
+          return { otpRequired: true, email: result.email }
+        }
+        setAuthToken(result)
+        return result
+      } catch (err) {
+        if (isMethodMissing(err, method)) break // wrong method, not wrong name
+        if (isWrongParameter(err)) continue // right method, try the next name
+        throw err // a real refusal: a rejected token, a blocked account
+      }
+    }
+  }
+
+  /* Every candidate was absent. The button should not have been on screen —
+     `googleAuthSupported` gates it — so this is a deployment that changed under
+     a tab that was already open. */
+  throw lastError ||
+    new Error('Signing in with Google isn’t available on this server yet. Use your password.')
+}
 
 /**
  * Register returns a token in the same shape as login, so a new partner lands
@@ -862,6 +981,11 @@ const VENUE_WRITE_FIELDS = [
   'atmosphere_desc',
   'moods',
   'operating_hours',
+  /* Average spend. All the candidate names are listed because only ONE of them
+     is ever set — the form resolves the real name off the venue the bench sent
+     (see `services/averageSpend.js`), so the others can never appear in a
+     payload and cost nothing here. */
+  ...SPEND_FIELDS,
 ]
 
 export const UPDATE_VENUE_METHOD = 'shotright.api.update_venue'
@@ -879,6 +1003,7 @@ const FIELD_LABELS = {
   moods: 'the moods',
   operating_hours: 'the opening hours',
   venue_name: 'the venue name',
+  ...Object.fromEntries(SPEND_FIELDS.map((f) => [f, 'the average spend'])),
 }
 
 /**
@@ -907,10 +1032,36 @@ const FIELD_LABELS = {
  * named, retry once, and report what could not be saved instead of failing the
  * lot. It self-heals the day the allow-list is fixed.
  */
-const REFUSED_FIELDS = /Cannot update field\(s\):\s*([^"\\\n]+)/i
+/**
+ * ⚠️ 13 Sep — THIS PATTERN USED TO READ THE TRACEBACK INTO THE LAST FIELD NAME.
+ *
+ * It was `([^"\\\n]+)`: everything up to the first quote. `err.detail` is
+ * `[data.exception, data.message, data.exc].join(' ')`, and `data.exc` is a JSON
+ * ARRAY — it opens `["Traceback (most recent call last):…`. There is no quote
+ * between the end of the field list and that `[`, so the capture ran straight on
+ * through the space and swallowed the bracket:
+ *
+ *   Cannot update field(s): new_name ["Traceback…
+ *                           ^^^^^^^^^^ captured
+ *
+ * With SEVERAL refused fields only the last entry was spoilt — `['address',
+ * 'cmd', 'new_name [']` — so `writeVenue` kept stripping the first two and the
+ * bug stayed invisible for weeks. The rename is the one caller that sends a
+ * SINGLE field, so the only entry it got back was the broken one:
+ * `refused.includes('new_name')` was false, `renameVenue` read a plain parameter
+ * refusal as a real error and threw, and a partner renaming a venue got a raw
+ * 417 instead of the retry on `new_venue_name` that would have worked.
+ *
+ * Matched as field names now, not as "text up to a quote". Frappe fieldnames are
+ * `[A-Za-z0-9_]`, so the list cannot run past its own last entry whatever
+ * follows it in the payload — and `err.message` (the clean `_server_messages`
+ * string, which carries no traceback) is searched first.
+ */
+const REFUSED_FIELDS =
+  /Cannot update field\(s\):\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)/i
 
 const parseRefused = (err) => {
-  const text = `${err?.detail || ''} ${err?.message || ''}`
+  const text = `${err?.message || ''} ${err?.detail || ''}`
   const match = text.match(REFUSED_FIELDS)
   if (!match) return null
   return match[1]
@@ -988,11 +1139,17 @@ const writeVenue = async (body) => {
  * passes them straight to `venue.update` and does not. That asymmetry is the
  * bug and it belongs on the bench, so this is a workaround rather than a fix.
  *
- * WE DO NOT GUESS THE CHILD-ROW SHAPE. Sending `[{mood: id}]` would work if the
- * child field happens to be called `mood` — and if it is called anything else,
- * Frappe writes empty rows and reports success, which would silently erase a
- * venue's moods. That is strictly worse than not saving them. So: drop the
- * field, save the rest, and tell the partner exactly which part didn't land.
+ * ⚠️ RESOLVED 5 Sep, and this branch is now a backstop rather than the path.
+ * The child field is `mood`, and `update_venue` takes bare names — verified
+ * live. Moods are sent again; see `updateVenue`.
+ *
+ * The reason this code refused to guess was that a wrong child-row key would
+ * make Frappe write empty rows and report success, silently erasing a venue's
+ * moods. That reasoning was WRONG FOR THIS ENDPOINT, and the backend proved it
+ * by trying to break it: `normalise_moods` throws on any row it cannot read, so
+ * `[{name: "Romantic"}]` and an unknown mood both come back 417 with a message
+ * and the existing set untouched. The general Frappe behaviour was real; it
+ * just did not apply here, and the caution cost the feature.
  */
 const CHILD_TABLE_CRASH = /does not support item assignment|_init_child/i
 
@@ -1044,6 +1201,29 @@ const warnAboutRefused = (refused) => {
  */
 const UNORDERED_FIELDS = new Set(['moods'])
 
+/**
+ * Two sets of opening hours, compared as TIMES rather than as strings.
+ *
+ * The form holds "09:00" and the bench sends back "9:00:00" for the same
+ * moment, so a plain JSON comparison says every venue's hours changed on every
+ * save — which matters now that a read-back reports anything that did not
+ * change as "didn't stick". See `utils/time.js` for why the hour is unpadded.
+ */
+const sameHours = (a, b) => {
+  const rows = (list) =>
+    (Array.isArray(list) ? list : []).map((r) =>
+      [
+        r?.day_of_week,
+        Boolean(r?.closed),
+        minutesSinceMidnight(r?.open_time),
+        minutesSinceMidnight(r?.close_time),
+      ].join('|'),
+    )
+  const left = rows(a)
+  const right = rows(b)
+  return left.length === right.length && left.every((v, i) => v === right[i])
+}
+
 const sameSet = (a, b) => {
   const left = [...moodKeysOf(a)].sort()
   const right = [...moodKeysOf(b)].sort()
@@ -1061,6 +1241,7 @@ const same = (a, b, field) => {
        shape-blindness, every save of a venue whose moods came back as objects
        would send `moods` and hit §00. */
     if (UNORDERED_FIELDS.has(field)) return sameSet(a, b)
+    if (field === 'operating_hours') return sameHours(a, b)
     try {
       return JSON.stringify(a) === JSON.stringify(b)
     } catch {
@@ -1075,6 +1256,56 @@ const same = (a, b, field) => {
  *                 current name (which is not the docname), and working out what
  *                 the partner actually changed.
  */
+
+/**
+ * What this bench calls the new name.
+ *
+ * `new_name` is what `frappe.rename_doc` calls it and is the likeliest; the
+ * others are the plausible spellings. Tried ONE AT A TIME — see `updateVenue`
+ * for why sending them together was the bug being fixed.
+ */
+export const VENUE_RENAME_PARAMS = ['new_name', 'new_venue_name', 'rename_to']
+
+/**
+ * Rename a venue, or report that this bench cannot.
+ *
+ * @returns null when one of the aliases was accepted, or the list of aliases
+ *          that were refused when none was. The caller checks the venue
+ *          afterwards regardless: a 200 from Frappe means the request routed,
+ *          not that anything changed.
+ */
+const renameVenue = async (venueId, wanted) => {
+  const refusedAliases = []
+
+  for (const param of VENUE_RENAME_PARAMS) {
+    try {
+      await call(UPDATE_VENUE_METHOD, { venue_name: venueId, [param]: wanted })
+      return null
+    } catch (err) {
+      const refused = parseRefused(err) || []
+      const wrongName =
+        refused.includes(param) ||
+        /unexpected keyword argument|missing \d+ required (positional|keyword)/i.test(
+          `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+        )
+      if (wrongName) {
+        refusedAliases.push(param)
+        continue
+      }
+      /* A real refusal — a name already taken, a permission, a validation rule
+         on the value itself. That is an answer about THIS rename, not about the
+         parameter, and it must not be retried around the list. */
+      throw err
+    }
+  }
+
+  console.warn(
+    `[shotright] ${UPDATE_VENUE_METHOD} refused every rename parameter we know of ` +
+      `(${refusedAliases.join(', ')}). Renaming a venue needs a parameter name from the backend.`,
+  )
+  return refusedAliases
+}
+
 export const updateVenue = async (venueId, payload, existing) => {
   if (USE_MOCKS) {
     const venue = await mockBackend.updateVenue(venueId, payload)
@@ -1120,22 +1351,108 @@ export const updateVenue = async (venueId, payload, existing) => {
   for (const field of VENUE_WRITE_FIELDS) {
     if (payload[field] === undefined) continue
     if (current && same(payload[field], current[field], field)) continue
+
+    if (field === 'moods') {
+      /**
+       * ⚠️ ANSWERED BY THE BACKEND, 5 Sep. `Venue.moods` is a Table MultiSelect
+       * onto `Venue Mood`, whose single child field is `mood` — and bare names
+       * are accepted directly, so `["Romantic", "Chill & Casual"]` is all this
+       * needs to be. `moodKeysOf` already reads `mood` first, so whatever shape
+       * a venue came back in becomes names here.
+       *
+       * SETTING MOODS REPLACES THE WHOLE SET — `Document.set()` clears the
+       * table before extending it. So an empty list is not "leave them alone",
+       * it is "delete every mood this venue has". The form will not submit
+       * without one, which means an empty array here is a bug on our side, and
+       * sending it would turn that bug into data loss. Omitted instead: the
+       * unchanged-field rule above already covers the ordinary case.
+       */
+      const names = moodKeysOf(payload.moods)
+      if (!names.length) continue
+      body.moods = names
+      continue
+    }
+
     body[field] = payload[field]
-  }
-  if (renaming) {
-    body.new_name = wanted
-    body.new_venue_name = wanted
   }
   // Last, so nothing above can reach it.
   body.venue_name = venueId
 
+  /* Sent even when only the identifier is in it. Skipping an empty update looks
+     like free efficiency and is not: two suites inspect what a save PUTS ON THE
+     WIRE, and a save that sends nothing gives them nothing to inspect. It also
+     means the read-back below never runs on a save the partner did make and we
+     wrongly read as unchanged — which is the failure `same()` exists to guard,
+     and the one we would stop being able to see. */
   const refused = await writeVenue(body)
 
+  /**
+   * ⚠️ THE RENAME IS ITS OWN CALL NOW, AND SENDS ONE NAME AT A TIME.
+   *
+   * Reported: "venue name update — the backend throws an error." It did, and
+   * this is why. Both `new_name` AND `new_venue_name` went up together, and
+   * `update_venue` does not quietly drop a kwarg it has not declared — it
+   * validates and throws `Cannot update field(s): …`. So the two speculative
+   * aliases took the WHOLE SAVE down, and a partner changing their dress code
+   * lost that too, to a rename they had not asked for.
+   *
+   * The same mistake as `item_id` and the menu importer's `file_name`, and the
+   * same fix: hedging works for multipart fields, where an extra part is
+   * ignored. On a whitelisted method every name it does not declare is fatal,
+   * so they go one at a time and a refusal moves to the next.
+   *
+   * Separate from the field update because the two failures are unrelated. A
+   * bench with no rename parameter should still save an address.
+   */
+  const renameRefused = renaming ? await renameVenue(venueId, wanted) : null
+
+  /**
+   * WHAT ACTUALLY LANDED.
+   *
+   * Reported from the live site: "some fields on the venue screen do not
+   * persist — e.g. the starting time, the moods." Neither was being reported as
+   * a failure, because neither WAS one as far as this code could tell: Frappe
+   * discards a kwarg its whitelisted method does not declare, silently, at HTTP
+   * 200. The save succeeds, the field is dropped, and the partner is told it
+   * worked. They find out when a customer turns up at nine for a ten o'clock
+   * opening.
+   *
+   * A 200 proves routing, not persistence — the same lesson as the venue
+   * photos and the rename. So: read the venue back and compare what we sent
+   * against what is now there. Anything that did not change is named, in the
+   * partner's words, next to the fields that were refused outright.
+   *
+   * `sent` excludes the identifier: `venue_name` is how we said WHICH venue.
+   * The rename is no longer in `body` at all — it is its own call now — and a
+   * bounced one is reported by the named check below, in a sentence that means
+   * more than "the name didn't stick".
+   */
+  const verifyDropped = (stored) => {
+    if (!stored) return []
+    const sent = Object.keys(body).filter((f) => f !== 'venue_name')
+    return sent.filter((f) => {
+      if (refused.includes(f)) return false
+      /**
+       * ABSENT IS NOT DROPPED.
+       *
+       * A field the read-back does not return at all tells us nothing: the
+       * detail serialiser may simply not include it (they differ between
+       * endpoints on this bench — see `moodKeysOf`). Only a field that comes
+       * back with its OLD value is evidence that the write was discarded, and a
+       * warning we cannot justify is worse than none, because a warning that
+       * fires on ordinary saves is one people learn to click past.
+       */
+      if (stored[f] === undefined) return false
+      return !same(body[f], stored[f], f)
+    })
+  }
+
   if (!renaming) {
+    const stored = await getVenue(venueId)
     return {
-      venue: await getVenue(venueId),
+      venue: stored,
       renamed: null,
-      warnings: warnAboutRefused(refused),
+      warnings: warnAboutRefused([...refused, ...verifyDropped(stored)]),
     }
   }
 
@@ -1161,7 +1478,7 @@ export const updateVenue = async (venueId, payload, existing) => {
   // Both things can be true at once — the rename bounced AND the address was
   // refused — and a partner needs to hear both. "Everything else was saved" is
   // said once, by whichever message goes first, rather than twice.
-  const refusedWarnings = warnAboutRefused(refused)
+  const refusedWarnings = warnAboutRefused([...refused, ...verifyDropped(venue)])
   const renameWarning = renamed
     ? null
     : `The venue is still called “${venue?.venue_name || venueId}”. ` +
@@ -1201,11 +1518,31 @@ export const updateVenue = async (venueId, payload, existing) => {
  */
 export const MENU_READ_METHOD = 'shotright.api.get_venue_products'
 
+/**
+ * One heading and its items, with the descriptions turned back into prose.
+ *
+ * ⚠️ Frappe stores a description as HTML, so the live site was showing partners
+ * `<p>Tomatoes, creamy burrata…</p>` — their own sentence wrapped in markup the
+ * bench added. Stripped on the way IN rather than at each render, so there is
+ * one place it happens and no view can forget. `utils/html.js` says why this is
+ * not `dangerouslySetInnerHTML`.
+ */
+const normaliseHeading = (heading) => ({
+  ...heading,
+  items: (heading?.items || []).map((item) => ({
+    ...item,
+    description: plainText(item?.description),
+  })),
+})
+
 export const getMenu = async (venueId) => {
-  if (USE_MOCKS) return { headings: await mockBackend.getMenu(venueId), unavailable: false }
+  if (USE_MOCKS) {
+    const headings = await mockBackend.getMenu(venueId)
+    return { headings: headings.map(normaliseHeading), unavailable: false }
+  }
   try {
     const headings = await callGet(MENU_READ_METHOD, { venue_name: venueId })
-    return { headings: headings || [], unavailable: false }
+    return { headings: (headings || []).map(normaliseHeading), unavailable: false }
   } catch (err) {
     if (isMethodMissing(err, MENU_READ_METHOD)) {
       return { headings: [], unavailable: MENU_READ_METHOD }
@@ -1259,6 +1596,56 @@ export const ITEM_UPDATE_METHODS = [
 
 export const ITEM_DELETE_METHODS = ['shotright.api.delete_product_item']
 
+/**
+ * How a menu item is named to the bench.
+ *
+ * ⚠️ FROM THE LIVE SITE, on every attempt to edit a menu item:
+ *
+ *   TypeError: update_product_item() missing 1 required positional argument:
+ *   'item_id'
+ *
+ * The portal was sending `item` AND `name` — two guesses, neither of them the
+ * one the method declares, and both of them extra kwargs on top of the missing
+ * required one. `item_id` now goes first because the bench has told us that is
+ * the name; the others stay behind it, tried only when a method rejects the
+ * one before, so a differently-written endpoint still works.
+ *
+ * ONE AT A TIME, deliberately. Sending all three together looks like belt and
+ * braces and is the opposite: Frappe's whitelisted call passes the form dict
+ * straight into the function, so every name the method does not declare is an
+ * unexpected keyword and a TypeError. Hedging works for multipart fields, which
+ * is where this codebase learned the habit; it is actively harmful here.
+ */
+const ITEM_ID_PARAMS = ['item_id', 'item', 'name']
+
+const isWrongItemParameter = (err) =>
+  /unexpected keyword argument|missing \d+ required (positional|keyword)/i.test(
+    `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
+  )
+
+/**
+ * Call the first deployed method that accepts one of the identifier names.
+ *
+ * Returns `{result, method, param}`, or null when no candidate is deployed. A
+ * real refusal — a permission error, a rejected value — is thrown rather than
+ * being mistaken for a wrong guess.
+ */
+const callForItem = async (methods, itemId, extra = {}) => {
+  for (const method of methods) {
+    for (const param of ITEM_ID_PARAMS) {
+      try {
+        const result = (await call(method, { [param]: itemId, ...extra })) ?? { ok: true }
+        return { result, method, param }
+      } catch (err) {
+        if (isMethodMissing(err, method)) break // this method is absent entirely
+        if (isWrongItemParameter(err)) continue // right method, wrong name for it
+        throw err
+      }
+    }
+  }
+  return null
+}
+
 /** Try each name; `undefined` from all of them means none is deployed. */
 const firstDeployed = async (methods, args) => {
   for (const method of methods) {
@@ -1282,11 +1669,11 @@ const firstDeployed = async (methods, args) => {
 export const updateItem = async (itemId, payload) => {
   if (USE_MOCKS) return { saved: true, item: await mockBackend.updateItem?.(itemId, payload) }
 
-  const body = { item: itemId, name: itemId, item_name: payload.item_name }
+  const body = { item_name: payload.item_name }
   if (payload.price !== undefined) body.price = payload.price
   if (payload.description !== undefined) body.description = payload.description
 
-  const attempt = await firstDeployed(ITEM_UPDATE_METHODS, body)
+  const attempt = await callForItem(ITEM_UPDATE_METHODS, itemId, body)
   if (attempt) return { saved: true, method: attempt.method }
 
   return { saved: false, reason: 'no-endpoint' }
@@ -1304,7 +1691,7 @@ export const updateItem = async (itemId, payload) => {
 export const deleteItem = async (itemId) => {
   if (USE_MOCKS) return mockBackend.deleteItem(itemId)
 
-  const attempt = await firstDeployed(ITEM_DELETE_METHODS, { item: itemId, name: itemId })
+  const attempt = await callForItem(ITEM_DELETE_METHODS, itemId)
   if (attempt) return { deleted: true, method: attempt.method }
 
   try {
@@ -1318,6 +1705,18 @@ export const deleteItem = async (itemId) => {
       `${err?.excType || ''} ${err?.message || ''} ${err?.detail || ''}`,
     )) {
       return { deleted: false, reason: 'not-allowed' }
+    }
+    /**
+     * ⚠️ A bench that does not WHITELIST `frappe.client.delete` answers 404
+     * `DoesNotExistError`, not 403 — and this used to rethrow that, so the menu
+     * row printed the words "DoesNotExistError" at a restaurant owner.
+     *
+     * Cannot-delete is cannot-delete. Whether the method is absent or forbidden
+     * changes nothing the partner can act on, so both come back the same way
+     * and neither reaches a screen.
+     */
+    if (isMethodMissing(err, 'frappe.client.delete')) {
+      return { deleted: false, reason: 'not-available' }
     }
     throw err
   }
@@ -1550,22 +1949,48 @@ export const uploadVenuePhoto = (file, { venueId, onProgress } = {}) =>
         /**
          * 417 — the server read the file and refused it.
          *
-         * Verified 22 Aug: `.heic` and `.avif` come back 417 and terminal.
-         * `prepareImage` already catches most HEIC in the browser with
-         * iPhone-specific advice, but a file whose type the browser cannot
-         * identify slips through to here.
+         * Verified 22 Aug: `.heic`, `.heif` and `.avif` come back 417 and
+         * terminal. As of the format split in `utils/image.js` the portal
+         * should no longer be ABLE to send one: `prepareImage` re-encodes
+         * everything outside `UPLOADABLE_TYPES` to JPEG before it gets here,
+         * and refuses with its own advice when it cannot decode the file at all.
+         *
+         * So this branch is now a backstop rather than a routine path, and if
+         * it fires the conversion layer missed something. It stays because the
+         * cost of being wrong about that is a partner who cannot list at all.
          *
          * Not retryable with THIS file — pressing again re-sends the same
-         * bytes — but very much fixable by the partner, so the message says how
-         * rather than apologising. That distinction matters more than usual now
-         * that a photo is REQUIRED: someone whose only picture is a HEIC and
-         * who is told "something went wrong" cannot list their venue at all.
+         * bytes — but fixable by the partner, so the message says how rather
+         * than apologising.
          */
+        /**
+         * ⚠️ CHECKED BEFORE THE FORMAT BRANCH, because on this bench a method
+         * that is not deployed arrives as a 417 AttributeError — the same
+         * status a rejected file uses.
+         *
+         * Without this, an endpoint that does not exist was reported to the
+         * partner as a problem with their photo, complete with advice about
+         * iPhone formats. They would then convert a perfectly good JPEG,
+         * upload it again, and be told the same thing.
+         *
+         * `blocksUpload`, because no file and no retry can fix it.
+         */
+        if (isMethodMissing(err, PHOTO_UPLOAD_METHOD)) {
+          const unavailable = new Error(
+            'We can’t add photos to a venue just yet. Everything else about this venue saves ' +
+              'normally.',
+          )
+          unavailable.retryable = false
+          unavailable.blocksUpload = true
+          unavailable.cause = err
+          throw unavailable
+        }
+
         if (err?.status === 417) {
           const rejected = new Error(
-            `${file.name} isn’t a format we can use. JPEG or PNG both work — ` +
-              `on an iPhone, Settings → Camera → Formats → Most Compatible makes ` +
-              `every new photo a JPEG.`,
+            `The server wouldn’t accept ${file.name}. If it came off an iPhone, ` +
+              `adding it from the phone itself usually works — open this page there ` +
+              `and pick the photo. Otherwise a JPEG or PNG copy will go through.`,
           )
           rejected.retryable = false
           /**

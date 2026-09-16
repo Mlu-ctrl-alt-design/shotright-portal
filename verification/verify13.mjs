@@ -28,26 +28,34 @@ async function open({ rename = 'ignored' } = {}) {
   const page = await context.newPage()
   page.on('pageerror', (e) => console.log('   PAGEERROR', e.message))
 
-  const state = { venue_name: OLD, dress_code: 'Smart casual' }
+  /**
+   * This stub is a SERVER, so it stores what it is given.
+   *
+   * It used to echo fixed values for everything except the name and the dress
+   * code, which meant any field the form sent came back unchanged — and once
+   * the portal started reading a venue back to check the write landed, that
+   * read as "the opening hours didn't save" on a suite about renaming. The
+   * fake was the thing that was wrong: a real bench that accepts a field keeps
+   * it. Only the deliberate failures below are modelled as failures.
+   */
+  const state = {
+    venue_name: OLD,
+    dress_code: 'Smart casual',
+    address: '70 Juta St',
+    latitude: -26.19,
+    longitude: 28.03,
+    atmosphere_desc: '',
+    moods: ['MOOD-CHILLED'],
+    operating_hours: [],
+  }
   const updates = []
 
   await page.route('**/api/**', (r) => {
     const u = new URL(r.request().url())
     const p = u.pathname
-    const venue = () => ({
-      name: 'V-1',
-      venue_name: state.venue_name,
-      address: '70 Juta St',
-      latitude: -26.19,
-      longitude: 28.03,
-      dress_code: state.dress_code,
-      atmosphere_desc: '',
-      workflow_state: 'Approved',
-      // A venue must carry a mood and an open day or the form refuses to
-      // submit at all — see venueValidation.js.
-      moods: ['MOOD-CHILLED'],
-      operating_hours: [],
-    })
+    // A venue must carry a mood and an open day or the form refuses to submit
+    // at all — see venueValidation.js.
+    const venue = () => ({ name: 'V-1', workflow_state: 'Approved', ...state })
 
     if (p.startsWith('/api/resource/Mood')) return r.fulfill({ json: { data: [] } })
     if (p.includes('api.login'))
@@ -83,9 +91,16 @@ async function open({ rename = 'ignored' } = {}) {
         })
       const body = JSON.parse(r.request().postData() || '{}')
       updates.push(body)
-      if (body.dress_code) state.dress_code = body.dress_code
+
+      // Everything the method understands is stored, the way a bench would.
+      for (const [key, value] of Object.entries(body)) {
+        if (key === 'venue_name' || key === 'new_name' || key === 'new_venue_name') continue
+        state[key] = value
+      }
+
       // 'ignored' is the Frappe default for an undeclared kwarg: HTTP 200, no
-      // error, nothing written.
+      // error, nothing written. That is what this suite is about, so the RENAME
+      // is the one thing deliberately not stored unless the bench understands it.
       if (rename === 'works' && body.new_name) state.venue_name = body.new_name
       return r.fulfill({ json: { message: venue() } })
     }
@@ -116,23 +131,43 @@ const rename = async (page) => {
   const { page, context, updates } = await open({ rename: 'ignored' })
   await rename(page)
 
-  check(updates.length === 1, 'the update was sent')
-  const sent = updates[0]
+  /* Two calls now, and deliberately: the changed FIELDS in one, the rename in
+     another. They fail for unrelated reasons, and a bench with no rename
+     parameter must still be able to save an address. */
+  check(updates.length >= 1, 'the update was sent')
+  /**
+   * ⚠️ THIS SUITE USED TO ASSERT THE BUG. It required BOTH `new_name` and
+   * `new_venue_name` in one call, "since Frappe drops the one it does not
+   * declare" — and that belief is exactly what broke renaming. `update_venue`
+   * validates its kwargs rather than dropping them (`Cannot update field(s): …`),
+   * so the second alias took the whole save down, including fields the partner
+   * had actually changed. Reported 13 Sep as "venue name update throws an
+   * error".
+   *
+   * The rename is its own call now, carrying ONE alias at a time.
+   */
+  const renameCall = updates.find((u) =>
+    ['new_name', 'new_venue_name', 'rename_to'].some((a) => a in u),
+  )
+  check(Boolean(renameCall), 'the new name travels under its own key')
   check(
-    sent.venue_name === 'V-1',
+    renameCall?.venue_name === 'V-1',
     'venue_name still identifies WHICH venue — it is no longer overwritten by the new name',
   )
-  check(sent.new_name === NEW, 'and the new name travels under its own key')
   check(
-    sent.new_venue_name === NEW,
-    'under both plausible spellings, since Frappe drops the one it does not declare',
+    ['new_name', 'new_venue_name', 'rename_to'].filter((a) => a in (renameCall || {})).length === 1,
+    'and exactly one alias is sent, because an undeclared kwarg here is fatal rather than ignored',
   )
+  /* Across EVERY call, not just the first — the edit is two requests now, and
+     a leak in either one is the same leak. */
   check(
-    sent.workflow_state === undefined,
+    updates.every((u) => u.workflow_state === undefined),
     'and workflow_state is no longer sent back — a client must never set its own approval state',
   )
-  check(sent.name === undefined && sent.vendor_profile === undefined,
-    'nor the rest of the loaded venue that the form was spreading wholesale')
+  check(
+    updates.every((u) => u.name === undefined && u.vendor_profile === undefined),
+    'nor the rest of the loaded venue that the form was spreading wholesale',
+  )
 
   await context.close()
 }

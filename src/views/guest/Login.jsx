@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { Button, Input, PasswordInput, Alert } from '../../components/ui'
+import GoogleSignInButton from '../../components/ui/GoogleSignInButton'
 import AuthLayout from '../../components/layout/AuthLayout'
 
 /**
@@ -17,6 +18,7 @@ export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
   const login = useAuthStore((s) => s.login)
+  const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle)
 
   // No prefill, in any environment. It used to seed fixture credentials, which
   // was harmless while the whole app was fixtures and is not now: a real
@@ -27,19 +29,39 @@ export default function Login() {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
 
+  /* One place for what happens AFTER a successful sign-in, whichever way it
+     came. The unverified-account branch is the reason: a Google account can
+     belong to a partner who never finished verifying, and only handling that on
+     the password path would send them to a dashboard they cannot use. */
+  const land = (result) => {
+    if (result?.otpRequired) {
+      navigate('/verify', { replace: true, state: { email: result.email } })
+      return
+    }
+    navigate(location.state?.from || '/', { replace: true })
+  }
+
+  const onGoogleCredential = async (credential) => {
+    setBusy(true)
+    setError(null)
+    try {
+      land(await loginWithGoogle(credential))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onSubmit = async (event) => {
     event.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      const result = await login(email, password)
-      // An account that exists but hasn't verified. Same destination as
-      // registration, carrying the address so the code can be resent.
-      if (result?.otpRequired) {
-        navigate('/verify', { replace: true, state: { email: result.email } })
-        return
-      }
-      navigate(location.state?.from || '/', { replace: true })
+      // An account that exists but hasn't verified goes to the same place as
+      // registration, carrying the address so the code can be resent — see
+      // `land`, which both ways in share.
+      land(await login(email, password))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -112,6 +134,10 @@ export default function Login() {
             Login
           </Button>
         </div>
+
+        {/* Below the password form, not above it. Most partners here have a
+            password; the ones who used Google will look for it and find it. */}
+        <GoogleSignInButton onCredential={onGoogleCredential} disabled={busy} />
 
         <div className="space-y-2 pt-1 text-center">
           <p>

@@ -226,7 +226,7 @@ const go = async (page, id = 'VEN-00007') => {
   )
   check(/Worth doing while you wait/i.test(body), 'and there is something to get on with')
   check(
-    /None of this stops the review/i.test(body),
+    /doesn’t hold up the review/i.test(body),
     'said without implying the gaps are what is holding up the decision',
   )
 

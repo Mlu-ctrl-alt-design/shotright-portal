@@ -195,9 +195,40 @@ export function normalizeError(error) {
  * "this part of the portal is not on your server yet" instead of frightening
  * someone about their own menu.
  */
+/**
+ * ⚠️ THIS BENCH DOES NOT 404 FOR A MISSING METHOD.
+ *
+ * Verified on shotright.thedaystar.co.za, 5 Sep. Asking for a name that is not
+ * in `shotright.api` returns **417**, not 404:
+ *
+ *   AttributeError: module 'shotright.api' has no attribute
+ *   'get_legal_documents'
+ *
+ * Everything in this portal that asks "is this deployed?" was gated on a 404
+ * first, so on this bench the answer was always no — every capability probe
+ * reported a missing endpoint as a hard error and no fallback ever engaged.
+ * That is why the legal screen showed a failure instead of quietly doing
+ * without, and it applies to every `withFallback` on the site.
+ *
+ * Matched narrowly on purpose. `AttributeError` on its own is far too broad: a
+ * deployed method with a bug in it raises `'NoneType' object has no attribute
+ * 'x'`, which is a real error and must keep surfacing. Only the module-level
+ * shape counts, and when the caller names the method, the attribute has to be
+ * the one it asked for.
+ */
+const MODULE_HAS_NO_ATTRIBUTE = /module '[^']*' has no attribute '([^']+)'/i
+
 export function isMethodMissing(error, method) {
+  const detail = `${error?.detail || ''} ${error?.message || ''}`
+
+  const attribute = MODULE_HAS_NO_ATTRIBUTE.exec(detail)
+  if (attribute) {
+    // `method` may be the full path or the bare name; the bench names the bare
+    // one. Without a method to check against, the module shape alone is enough.
+    return !method || method.split('.').pop() === attribute[1]
+  }
+
   if (error?.status !== 404) return false
-  const detail = `${error.detail || ''} ${error.message || ''}`
   return (
     /Method Not Found|ModuleNotFoundError|AttributeError|not whitelisted/i.test(detail) ||
     (Boolean(method) && detail.includes(method))

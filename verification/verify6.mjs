@@ -462,7 +462,7 @@ const pinLatitude = (page) =>
 
   const body = await page.locator('main').innerText()
   check(
-    /roughly where you are now, not your venue/.test(body),
+    /where you are now, not your venue/.test(body),
     'and is labelled a guess, not presented as the venue',
   )
 

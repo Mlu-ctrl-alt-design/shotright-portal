@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { minutesSinceMidnight } from '../../utils/time'
+import { spendFieldOf, describeSpendGap, parseSpend } from '../../services/averageSpend'
 import {
   useVenue,
   useMoods,
@@ -128,6 +130,17 @@ export default function VenueForm() {
     })
   }, [existing, moods])
 
+  /**
+   * Which key this bench uses for average spend, read off the venue it sent
+   * rather than guessed. `null` means the field is not on this payload and the
+   * input does not render; the console line names what the payload DID carry,
+   * so one look at a live session gives the real name.
+   */
+  const spendField = spendFieldOf(existing)
+  useEffect(() => {
+    if (existing && !spendField) describeSpendGap(existing)
+  }, [existing, spendField])
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   const toggleMood = (moodName) =>
@@ -152,7 +165,24 @@ export default function VenueForm() {
       setError('A venue must be open on at least one day.')
       return
     }
-    const badRow = openDays.find((h) => h.open_time >= h.close_time)
+    /**
+     * ⚠️ Compared as MINUTES, not as strings.
+     *
+     * This was `h.open_time >= h.close_time`, and Frappe does not zero-pad the
+     * hour of a Time field — so a venue opening at nine and closing at eleven
+     * arrived as "9:00:00" and "23:00:00", and `"9" > "2"` made the string
+     * comparison say closing came first. Every venue opening before ten
+     * o'clock was refused the save, on a form that gave no way to argue.
+     *
+     * A row we cannot read at all is NOT treated as backwards: refusing a save
+     * because of a value the partner never typed and cannot see is the same
+     * mistake in a different coat.
+     */
+    const badRow = openDays.find((h) => {
+      const open = minutesSinceMidnight(h.open_time)
+      const close = minutesSinceMidnight(h.close_time)
+      return open !== null && close !== null && open >= close
+    })
     if (badRow) {
       setError(`${badRow.day_of_week}: closing time must be after opening time.`)
       return
@@ -163,6 +193,9 @@ export default function VenueForm() {
       latitude: form.latitude === '' ? null : Number(form.latitude),
       longitude: form.longitude === '' ? null : Number(form.longitude),
     }
+    /* An empty box is "I would rather not say", which is a real answer and must
+       not become a zero — R0 average spend reads as a free venue. */
+    if (spendField) payload[spendField] = parseSpend(form[spendField])
 
     try {
       const result = isEdit
@@ -323,6 +356,27 @@ export default function VenueForm() {
             value={form.dress_code}
             onChange={set('dress_code')}
           />
+          {/* Shown only when the venue the bench sent actually carries the
+              field — see `services/averageSpend.js`. An input over something
+              that cannot save is the failure this codebase keeps returning to,
+              and it is worse here than most: a figure that looks saved and is
+              not will be quoted to a customer.
+
+              Held as a STRING and parsed on save, the same trap the menu price
+              field documents — a controlled input bound to a parsed number
+              throws away any keystroke that does not parse, so nobody can type
+              a decimal point. */}
+          {spendField && (
+            <Input
+              label="Average spend per person"
+              name={spendField}
+              inputMode="decimal"
+              placeholder="250"
+              hint="Roughly what one person spends on a normal visit. Leave it blank rather than guess."
+              value={form[spendField] ?? ''}
+              onChange={set(spendField)}
+            />
+          )}
           <Textarea
             label="Atmosphere"
             name="atmosphere_desc"
@@ -375,9 +429,8 @@ export default function VenueForm() {
                 <Alert variant="warning">
                   <p className="font-bold">These don’t reach customers yet</p>
                   <p className="mt-1">
-                    Photos you add here upload properly and attach to this venue, so our reviewers
-                    see them. The app has no place to show a venue’s pictures yet, so they won’t
-                    appear in search, and the order below isn’t saved yet.
+                    Reviewers see these. Customers don’t yet — the app has no place for venue
+                    photos, and the order isn’t saved.
                   </p>
                 </Alert>
               )}

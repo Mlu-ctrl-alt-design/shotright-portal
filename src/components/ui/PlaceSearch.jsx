@@ -134,8 +134,7 @@ export default function PlaceSearch({ onPick, onSkip, near }) {
 
       {state.status === 'done' && query.trim().length >= 3 && !state.results.length && (
         <p className="mt-2 text-sm text-ink-700">
-          Nothing came back for that. Try the name as it appears on your signage, or just fill the
-          form in below — it works exactly the same.
+          Nothing came back. Try the name on your signage, or fill the form in below.
         </p>
       )}
 
@@ -174,9 +173,8 @@ export default function PlaceSearch({ onPick, onSkip, near }) {
             <>
               <p className="font-bold">That venue is already on Sho’t Right</p>
               <p className="mt-1">
-                Someone has listed it already. If it’s yours, get in touch and we’ll sort out who it
-                belongs to — don’t create a second listing for the same place, it splits your
-                bookings in two.
+                Someone has listed this already. If it’s yours, get in touch — a second listing
+                splits your bookings.
               </p>
             </>
           ) : (

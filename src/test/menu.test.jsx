@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
+import MenuSkeleton from '../components/ui/MenuSkeleton'
 
 /**
  * A venue's menu — adding, editing and deleting.
@@ -152,7 +153,61 @@ describe('delete a menu item', () => {
     await user.click(await screen.findByRole('button', { name: /remove/i }))
 
     await waitFor(() => expect(bench.items).toHaveLength(0))
-    await waitFor(() => expect(screen.queryByText('Chakalaka')).not.toBeInTheDocument())
+    /* The ROW is gone — its Remove button only exists on a row. Scoped rather
+       than a document-wide text query, because the undo strip names the item
+       it just removed, and that is the point of it. */
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /remove chakalaka/i })).not.toBeInTheDocument(),
+    )
+  })
+
+  /**
+   * Undo instead of "Are you sure?". A dialog interrupts everyone to catch the
+   * rare mistake; a way back costs the careful partner nothing.
+   *
+   * ⚠️ It RE-CREATES rather than un-deletes, so the item returns with a new id.
+   * The alternative — holding the delete back for a few seconds so Undo could
+   * cancel it — would show the row as gone while the server still had it, which
+   * is the exact thing the test above exists to prevent.
+   */
+  it('offers a way back, and putting it back reaches the server', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /remove/i }))
+    await waitFor(() => expect(bench.items).toHaveLength(0))
+
+    await user.click(await screen.findByRole('button', { name: /^undo$/i }))
+
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+    expect(bench.items[0].item_name).toBe('Chakalaka')
+    expect(await screen.findByRole('button', { name: /remove chakalaka/i })).toBeInTheDocument()
+  })
+
+  it('does not offer to undo a removal the server refused', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    bench.deploy['frappe.client.delete'] = false
+    await user.click(await screen.findByRole('button', { name: /remove/i }))
+
+    await screen.findByText(/can’t remove menu items yet/i)
+    /* Nothing was removed, so there is nothing to put back — and an Undo here
+       would imply something happened. */
+    expect(screen.queryByRole('button', { name: /^undo$/i })).not.toBeInTheDocument()
+
+    /* This test was written to check the Undo and found something else: a bench
+       that does not whitelist `frappe.client.delete` answers 404
+       DoesNotExistError rather than 403, which the service rethrew and the row
+       printed verbatim. A partner was being shown the words "DoesNotExistError"
+       where their dish had failed to delete. */
+    expect(screen.queryByText(/DoesNotExist|PermissionError|frappe\./i)).not.toBeInTheDocument()
   })
 
   it('does not report a delete that the server refused', async () => {
@@ -279,5 +334,247 @@ describe('when the menu upload is refused', () => {
     const upload = bench.calls.find((c) => c.method === 'upload_file')
     expect(upload.args.doctype).toBeFalsy()
     expect(upload.args.docname).toBeFalsy()
+  })
+})
+
+describe('a description as the bench actually stores it', () => {
+  /**
+   * REPORTED FROM THE LIVE SITE (screenshot, /venues/VEN-00010/menu): an item
+   * read `<p>Tomatoes, creamy burrata and a great summer starter.</p>` on
+   * screen — the partner's own sentence with Frappe's markup around it.
+   *
+   * Frappe's Text Editor field stores HTML and React escapes it, so the tags
+   * are shown rather than applied. The fake bench used to hand descriptions
+   * back exactly as they were sent, which is why no test could see this; it now
+   * wraps them in `<p>` the way the real one does.
+   */
+  it('reaches the partner as words, not as markup', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Starters')
+    const card = (await screen.findByRole('heading', { name: 'Starters' })).closest('section')
+    await user.type(within(card).getByLabelText(/^item$/i), 'Prawn Cocktail')
+    await user.type(within(card).getByLabelText(/price/i), '80')
+    await user.type(
+      within(card).getByLabelText(/description/i),
+      'Tomatoes, creamy burrata and a great summer starter.',
+    )
+    await user.click(within(card).getByRole('button', { name: /add item/i }))
+
+    /* The bench really is holding HTML — otherwise this test proves nothing. */
+    await waitFor(() => expect(bench.items.at(-1)?.description).toMatch(/^<p>/))
+
+    expect(
+      await screen.findByText('Tomatoes, creamy burrata and a great summer starter.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/<p>/)).not.toBeInTheDocument()
+  })
+})
+
+describe('the menu comes first', () => {
+  /**
+   * This screen used to open on three empty forms — upload, add a heading, add
+   * an item — with the partner's own menu underneath all of them. The forms are
+   * now actions in the header, and the menu is the page.
+   */
+  it('folds the import away once there is a menu, and opens it on request', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addItem(user, { heading: 'Cocktails', item: 'Negroni', price: '85' })
+
+    await waitFor(() => expect(screen.queryByLabelText(/menu file/i)).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /import a spreadsheet/i }))
+    expect(await screen.findByLabelText(/menu file/i)).toBeInTheDocument()
+  })
+
+  it('counts what is on the menu, so the header says what the page holds', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addItem(user, { heading: 'Cocktails', item: 'Negroni', price: '85' })
+
+    expect(await screen.findByText(/1 item in 1 section$/i)).toBeInTheDocument()
+
+    await addItem(user, { heading: 'Cocktails', item: 'Old Fashioned', price: '110' })
+    expect(await screen.findByText(/2 items in 1 section$/i)).toBeInTheDocument()
+  })
+
+  /**
+   * A heading with nothing under it is a blank tab in the customer app. That is
+   * invisible from this screen unless it is said, and it is the single most
+   * likely thing to be wrong with a half-finished menu.
+   */
+  it('says when a section is empty, and what that means for customers', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addItem(user, { heading: 'Cocktails', item: 'Negroni', price: '85' })
+    await addHeading(user, 'Desserts')
+
+    expect(await screen.findByText(/desserts is empty, so customers see a blank tab/i)).toBeInTheDocument()
+
+    const card = (await screen.findByRole('heading', { name: 'Desserts' })).closest('section')
+    expect(within(card).getByText(/customers see this as an empty tab/i)).toBeInTheDocument()
+  })
+
+  /**
+   * The form is on screen at this point only because the menu is empty. Adding
+   * a heading makes it non-empty — so without holding it open, the form the
+   * partner is typing into disappears the moment it works.
+   */
+  it('keeps the section form open for the next one', async () => {
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Cocktails')
+    await addHeading(user, 'Mains')
+
+    expect(await screen.findByRole('heading', { name: 'Cocktails' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Mains' })).toBeInTheDocument()
+  })
+})
+
+describe('while the menu is loading', () => {
+  /**
+   * The screen used to return a bare `<Spinner/>` INSTEAD of itself, so the
+   * heading and the layout vanished and snapped back — and a slow menu looked
+   * exactly like a broken one.
+   *
+   * Rendered directly rather than raced against MSW: the claim is about what
+   * the placeholder IS, and a timing window is not a good place to assert it.
+   */
+  it('keeps the page and its shape instead of replacing them', () => {
+    render(<MenuSkeleton />)
+
+    expect(screen.getByRole('heading', { name: /^menu$/i })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/loading your menu/i)
+    expect(screen.getByText('Sections')).toBeInTheDocument()
+  })
+
+  /* One live region carrying the words. A screen reader should hear "loading
+     your menu", not a description of forty grey boxes. */
+  it('does not read the placeholder boxes out to a screen reader', () => {
+    const { container } = render(<MenuSkeleton />)
+    const bones = container.querySelectorAll('.animate-pulse')
+
+    expect(bones.length).toBeGreaterThan(5)
+    bones.forEach((bone) => expect(bone).toHaveAttribute('aria-hidden', 'true'))
+  })
+})
+
+describe('the CSV import, when the server will not take the file', () => {
+  /**
+   * REPORTED: "we're still struggling to upload Menu via csv."
+   *
+   * The upload and the import are two calls, and only the first was tagged. So
+   * anything the IMPORTER refused fell through to "we couldn't read that file"
+   * — a sentence about the partner's spreadsheet, over a problem in our
+   * request. They try a different file, and a CSV instead of an Excel, and a
+   * shorter one, and every attempt fails identically.
+   *
+   * This component's upload branch was written to fix exactly that mistake one
+   * step earlier. It was left in place here.
+   */
+  const upload = async (user) => {
+    await user.click(await screen.findByRole('button', { name: /import a spreadsheet/i }))
+    const input = await screen.findByLabelText(/menu file/i)
+    await user.upload(
+      input,
+      new File(['heading,item_name,price\nMains,Bobotie,120'], 'menu.csv', { type: 'text/csv' }),
+    )
+  }
+
+  it('does not blame the spreadsheet when the importer refuses the request', async () => {
+    bench.importerWants = 'none'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    expect(await screen.findByText(/couldn’t start the import/i)).toBeInTheDocument()
+    expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/nothing is wrong with your file/i)).toBeInTheDocument()
+  })
+
+  /* Neither retrying nor swapping the file can help, so neither is offered —
+     the same rule the permission branch already follows. */
+  it('does not send them off to find another file', async () => {
+    bench.importerWants = 'none'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    await screen.findByText(/couldn’t start the import/i)
+    expect(screen.queryByRole('button', { name: /try another file/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /by hand/i })).toBeInTheDocument()
+  })
+
+  /**
+   * The importer declares `file_url`, not `file_name`. The portal has always
+   * sent a DOCNAME under the name `file_name`, so a bench that wants the URL
+   * refused every import — and said so in a TypeError the partner saw as a
+   * problem with their spreadsheet.
+   */
+  it('finds the parameter the importer actually declares', async () => {
+    bench.importerWants = 'file_url'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user, 'Mains')
+    await upload(user)
+
+    await waitFor(() =>
+      expect(bench.calls.some((c) => c.method === 'start_menu_import' && c.args.file_url)).toBe(
+        true,
+      ),
+    )
+    expect(screen.queryByText(/couldn’t read that file/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('naming a menu item to the bench', () => {
+  /**
+   * FROM THE LIVE SITE, on every attempt to edit a menu item:
+   *
+   *   TypeError: update_product_item() missing 1 required positional argument:
+   *   'item_id'
+   *
+   * The portal sent `item` AND `name` — two guesses, neither of them the one
+   * the method declares, and both extra keywords on top of the missing required
+   * one. A whitelisted method takes the form dict as kwargs, so Frappe refuses
+   * every one of those rather than ignoring them.
+   *
+   * The mock accepted `item` or `name` and not `item_id`, so a green suite
+   * covered a feature that could never once have worked on the real bench.
+   */
+  it('sends item_id, and only one identifier', async () => {
+    bench.deploy.update_product_item = true
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /edit chakalaka/i }))
+    const form = screen.getByRole('button', { name: /^save$/i }).closest('form')
+    await user.clear(within(form).getByLabelText(/price/i))
+    await user.type(within(form).getByLabelText(/price/i), '55')
+    await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(bench.items[0].price).toBe(55))
+
+    const sent = bench.calls.filter((c) => c.method === 'update_product_item').at(-1)
+    expect(sent.args.item_id).toBe(bench.items[0].name)
+    /* Hedging works for multipart fields, which is where this codebase learned
+       the habit. On a whitelisted method every extra name is a TypeError. */
+    expect(sent.args).not.toHaveProperty('item')
+    expect(sent.args).not.toHaveProperty('name')
+  })
+
+  /* The list is still a list: a bench that calls it something else keeps
+     working, because the portal tries the next name on a TypeError. */
+  it('finds the name a differently-written bench uses', async () => {
+    bench.deploy.update_product_item = true
+    bench.itemIdParam = 'item'
+    const { user } = renderApp({ route: MENU_ROUTE, signedIn: true })
+    await addHeading(user)
+    await addItem(user)
+    await waitFor(() => expect(bench.items).toHaveLength(1))
+
+    await user.click(await screen.findByRole('button', { name: /remove chakalaka/i }))
+
+    await waitFor(() => expect(bench.items).toHaveLength(0))
   })
 })

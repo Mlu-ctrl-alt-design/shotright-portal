@@ -137,8 +137,7 @@ export default function VenuePending({ venue, venueId, photos = [], menu = [] })
       {!theirs && outstanding.length > 0 && (
         <Card title="Worth doing while you wait">
           <p className="text-sm text-ink-700">
-            None of this stops the review — your venue is being looked at either way. But a listing
-            with these filled in is a listing people choose.
+            This doesn’t hold up the review. But a filled-in listing is one people choose.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <Link to={`/venues/${venueId}/edit`}>

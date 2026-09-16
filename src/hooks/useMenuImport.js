@@ -172,7 +172,18 @@ export function useMenuImport(venueId, { onComplete } = {}) {
           /doctype access|not permitted|no permission|role permission/i.test(
             `${err?.message || ''} ${err?.detail || ''}`,
           )
-        setFailure(err?.stage === 'upload' ? (refused ? 'permission' : 'upload') : 'parse')
+        /* Three of these are ours and one is the partner's. Only a failure with
+           no stage at all is treated as a parse problem, because that is the
+           only case where the file's own contents are still a candidate. */
+        setFailure(
+          err?.stage === 'upload'
+            ? refused
+              ? 'permission'
+              : 'upload'
+            : err?.stage === 'import'
+              ? 'import'
+              : 'parse',
+        )
       }
     },
     [venueId, finish, watch],

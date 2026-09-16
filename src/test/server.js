@@ -4,15 +4,46 @@ import { bench, headingsFor, venueById } from './bench'
 
 /* ------------------------------------------------------------ Frappe shapes */
 
-/** A missing whitelisted method. Names the method, as Frappe does. */
-const methodMissing = (method) =>
-  HttpResponse.json(
+/**
+ * A missing whitelisted method — as THIS bench actually reports one.
+ *
+ * ⚠️ Verified on shotright.thedaystar.co.za, 5 Sep. Asking for a name that is
+ * not in `shotright.api` does NOT return 404 "Method Not Found". It returns:
+ *
+ *   417  AttributeError: module 'shotright.api' has no attribute 'x'
+ *
+ * This mock returned the 404, which is what a Frappe bench returns when the
+ * MODULE path itself does not resolve — a different case. So every capability
+ * probe in the portal passed here and failed in production: `isMethodMissing`
+ * was gated on the status, and no fallback on the live site ever engaged.
+ *
+ * Sixth time this session a double disagreeing with the server has cost us a
+ * bug, and the widest-reaching of them.
+ *
+ * `bench.missingMethodStyle` keeps the old shape available, because a bench
+ * whose whole app is absent really does answer that way and the portal must
+ * still understand it.
+ */
+const methodMissing = (method) => {
+  if (bench.missingMethodStyle === 'not-found') {
+    return HttpResponse.json(
+      {
+        exc_type: 'DoesNotExistError',
+        exception: `frappe.exceptions.DoesNotExistError: Method Not Found: ${method}`,
+      },
+      { status: 404 },
+    )
+  }
+  const attribute = method.split('.').pop()
+  const module = method.split('.').slice(0, -1).join('.')
+  return HttpResponse.json(
     {
-      exc_type: 'DoesNotExistError',
-      exception: `frappe.exceptions.DoesNotExistError: Method Not Found: ${method}`,
+      exc_type: 'AttributeError',
+      exception: `AttributeError: module '${module}' has no attribute '${attribute}'`,
     },
-    { status: 404 },
+    { status: 417 },
   )
+}
 
 /** A missing DOCUMENT. Same status, same exc_type, no method named — which is
     exactly why `isMethodMissing` has to read the text. */
@@ -23,11 +54,40 @@ const docMissing = () =>
   )
 
 /** `frappe.throw`. Note the HTML — Frappe messages are markup. */
+/**
+ * ⚠️ `exc` WAS MISSING HERE, AND THAT OMISSION SHIPPED A BUG. Added 13 Sep.
+ *
+ * A real Frappe error body carries THREE things, and the portal's
+ * `normalizeError` joins all three into `err.detail`:
+ *
+ *   exception         "frappe.exceptions.ValidationError: <message>"
+ *   _server_messages  the clean message, JSON inside JSON
+ *   exc               a JSON ARRAY of the traceback — it opens `["Traceback…`
+ *
+ * This double sent the first two. So `err.detail` ended at the message, and
+ * `parseRefused`'s old `([^"\\\n]+)` — "everything up to the first quote" —
+ * had nothing after the field list to run into. Every test passed. On the live
+ * bench the `exc` array follows, the capture swallowed the space and the `[`,
+ * and `Cannot update field(s): new_name` came back as `['new_name [']`: a
+ * partner renaming a venue got a raw 417 instead of the retry that works.
+ *
+ * The traceback is the shape Frappe actually sends, ending with the exception
+ * line, because a double that cannot produce the bug cannot prove the fix.
+ */
+const traceback = (html) =>
+  JSON.stringify([
+    'Traceback (most recent call last):\n' +
+      '  File "apps/frappe/frappe/app.py", line 120, in application\n' +
+      '    response = frappe.api.handle(request)\n' +
+      `frappe.exceptions.ValidationError: ${html}\n`,
+  ])
+
 const validationError = (html) =>
   HttpResponse.json(
     {
       exc_type: 'ValidationError',
       exception: `frappe.exceptions.ValidationError: ${html}`,
+      exc: traceback(html),
       _server_messages: JSON.stringify([JSON.stringify({ message: html })]),
     },
     { status: 417 },
@@ -59,6 +119,42 @@ const declaredOnly = (method, args) => {
 }
 
 const record = (method, args) => bench.calls.push({ method, args })
+
+/**
+ * Frappe's answer to being called with the wrong argument name.
+ *
+ * A whitelisted method takes the form dict as kwargs, so a name it does not
+ * declare is an unexpected keyword and the one it needs is missing — both
+ * TypeErrors, and neither is silently ignored the way an undeclared field on a
+ * doc write is. The portal's search for the right name depends on telling those
+ * apart from a real refusal.
+ */
+const ITEM_PARAM_NAMES = ['item_id', 'item', 'name']
+
+const itemParamError = (fn, args) => {
+  const wanted = bench.itemIdParam
+  const given = ITEM_PARAM_NAMES.filter((p) => p in args)
+  const extra = given.find((p) => p !== wanted)
+  if (extra) {
+    return HttpResponse.json(
+      {
+        exc_type: 'TypeError',
+        exception: `TypeError: ${fn}() got an unexpected keyword argument '${extra}'`,
+      },
+      { status: 417 },
+    )
+  }
+  if (!given.includes(wanted)) {
+    return HttpResponse.json(
+      {
+        exc_type: 'TypeError',
+        exception: `TypeError: ${fn}() missing 1 required positional argument: '${wanted}'`,
+      },
+      { status: 417 },
+    )
+  }
+  return null
+}
 
 /* ------------------------------------------------------------------ handlers */
 
@@ -218,10 +314,25 @@ const apiHandlers = [
     if (!venue) return docMissing()
     const out = { ...venue, moods: shapeMoods(venue.moods) }
     for (const field of bench.detailOmits || []) delete out[field]
+
+    /* The average-spend key, renamed to whatever this bench calls it — or
+       removed entirely. The portal reads the name off this payload rather than
+       guessing, so the rename is the whole point of the switch. */
+    if (bench.spendField !== 'average_spend') {
+      const value = out.average_spend
+      delete out.average_spend
+      if (bench.spendField) out[bench.spendField] = value
+    }
     return ok(out)
   }),
 
   method('shotright.api.create_venue', (args) => {
+    /* A bulk import creates many venues in one run, and one refusal must not
+       end it. `bench.createVenueRefuses` names a venue this bench will not
+       take, so that can be tested. */
+    if (bench.createVenueRefuses && args.venue_name === bench.createVenueRefuses) {
+      return validationError('That venue could not be created.')
+    }
     const id = `VEN-${String(bench.venues.length + 1).padStart(5, '0')}`
     const venue = {
       name: id,
@@ -295,13 +406,33 @@ const apiHandlers = [
 
     // Unlike everything else on this bench, update_venue REFUSES unknown
     // fields rather than dropping them. Reproduced from production.
-    const refused = Object.keys(rest).filter((k) => !bench.venueWritable.includes(k))
+    /* ⚠️ Exactly ONE rename parameter is accepted, and which one is switchable.
+       The portal used to send `new_name` and `new_venue_name` together, and
+       this method validates its kwargs rather than dropping them — so the
+       second alias took the whole save down with it, including fields the
+       partner had actually changed. */
+    const renameParams = ['new_name', 'new_venue_name', 'rename_to']
+    const writable = bench.venueWritable.filter((f) => !renameParams.includes(f))
+    if (bench.renameParam) writable.push(bench.renameParam)
+
+    const refused = Object.keys(rest).filter((k) => !writable.includes(k))
     if (refused.length) {
-      return validationError(`Cannot update field(s): ${[...refused, 'cmd'].sort().join(', ')}`)
+      /* ⚠️ `cmd` USED TO BE APPENDED HERE, AND IT HID THE RENAME BUG. Fixed
+         13 Sep. It was real once — Frappe's routing key leaked through the
+         backend's `**form_dict` — but `api.update_venue` has stripped
+         FRAPPE_TRANSPORT_KEYS (`cmd`, `csrf_token`, `_`) since 5 Sep, so the
+         live message names ONLY the fields the caller sent.
+
+         That mattered far more than it looks. Padding the list to two entries
+         meant the refused name was never last, and `parseRefused`'s old
+         pattern only corrupted the LAST entry. The rename — the one caller
+         that sends a single field — was the only case that broke, and this
+         double could not produce it. */
+      return validationError(`Cannot update field(s): ${[...refused].sort().join(', ')}`)
     }
 
     for (const [key, value] of Object.entries(rest)) {
-      if (key === 'new_name') {
+      if (key === bench.renameParam) {
         venue.venue_name = value
         continue
       }
@@ -319,6 +450,31 @@ const apiHandlers = [
        * makes the test fail before the fix.
        */
       const parsed = key === 'moods' || key === 'operating_hours' ? parse(value, value) : value
+
+      /**
+       * ⚠️ WHAT THE BENCH REALLY DOES WITH MOODS, verified 5 Sep by trying to
+       * break it. `normalise_moods` reads a bare name, a `{mood: ...}` row, or
+       * a JSON string — and THROWS on anything else rather than writing empty
+       * rows and reporting success:
+       *
+       *   [{"name": "Romantic"}]  -> refused, existing set untouched
+       *   ["Nope"]                -> refused: Unknown mood: Nope
+       *
+       * The portal declined to send moods at all for weeks on the theory that a
+       * wrong key would silently erase them. That is real Frappe behaviour and
+       * it is not this endpoint's behaviour; modelling it here is what stops
+       * that caution being reinvented.
+       */
+      if (key === 'moods' && Array.isArray(parsed)) {
+        const unreadable = parsed.find(
+          (row) => !(typeof row === 'string' || (row && typeof row === 'object' && row.mood)),
+        )
+        if (unreadable) return validationError('Could not read that mood')
+        const names = parsed.map((row) => (typeof row === 'string' ? row : row.mood))
+        const unknown = names.find((n) => !bench.moods.some((m) => m.name === n || m.mood === n))
+        if (unknown) return validationError(`Unknown mood: ${unknown}`)
+      }
+
       if (
         bench.moodsAreChildRows &&
         key === 'moods' &&
@@ -337,9 +493,64 @@ const apiHandlers = [
         )
       }
 
+      /**
+       * ⚠️ A FIELD THAT IS ACCEPTED AND NOT STORED.
+       *
+       * Frappe discards an undeclared kwarg silently at HTTP 200, so a field
+       * the whitelisted method has no parameter for is taken, acknowledged and
+       * dropped. This bench used to store everything it accepted, which made
+       * that failure — the one behind "the starting time and the moods don't
+       * persist" — impossible to write a test for.
+       *
+       * Fourth time a double that was tidier than the server has cost us a bug,
+       * after the File docname, the unpadded Time hour and the HTML in a menu
+       * description.
+       */
+      if ((bench.silentlyDrops || []).includes(key)) continue
+
       venue[key] = parsed
     }
     return ok({ ...venue })
+  }),
+
+  /**
+   * Google sign-in, as a bench that HAS it would answer.
+   *
+   * Off by default (`bench.deploy.login_with_google`), so the ordinary suite
+   * runs against a bench that has never heard of it — which is the state the
+   * live one is in until the backend says otherwise, and the state in which no
+   * button may appear.
+   *
+   * The parameter is `credential` here. The portal does not know that, so it
+   * tries `credential`, `id_token` and `token` in turn; this rejects the wrong
+   * ones the way Frappe does, with a TypeError about an unexpected keyword,
+   * rather than quietly accepting them.
+   */
+  method('shotright.api.login_with_google', (args) => {
+    if (!bench.deploy.login_with_google) return methodMissing('shotright.api.login_with_google')
+
+    const unexpected = Object.keys(args).filter((k) => k !== 'credential' && k !== 'cmd')
+    if (unexpected.length) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception: `TypeError: login_with_google() got an unexpected keyword argument '${unexpected[0]}'`,
+        },
+        { status: 417 },
+      )
+    }
+
+    // The probe: no credential at all. A method that EXISTS says so by
+    // refusing, and that refusal is what tells the portal it is there.
+    if (!args.credential) return validationError('credential is required')
+
+    if (args.credential === 'unverified-account') {
+      return ok({ otp_required: true, email: 'new@partner.co.za' })
+    }
+    if (args.credential !== 'good-google-token') {
+      return validationError('That Google sign-in could not be verified.')
+    }
+    return ok({ api_key: 'GK', api_secret: 'GS' })
   }),
 
   /* ---------------------------------------------------------------- menu */
@@ -365,7 +576,14 @@ const apiHandlers = [
       parent_heading: args.heading_name || args.heading || args.parent_heading,
       item_name: args.item_name,
       price: Number(args.price) || 0,
-      description: args.description || '',
+      /* ⚠️ Frappe's Text Editor field stores HTML, so what comes back out is
+         `<p>the sentence</p>` and NOT the sentence. This mock used to hand back
+         exactly what was sent, which is how the live site ended up printing
+         `<p>Tomatoes, creamy burrata…</p>` at a partner while every test was
+         green. Third time this shape of mistake has cost us a bug (see the File
+         docname in #23 and the unpadded Time hour in #27): a double may be
+         simpler than the server, never different from it. */
+      description: args.description ? `<p>${args.description}</p>` : '',
     })
     return ok({ name })
   }),
@@ -379,8 +597,23 @@ const apiHandlers = [
    * everything else the endpoint exists and a test opts OUT; for these the
    * endpoint doesn't and a test opts IN.
    */
+  /**
+   * ⚠️ THE ITEM IS ADDRESSED AS `item_id`. Verified from the live bench:
+   *
+   *   TypeError: update_product_item() missing 1 required positional argument:
+   *   'item_id'
+   *
+   * This mock used to accept `item` or `name` — the two the portal was guessing
+   * at, and the two the real method does NOT declare — so a green suite covered
+   * a feature that could never once have worked. Fifth time a double
+   * disagreeing with the server has cost us a bug, after the File docname, the
+   * unpadded Time hour, the HTML in a description, and the fields update_venue
+   * silently drops.
+   */
   method('shotright.api.update_product_item', (args) => {
-    const item = bench.items.find((i) => i.name === (args.item || args.name))
+    const wrong = itemParamError('update_product_item', args)
+    if (wrong) return wrong
+    const item = bench.items.find((i) => i.name === args[bench.itemIdParam])
     if (!item) return docMissing()
     if (args.item_name !== undefined) item.item_name = args.item_name
     if (args.price !== undefined) item.price = Number(args.price) || 0
@@ -389,7 +622,9 @@ const apiHandlers = [
   }),
 
   method('shotright.api.delete_product_item', (args) => {
-    const id = args.item || args.name
+    const wrong = itemParamError('delete_product_item', args)
+    if (wrong) return wrong
+    const id = args[bench.itemIdParam]
     const before = bench.items.length
     bench.items = bench.items.filter((i) => i.name !== id)
     return before === bench.items.length ? docMissing() : ok({ ok: true })
@@ -483,21 +718,67 @@ const apiHandlers = [
 
   /* --------------------------------------------------------------- legal */
 
-  method('shotright.api.get_legal_documents', () =>
-    ok(
-      bench.legal.map((d) => ({
-        name: d.name,
-        title: d.title,
-        document_type: d.document_type || '',
-        version: d.version || '',
-        effective_date: d.effective_date || '',
-        content: d.content ?? '',
-        required: d.required === undefined ? 1 : d.required,
-        accepted: d.accepted ? 1 : 0,
-        accepted_on: d.accepted_on || '',
-      })),
-    ),
+  /**
+   * ⚠️ THE REAL CONTRACT, verified on the bench 5 Sep. Two endpoints, not one:
+   *
+   *   get_required_consents()          -> [{policy_type, version}]
+   *   get_legal_document(policy_type)  -> {name, policy_type, version, content,
+   *                                        published_on}
+   *
+   * This mock used to serve a single `get_legal_documents` returning everything
+   * at once — a method that has never existed on the bench, in a shape it has
+   * never used. The portal was written against the mock, so the whole legal
+   * feature was tested against a fiction.
+   */
+  method('shotright.api.get_required_consents', () =>
+    bench.legalListRefuses
+      ? validationError('Could not read the consent list')
+      : ok(
+          /* ⚠️ 13 Sep — THIS USED TO LEAK AN `accepted` FLAG, AND THE REAL
+             ONE NEVER HAS. `get_required_consents` is the list of ACTIVE
+             POLICIES: not user-scoped, `{policy_type, version}` and nothing
+             else, identical for a partner who has signed everything and one
+             who has signed nothing. While this double echoed the fixture's
+             `accepted` back, the portal's read-back appeared to work — and on
+             the bench it could never work, so a recorded consent was reported
+             to the partner as "your acceptance didn't save", nine times for
+             one user. Who has accepted what is `get_outstanding_consents`. */
+          bench.legal.map((d) => ({
+            policy_type: d.policy_type || d.title,
+            version: d.version || '',
+            ...(d.required === undefined ? {} : { required: d.required }),
+          })),
+        ),
   ),
+
+  /**
+   * One document's text. `policy_type` is required — a Select, not free text.
+   *
+   * `Usage Policy` is a valid type with NOTHING PUBLISHED, so an empty answer
+   * is normal here rather than a failure, and the portal must show no tickbox
+   * over it rather than an error.
+   */
+  method('shotright.api.get_legal_document', (args) => {
+    if (!args.policy_type) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception:
+            "TypeError: get_legal_document() missing 1 required positional argument: 'policy_type'",
+        },
+        { status: 417 },
+      )
+    }
+    const doc = bench.legal.find((d) => (d.policy_type || d.title) === args.policy_type)
+    if (!doc || doc.content === undefined) return ok(null)
+    return ok({
+      name: `${args.policy_type}-${doc.version || '2026-01-01'}`,
+      policy_type: args.policy_type,
+      version: doc.publishedVersion || doc.version || '',
+      content: doc.content ?? '',
+      published_on: doc.effective_date || '2026-08-20 15:14:10',
+    })
+  }),
 
   /**
    * Accept, with the silent-no-op switch built in.
@@ -508,9 +789,52 @@ const apiHandlers = [
    * that" rather than showing a tick. A test double that cannot reproduce the
    * bug cannot prove the fix.
    */
-  method('shotright.api.accept_legal_document', (args) => {
+  /**
+   * WHICH POLICIES THIS USER STILL OWES. User-scoped, and the only endpoint
+   * that can tell an accepted document from an unaccepted one.
+   *
+   * Answers `[]` once everything is signed — which is what `acceptDocument`
+   * reads back as its proof.
+   */
+  method('shotright.api.get_outstanding_consents', () =>
+    bench.legalOutstandingRefuses
+      ? validationError('Could not read outstanding consents')
+      : ok(
+          bench.legal
+            .filter((d) => !d.accepted)
+            .map((d) => ({ policy_type: d.policy_type || d.title, version: d.version || '' })),
+        ),
+  ),
+
+  /**
+   * ⚠️ 13 Sep — RENAMED FROM `accept_legal_document`, WHICH HAS NEVER EXISTED.
+   *
+   * `accept_terms` is the one way to record a consent. The three names the
+   * portal used to probe first (`accept_legal_document`, `accept_legal_documents`,
+   * `record_legal_acceptance`) are deliberately absent from this file: MSW runs
+   * with `onUnhandledRequest: 'error'`, so if they are ever reinstated the suite
+   * fails loudly instead of quietly firing three 417s at a partner's browser.
+   */
+  method('shotright.api.accept_terms', (args) => {
     const id = args.document || args.legal_document || args.name || args.document_name
-    const doc = bench.legal.find((d) => d.name === id)
+    /* Documents are addressed by `policy_type` on this bench, and the docname
+       the portal now holds is the one `get_legal_document` returned — which is
+       `<policy_type>-<version>`. Both resolve here.
+
+       ⚠️ The accept METHOD NAME is still a guess. The backend confirmed
+       `get_required_consents` and `get_legal_document` on 5 Sep and said nothing
+       about recording an acceptance, so `canEnforce` still refuses to gate on
+       it. This handler models what one would look like, not what one is. */
+    /* `policy_type` + `version` is the endpoint's primary contract and wins
+       when both are present; the docname is the documented fallback. */
+    const doc = args.policy_type
+      ? bench.legal.find((d) => (d.policy_type || d.title) === args.policy_type)
+      : bench.legal.find(
+          (d) =>
+            d.name === id ||
+            (d.policy_type || d.title) === id ||
+            `${d.policy_type || d.title}-${d.version || ''}` === id,
+        )
     if (!doc) return docMissing()
     if (bench.legalAcceptSilentlyFails) return ok({ ok: true })
     doc.accepted = 1
@@ -523,13 +847,21 @@ const apiHandlers = [
 
   /* -------------------------------------------------------------- drafts */
   method('shotright.api.save_venue_draft', (args) => {
+    /* A bulk import saves many drafts in one run, and one refusal must not end
+       it. `bench.draftSaveRefuses` names one this bench will not take. */
+    if (bench.draftSaveRefuses && args.venue_name === bench.draftSaveRefuses) {
+      return validationError('That draft could not be saved.')
+    }
     const id = args.draft_id || `DRAFT-${bench.drafts.length + 1}`
     const existing = bench.drafts.find((d) => d.draft_id === id)
     const row = {
       draft_id: id,
       name: id,
       venue_name: args.venue_name || '',
-      step: Number(args.step) || 0,
+      /* The wizard sends a step KEY ('details'), not an index. `Number()` on
+         that is NaN, which fell through to 0 and silently sent every resumed
+         draft back to step one. */
+      step: args.step ?? 0,
       completed: args.completed ?? 0,
       payload: typeof args.payload === 'string' ? args.payload : JSON.stringify(args.payload || {}),
       modified: '2026-07-28 10:00:00',
@@ -612,7 +944,29 @@ const apiHandlers = [
   }),
 
   /* ------------------------------------------------------ menu import job */
-  method('shotright.api.start_menu_import', () => ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })),
+  /**
+   * The importer, and what it does with the way we name the uploaded file.
+   *
+   * `bench.importerWants` is the parameter this bench's method actually
+   * declares. Anything else gets Frappe's TypeError, which is what a whitelisted
+   * method really does with an unexpected keyword — it does NOT ignore it the
+   * way a doc write does. `'none'` models an importer that refuses every shape.
+   */
+  method('shotright.api.start_menu_import', (args) => {
+    const wanted = bench.importerWants
+    if (wanted && !(wanted in args)) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception: `TypeError: start_menu_import() got an unexpected keyword argument '${
+            Object.keys(args).find((k) => k !== 'venue_name' && k !== 'cmd') || 'file_name'
+          }'`,
+        },
+        { status: 417 },
+      )
+    }
+    return ok({ name: 'MI-1', status: 'Queued', stage: 'uploaded' })
+  }),
   method('shotright.api.get_menu_import_status', () =>
     bench.importFails
       ? ok({
@@ -735,9 +1089,11 @@ const apiHandlers = [
       return permissionError('Not permitted')
     }
 
-    /* Verified 22 Aug: .heic and .avif are refused with a terminal 417. Most
-       HEIC is caught in the browser before it gets here; a file whose type the
-       browser cannot identify is not. */
+    /* Verified 22 Aug: .heic, .heif and .avif are refused with a terminal 417.
+       Since the format split in `utils/image.js` the portal converts all three
+       to JPEG before sending, so nothing should ever trip this. It stays
+       precisely so that a regression in that conversion shows up as a failing
+       test here rather than as a partner who cannot list their venue. */
     if (/\.(heic|heif|avif)$/i.test(file?.name || '')) {
       return validationError('Unsupported image format')
     }

@@ -143,6 +143,9 @@ describe('edit a venue', () => {
   })
 
   it('saves the rest of the edit when the mood list crashes the child table', async () => {
+    /* The old bench, kept as a regression guard: the workaround must still
+       work if a deployment ever goes back to it. */
+    bench.moodsAreChildRows = true
     /* When moods genuinely change we have to send them, and on today's bench
        that raises. Nothing is saved — the exception is raised before the write
        — so the rest of the edit is still to do. */
@@ -161,6 +164,9 @@ describe('edit a venue', () => {
   })
 
   it('never shows a raw Python TypeError to a partner', async () => {
+    /* The old bench, kept as a regression guard: the workaround must still
+       work if a deployment ever goes back to it. */
+    bench.moodsAreChildRows = true
     const { user } = renderApp({ route: EDIT, signedIn: true })
 
     await screen.findByLabelText(/dress code/i)
@@ -323,6 +329,305 @@ describe('moods that arrive in an unexpected shape', () => {
     const write = bench.calls.filter((c) => c.method === 'update_venue').at(-1)
     expect(write.args.moods).toContain('MOOD-RETIRED')
   })
+
+  /**
+   * REPORTED FROM THE LIVE SITE, via a console log:
+   * `The specified value "9:00:" does not conform to the required format.`
+   *
+   * Two bugs behind one symptom, both from Frappe not zero-padding the hour of
+   * a Time field. The form cut the first five characters off "9:00:00" and gave
+   * an <input type="time"> a value it cannot parse, so the field rendered
+   * EMPTY; and it compared open and close as strings, where "9:00:00" sorts
+   * after "23:00:00", so the save was refused outright with "closing time must
+   * be after opening time".
+   *
+   * Net effect: a venue opening any time before ten o'clock could not be
+   * edited at all. The Wednesday row in the fixture opens at 9:00:00 for
+   * exactly this reason.
+   */
+  it('saves a venue that opens before ten in the morning', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    expect(
+      screen.queryByText(/closing time must be after opening time/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows that nine o’clock opening time instead of an empty box', async () => {
+    renderApp({ route: EDIT, signedIn: true })
+
+    const opening = await screen.findByLabelText(/Wednesday opening time/i)
+    expect(opening).toHaveValue('09:00')
+  })
+
+
+describe('a save the server accepted and did not keep', () => {
+  /**
+   * REPORTED FROM THE LIVE SITE: "some fields on the venue screen do not
+   * persist — e.g. the starting time, the moods."
+   *
+   * Neither was being reported as a failure, because as far as this code could
+   * tell neither WAS one. Frappe discards a kwarg its whitelisted method does
+   * not declare — silently, at HTTP 200. The save succeeds, the field is
+   * dropped, the partner is told it worked, and they find out when a customer
+   * turns up at nine for a ten o'clock opening.
+   *
+   * The fake bench could not model this until now: it stored everything it
+   * accepted. Fourth time a double tidier than the server has hidden a bug.
+   */
+  it('tells the partner when the opening time did not stick', async () => {
+    bench.silentlyDrops = ['operating_hours']
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const opening = await screen.findByLabelText(/Wednesday opening time/i)
+    await user.clear(opening)
+    await user.type(opening, '10:30')
+    await save(user)
+
+    expect(await screen.findByText(/the opening hours/i)).toBeInTheDocument()
+    /* And the bench really did drop it — otherwise this proves nothing. */
+    expect(venueById('VEN-00001').operating_hours[2].open_time).toBe('9:00:00')
+  })
+
+  it('says nothing when the save did stick', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const opening = await screen.findByLabelText(/Wednesday opening time/i)
+    await user.clear(opening)
+    await user.type(opening, '10:30')
+    await save(user)
+
+    await waitFor(() =>
+      expect(venueById('VEN-00001').operating_hours[2].open_time).toBe('10:30'),
+    )
+    expect(screen.queryByText(/couldn’t update/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * The false alarm this had to avoid. The form holds "09:00" and the bench
+   * sends back "9:00:00" for the same moment, so a plain string comparison
+   * would report every venue's hours as dropped on every single save — and a
+   * warning that fires every time is one people learn to click through.
+   */
+  it('does not cry wolf over Frappe’s own way of writing a time', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    expect(screen.queryByText(/the opening hours/i)).not.toBeInTheDocument()
+  })
+})
+
+
+describe('moods, now that the bench has told us the shape', () => {
+  /**
+   * ANSWERED 5 Sep. `Venue.moods` is a Table MultiSelect onto `Venue Mood`,
+   * whose single child field is `mood`, and bare names are accepted directly.
+   *
+   * The portal had been DROPPING moods from every edit on the theory that a
+   * wrong child-row key would make Frappe write empty rows and report success.
+   * That is real Frappe behaviour; it is not this endpoint's behaviour, and the
+   * caution cost the feature for weeks.
+   */
+  it('saves a changed mood selection', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /^lively$/i }))
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').moods).toContain('MOOD-LIVELY'))
+    expect(screen.queryByText(/couldn’t update the moods/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * ⚠️ Setting moods REPLACES the whole set — `Document.set()` clears the table
+   * before extending it. So an empty list is not "leave these alone", it is
+   * "delete every mood this venue has". The form will not submit without one,
+   * which makes an empty array here a bug on our side; sending it would turn
+   * that bug into data loss.
+   */
+  it('never sends an empty mood list, which would erase them', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    const sent = bench.calls.filter((c) => c.method === 'update_venue')
+    sent.forEach((c) => {
+      if ('moods' in c.args) expect(c.args.moods.length).toBeGreaterThan(0)
+    })
+    expect(venueById('VEN-00001').moods.length).toBeGreaterThan(0)
+  })
+})
+
+
+describe('average spend', () => {
+  /**
+   * ⚠️ The fieldname is UNCONFIRMED. The backend says the field is on `Venue`
+   * and has not said what it is called, so the portal reads the name off the
+   * venue the bench actually sent rather than guessing one.
+   *
+   * Every blind guess this project has shipped has cost a bug — the File
+   * docname, the Time hour, `item_id`, `file_name`. This is the same class of
+   * question answered the safe way round.
+   */
+  it('saves what the partner typed, under the name the bench uses', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByLabelText(/average spend/i)
+    await user.clear(field)
+    await user.type(field, '320')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').average_spend).toBe(320))
+  })
+
+  it('follows the field when the bench calls it something else', async () => {
+    bench.spendField = 'avg_spend'
+    bench.venues[0].avg_spend = 250
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByLabelText(/average spend/i)
+    await user.clear(field)
+    await user.type(field, '410')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').avg_spend).toBe(410))
+  })
+
+  /**
+   * An input over something that cannot save is the failure this codebase keeps
+   * returning to, and it is worse here than most: a figure that looks saved and
+   * is not gets quoted to a customer.
+   */
+  it('does not render at all when the venue carries no such field', async () => {
+    bench.spendField = null
+    renderApp({ route: EDIT, signedIn: true })
+
+    await screen.findByLabelText(/dress code/i)
+    expect(screen.queryByLabelText(/average spend/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * ⚠️ THE OUTCOME TO EXPECT ON THE LIVE BENCH, until someone confirms
+   * otherwise. A field can sit on the doctype and still not be a parameter of
+   * the whitelisted method — and `update_venue` refuses an undeclared field by
+   * NAME rather than dropping it, so this is a legible failure rather than a
+   * silent one.
+   *
+   * The partner must be told. A figure that looks saved and is not gets quoted
+   * to a customer, and the rest of their edit still needs to land.
+   */
+  it('says so when the method will not take it, and saves the rest', async () => {
+    bench.venueWritable = bench.venueWritable.filter((f) => f !== 'average_spend')
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    const spend = screen.getByLabelText(/average spend/i)
+    await user.clear(spend)
+    await user.type(spend, '320')
+    await save(user)
+
+    expect(await screen.findByText(/couldn’t update the average spend/i)).toBeInTheDocument()
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+  })
+
+  /* An empty box is "I would rather not say" — a real answer. R0 average spend
+     would read as a free venue. */
+  it('sends nothing rather than zero when it is left blank', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByLabelText(/average spend/i)
+    await user.clear(field)
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').average_spend).toBeNull())
+  })
+})
+
+
+describe('renaming a venue', () => {
+  /**
+   * REPORTED 13 Sep: "venue name update — the backend throws an error."
+   *
+   * ⚠️ It did, and the portal was the cause. Both `new_name` AND
+   * `new_venue_name` went up in the same call, and `update_venue` validates its
+   * kwargs rather than dropping them — `Cannot update field(s): …` — so the
+   * second, speculative alias took the WHOLE SAVE down with it. A partner
+   * changing their dress code and their name lost both, to an alias they never
+   * asked for.
+   *
+   * Third time this exact shape this month, after `item_id` and the menu
+   * importer's `file_name`. Hedging works for multipart fields, where an extra
+   * part is ignored. On a whitelisted method every undeclared name is fatal.
+   */
+  it('sends one rename parameter at a time, never two', async () => {
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByRole('textbox', { name: /venue name/i })
+    await user.clear(field)
+    await user.type(field, 'Corner Kitchen and Bar')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').venue_name).toBe('Corner Kitchen and Bar'))
+
+    for (const call of bench.calls.filter((c) => c.method === 'update_venue')) {
+      const aliases = ['new_name', 'new_venue_name', 'rename_to'].filter((a) => a in call.args)
+      expect(aliases.length).toBeLessThanOrEqual(1)
+    }
+  })
+
+  /* The list is a list for a reason: a bench that calls it something else has
+     to keep working, and the refusal names the parameter it rejected. */
+  it('finds the parameter a differently-written bench declares', async () => {
+    bench.renameParam = 'new_venue_name'
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const field = await screen.findByRole('textbox', { name: /venue name/i })
+    await user.clear(field)
+    await user.type(field, 'The Corner')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').venue_name).toBe('The Corner'))
+  })
+
+  /**
+   * The part that matters most. A bench that cannot rename at all must not take
+   * the rest of the edit down with it — that was the actual damage.
+   */
+  it('saves everything else even when no rename parameter is accepted', async () => {
+    bench.renameParam = null
+    const { user } = renderApp({ route: EDIT, signedIn: true })
+
+    const dress = await screen.findByLabelText(/dress code/i)
+    await user.clear(dress)
+    await user.type(dress, 'Formal')
+    const name = screen.getByRole('textbox', { name: /venue name/i })
+    await user.clear(name)
+    await user.type(name, 'A New Name')
+    await save(user)
+
+    await waitFor(() => expect(venueById('VEN-00001').dress_code).toBe('Formal'))
+    expect(venueById('VEN-00001').venue_name).toBe('Corner Kitchen & Bar')
+    expect(await screen.findByText(/still called/i)).toBeInTheDocument()
+  })
+})
+
 })
 
   it('saves when detail 404s AND the dashboard row describes moods differently', async () => {

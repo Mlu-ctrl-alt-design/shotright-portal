@@ -183,3 +183,62 @@ describe('draft venues', () => {
     expect(screen.getByRole('link', { name: /finish the listing/i })).toBeInTheDocument()
   })
 })
+
+describe('on a phone', () => {
+  /**
+   * ⚠️ MEASURED, NOT GUESSED. Driving the real app at 390x844: the venue table
+   * is 534px wide inside a horizontal scroller, so "Dress code" was clipped and
+   * the ENTIRE Actions column — Edit, Why?, Progress and the overflow menu —
+   * sat off-screen, with nothing on screen to say the table scrolled sideways.
+   * A partner on a phone could not reach a single action on their own venue.
+   *
+   * `useIsPhone` swaps the table for cards rather than hiding one with CSS, so
+   * only one layout is ever in the DOM. That is why these tests can tell which
+   * links a partner would actually be able to press.
+   */
+  const asPhone = () => {
+    window.matchMedia = (query) => ({
+      matches: /max-width:\s*639px/.test(query),
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+    })
+  }
+
+  it('drops the table, so nothing lives off the side of the screen', async () => {
+    asPhone()
+    renderApp({ route: '/venues', signedIn: true })
+
+    await screen.findByText(VENUE_ONE.venue_name)
+    expect(document.querySelector('table')).toBeNull()
+  })
+
+  it('keeps every venue’s action reachable', async () => {
+    asPhone()
+    renderApp({ route: '/venues', signedIn: true })
+
+    await screen.findByText(VENUE_ONE.venue_name)
+
+    /* The same one-in-the-open rule as the table: a primary action and the ⋯,
+       shared from `VenueActions` so the two layouts cannot disagree about
+       which one a venue gets. */
+    expect(
+      await screen.findByRole('link', { name: new RegExp(`Edit ${VENUE_ONE.venue_name}`, 'i') }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: new RegExp(`More actions for ${VENUE_ONE.venue_name}`, 'i'),
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('still says what state each venue is in', async () => {
+    asPhone()
+    renderApp({ route: '/venues', signedIn: true })
+
+    await screen.findByText(VENUE_ONE.venue_name)
+    expect(screen.getAllByText(/approved|pending|declined|draft/i).length).toBeGreaterThan(0)
+  })
+})
