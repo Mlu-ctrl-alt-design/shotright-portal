@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useDashboard } from '../../hooks/useVendor'
@@ -18,18 +19,56 @@ export default function Dashboard() {
   const { data: drafts = [] } = useSetupDrafts()
   const qc = useQueryClient()
 
+  /* Owned HERE, not by the card. Clearing the backlog empties the list and
+     unmounts the card, so a message the card owned would be destroyed by the
+     success it was announcing. */
+  const [clearedNote, setClearedNote] = useState(null)
+
   // The most recently touched unfinished setup. One card, not a list: someone
   // with three abandoned drafts is being asked which one they meant, which is
   // the dashboard interrogating them instead of helping. The rest stay
   // reachable from the venues list.
   const resumable = drafts[0] || null
 
+  /**
+   * ⚠️ REPORTED as "discarding draft is not working" — and the discard works.
+   *
+   * Every visit to the wizard leaves a draft behind, named or not. The bench
+   * is carrying 24 of them across four partners, 23 with no venue name at all,
+   * the oldest from 28 Jul. This card shows `drafts[0]`, so discarding the one
+   * on screen refetches and hands the SAME CARD the next of eighteen. Pressing
+   * a button and watching the thing you just deleted reappear is
+   * indistinguishable from a button that does nothing — which is exactly what
+   * was reported, twice, about a control that deletes correctly every time.
+   *
+   * The card is told how many there are. One of nineteen going away is
+   * progress you can see; one of nineteen going away silently is a bug.
+   */
   const dropDraft = async (draft) => {
     const result = await discardDraft(draft.id)
     qc.invalidateQueries({ queryKey: ['venue-drafts'] })
     // Handed back so the card can say so. It used to swallow this, which is
     // how a button that deleted nothing looked exactly like one that worked.
     return result
+  }
+
+  /**
+   * Clear the backlog in one action.
+   *
+   * Sequential, not `Promise.all`: nineteen simultaneous deletes at a bench
+   * that rate-limits is a burst that partly fails, and a partial failure here
+   * is worse than a slow success — the partner cannot tell which ones went.
+   * Each result is counted so the card can report honestly.
+   */
+  const dropAllDrafts = async () => {
+    let discarded = 0
+    for (const draft of drafts) {
+      const result = await discardDraft(draft.id)
+      if (!result || result.discarded !== false) discarded += 1
+    }
+    qc.invalidateQueries({ queryKey: ['venue-drafts'] })
+    setClearedNote({ discarded, attempted: drafts.length })
+    return { discarded, attempted: drafts.length }
   }
 
   if (isLoading) return <Spinner label="Loading dashboard…" />
@@ -75,7 +114,25 @@ export default function Dashboard() {
       {/* Above the tiles, deliberately. An unfinished setup is the only thing on
           this page with a deadline attached to a human being's attention — the
           counts will still be there after they have finished it. */}
-      {resumable && <ResumeSetupCard draft={resumable} onDiscard={dropDraft} />}
+      {/* Survives the card. A partial clear is reported as the number that
+          actually went, never as blanket success over a list still showing
+          them — the same rule the single discard already follows. */}
+      {clearedNote && (
+        <p role="status" className="mb-4 text-sm text-ink-700">
+          {clearedNote.discarded === clearedNote.attempted
+            ? `Cleared ${clearedNote.discarded} unfinished ${clearedNote.discarded === 1 ? 'setup' : 'setups'}.`
+            : `Cleared ${clearedNote.discarded} of ${clearedNote.attempted}. The rest are still here — try again.`}
+        </p>
+      )}
+
+      {resumable && (
+        <ResumeSetupCard
+          draft={resumable}
+          onDiscard={dropDraft}
+          totalCount={drafts.length}
+          onDiscardAll={dropAllDrafts}
+        />
+      )}
 
       {/* Each tile is a link to the tab it counts. "3 pending" raises the
           question "which three?" and the tile is where that gets asked. */}
