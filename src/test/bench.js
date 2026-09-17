@@ -139,7 +139,10 @@ const initial = () => ({
     get_popular_moods: true,
     get_popular_venue_options: true,
     verify_otp: true,
-    resend_otp: true,
+    /* ONE issuer for every purpose. There is no `resend_otp` and never was;
+       the portal called one for weeks and got a 417 each time. */
+    send_otp: true,
+    reset_password_with_otp: true,
     'frappe.client.delete': true,
     'frappe.client.get_list': true,
     'frappe.client.set_value': true,

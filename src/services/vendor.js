@@ -321,11 +321,28 @@ export const verifyOtp = (email, code) =>
     },
   )()
 
+/**
+ * Ask for another code.
+ *
+ * `send_otp` again, not a `resend_otp` of its own — the bench has never had
+ * one, and the 60-second cooldown that makes a resend safe lives inside
+ * `send_otp` itself. This called `shotright.api.resend_otp` for weeks and got
+ * a 417 every time.
+ */
 export const resendOtp = (email, purpose = 'Registration') =>
   pick(
-    () => call('shotright.api.resend_otp', { email, purpose }),
+    () => call('shotright.api.send_otp', { email, purpose }),
     async () => ({ sent: true, cooldown_seconds: 60 }),
   )()
+
+/**
+ * The bench's own name for the reset purpose, spelled exactly.
+ *
+ * `send_otp` looks it up in TEMPLATE_FOR_PURPOSE and throws ValidationError on
+ * anything it does not recognise, so a near-miss like "password_reset" fails
+ * the whole request rather than degrading.
+ */
+const PASSWORD_RESET = 'Password Reset'
 
 /**
  * Start a password reset.
@@ -336,14 +353,14 @@ export const resendOtp = (email, purpose = 'Registration') =>
  */
 export const requestPasswordReset = (email) =>
   pick(
-    () => call('shotright.api.request_password_reset', { email }),
+    () => call('shotright.api.send_otp', { email, purpose: PASSWORD_RESET }),
     async () => ({ sent: true, cooldown_seconds: 60 }),
   )()
 
 export const resetPassword = (email, code, new_password) =>
   pick(
     async () => {
-      const result = await call('shotright.api.reset_password', {
+      const result = await call('shotright.api.reset_password_with_otp', {
         email,
         code,
         new_password,
