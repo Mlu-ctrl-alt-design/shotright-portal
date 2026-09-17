@@ -95,6 +95,11 @@ export function Input({
   id,
   trailing,
   prefilled,
+  // Pills everywhere except the guest screens, whose 17 Sep design draws
+  // 8px-radius fields. Same escape hatch `Button` has carried since the first
+  // login screen, and for the same reason — one primitive, two shapes the
+  // designs actually ask for.
+  shape = 'pill',
   // Keep a line's worth of space under the field whether or not there is a
   // message. See the note on `messageRow` below — this is not cosmetic.
   reserveMessage,
@@ -132,7 +137,8 @@ export function Input({
           data-prefilled={prefilled ? 'true' : undefined}
           aria-describedby={describedBy}
           className={clsx(
-            'block w-full rounded-full border-2 px-5 py-2.5 text-sm text-ink-900',
+            'block w-full border-2 px-5 py-2.5 text-sm text-ink-900',
+            shape === 'rounded' ? 'rounded-lg' : 'rounded-full',
             'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
             'transition-colors duration-250',
             trailing && 'pr-11',
@@ -205,7 +211,7 @@ export function Input({
  * makes the toggle work at all; the field is `autoComplete="new-password"` on
  * the register form, so nothing is being re-typed into it anyway.
  */
-export function PasswordInput({ label, error, hint, className, id, ...props }) {
+export function PasswordInput({ label, error, hint, className, id, shape = 'pill', ...props }) {
   const generatedId = useId()
   const inputId = id || generatedId
   const [shown, setShown] = useState(false)
@@ -222,7 +228,8 @@ export function PasswordInput({ label, error, hint, className, id, ...props }) {
           id={inputId}
           type={shown ? 'text' : 'password'}
           className={clsx(
-            'block w-full rounded-full border-2 bg-white py-2.5 pr-24 pl-5 text-sm text-ink-900',
+            'block w-full border-2 bg-white py-2.5 pr-24 pl-5 text-sm text-ink-900',
+            shape === 'rounded' ? 'rounded-lg' : 'rounded-full',
             'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
             error ? 'border-red-700' : 'border-field',
           )}
@@ -234,7 +241,8 @@ export function PasswordInput({ label, error, hint, className, id, ...props }) {
           aria-pressed={shown}
           aria-controls={inputId}
           className={clsx(
-            'absolute inset-y-1 right-1.5 inline-flex items-center gap-1.5 rounded-full px-3',
+            'absolute inset-y-1 right-1.5 inline-flex items-center gap-1.5 px-3',
+            shape === 'rounded' ? 'rounded-md' : 'rounded-full',
             'text-xs font-semibold text-ink-700 hover:bg-brand-50 hover:text-ink-900',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1',
           )}
