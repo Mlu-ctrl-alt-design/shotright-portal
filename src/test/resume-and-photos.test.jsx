@@ -272,6 +272,81 @@ describe('discarding a draft', () => {
     })
   }
 
+  const seedDrafts = (count) => {
+    for (let i = 1; i <= count; i += 1) {
+      bench.drafts.push({
+        draft_id: `DRAFT-${i}`,
+        name: `DRAFT-${i}`,
+        venue_name: '',
+        step: 1,
+        completed: 0,
+        payload: JSON.stringify({ details: {} }),
+        modified: `2026-08-0${i} 10:00:00`,
+      })
+    }
+  }
+
+  /* ==========================================================================
+     REPORTED AGAIN 17 SEP — same words, and this time the discard was innocent.
+
+     The live bench is carrying 24 drafts across four partners, 23 of them with
+     no venue name, the oldest from 28 Jul: every visit to the wizard leaves one
+     behind. The dashboard renders `drafts[0]`, so deleting the card on screen
+     refetches and puts the NEXT one in exactly the same place. A partner
+     presses discard and watches the thing they just deleted reappear, which is
+     what a dead button looks like from the outside.
+     ======================================================================= */
+  it('says how many are queued behind this one', async () => {
+    seedDrafts(3)
+    renderApp({ route: '/', signedIn: true })
+
+    expect(await screen.findByText(/2 more unfinished setups are waiting/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /discard all 3/i })).toBeInTheDocument()
+  })
+
+  it('counts down as they go, so one of three is visible progress', async () => {
+    seedDrafts(3)
+    const { user } = renderApp({ route: '/', signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /discard this draft/i }))
+
+    await waitFor(() => expect(bench.drafts).toHaveLength(2))
+    expect(await screen.findByText(/One more unfinished setup is waiting/i)).toBeInTheDocument()
+  })
+
+  it('a single draft is not told it has company', async () => {
+    seedDrafts(1)
+    renderApp({ route: '/', signedIn: true })
+
+    await screen.findByRole('button', { name: /discard this draft/i })
+    expect(screen.queryByText(/unfinished setups? (is|are) waiting/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /discard all/i })).toBeNull()
+  })
+
+  it('clears the whole backlog in one press, and says how many went', async () => {
+    seedDrafts(4)
+    const { user } = renderApp({ route: '/', signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /discard all 4/i }))
+
+    await waitFor(() => expect(bench.drafts).toHaveLength(0))
+    expect(await screen.findByText(/cleared 4 unfinished setups/i)).toBeInTheDocument()
+  })
+
+  it('a partial clear reports the survivors rather than claiming success', async () => {
+    /* The house speciality again: the bench answers 200 and deletes nothing.
+       Claiming "cleared 4" over a list that still shows 4 is the exact lie
+       this card was rewritten to stop telling. */
+    seedDrafts(4)
+    bench.draftDiscardSilentlyFails = true
+    const { user } = renderApp({ route: '/', signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /discard all 4/i }))
+
+    expect(await screen.findByText(/cleared 0 of 4/i)).toBeInTheDocument()
+    expect(bench.drafts).toHaveLength(4)
+  })
+
   it('discards it, and the card goes', async () => {
     seedDraft()
     const { user } = renderApp({ route: '/', signedIn: true })
