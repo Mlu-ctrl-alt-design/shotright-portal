@@ -62,9 +62,11 @@ function StepPill({ label, status, number }) {
   )
 }
 
-export default function ResumeSetupCard({ draft, onDiscard }) {
+export default function ResumeSetupCard({ draft, onDiscard, totalCount = 1, onDiscardAll }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+
+  const others = Math.max(0, (totalCount || 1) - 1)
 
   const discard = async () => {
     setBusy(true)
@@ -75,6 +77,16 @@ export default function ResumeSetupCard({ draft, onDiscard }) {
        nothing is an older call site, not a failure — and the card unmounting
        on success means this state is usually never read at all. */
     if (result && result.discarded === false) setFailed(true)
+  }
+
+  /* The outcome is reported by the DASHBOARD, not here. Clearing the backlog
+     empties the list, which unmounts this card — a message owned by the card
+     would be destroyed by the very success it was announcing. */
+  const discardAll = async () => {
+    setBusy(true)
+    setFailed(false)
+    await onDiscardAll()
+    setBusy(false)
   }
 
   if (!draft) return null
@@ -167,6 +179,32 @@ export default function ResumeSetupCard({ draft, onDiscard }) {
           </button>
         )}
       </div>
+
+      {/* ⚠️ THE "DISCARD IS NOT WORKING" BUG, and the discard was never the
+          problem. This card shows the most recent draft; with others behind it,
+          discarding one refetches and puts the NEXT one in the same place. The
+          partner sees a card they just deleted, still there. Saying how many
+          there are turns that from a broken button into visible progress. */}
+      {others > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-200 pt-4">
+          <p className="text-sm text-ink-700">
+            {others === 1
+              ? 'One more unfinished setup is waiting behind this one.'
+              : `${others} more unfinished setups are waiting behind this one.`}
+          </p>
+          {onDiscardAll && (
+            <button
+              type="button"
+              onClick={discardAll}
+              disabled={busy}
+              className="text-sm font-medium text-ink-500 underline underline-offset-2 hover:text-ink-900 disabled:no-underline disabled:opacity-60"
+            >
+              {busy ? 'Discarding…' : `Discard all ${totalCount}`}
+            </button>
+          )}
+        </div>
+      )}
+
 
       {/* Reported 8 Aug: this button "is not working". It was not working, and
           worse, it was not SAYING so — a dead control that stays silent is

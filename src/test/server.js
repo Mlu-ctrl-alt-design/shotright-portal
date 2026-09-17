@@ -273,8 +273,23 @@ const apiHandlers = [
     return ok({ api_key: 'KEY', api_secret: 'SECRET', user: email })
   }),
 
-  method('shotright.api.resend_otp', () => ok({ sent: true })),
-  method('shotright.api.request_password_reset', () => ok({ sent: true })),
+  /**
+   * ONE endpoint issues every code, whatever the purpose.
+   *
+   * This double used to answer `resend_otp` and `request_password_reset` too.
+   * Neither has ever existed on the bench — both 417 with "Failed to get
+   * method" — so the suite was green while the live forgot-password screen
+   * could not send a single email. Same shape as the four the 13 Sep session
+   * found: a double kinder than the bench hides exactly the bug it was written
+   * to catch.
+   */
+  method('shotright.api.send_otp', ({ purpose }) => {
+    if (purpose && !['Registration', 'Password Reset', 'Venue Claim'].includes(purpose)) {
+      // The bench throws on an unrecognised purpose rather than degrading.
+      return validationError('Unknown purpose')
+    }
+    return ok({ sent: true, expires_in_minutes: 10, length: 6 })
+  }),
   /**
    * Validates the code and returns a session, like the real one.
    *
@@ -282,7 +297,7 @@ const apiHandlers = [
    * code appeared to work — the test asserting an error found none. A double
    * that accepts anything cannot fail the case it exists to cover.
    */
-  method('shotright.api.reset_password', ({ email, code, new_password }) => {
+  method('shotright.api.reset_password_with_otp', ({ email, code, new_password }) => {
     if (String(code) !== bench.otpCode) return validationError('That code is not right')
     const user = bench.users.find((u) => u.email === email)
     if (user) {

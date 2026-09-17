@@ -102,12 +102,24 @@ export function Input({
   id,
   trailing,
   prefilled,
+  /**
+   * Pills everywhere except the screens whose 17 Sep designs draw 8px fields —
+   * the guest screens and the add-venue flow.
+   *
+   * ⚠️ TWO NAMES FOR ONE SHAPE, and that is a merge scar rather than a design.
+   * The login redesign and the add-venue redesign landed the same 8px corner
+   * on the same day, independently, one calling it `rounded` and one `field`.
+   * Both are honoured because both have live call sites and renaming either
+   * would be a silent restyle of a screen nobody was looking at. Worth
+   * collapsing to one name in a pass of its own, with the call sites.
+   *
+   * Note `Button`'s `rounded` is 16px, not 8px — so they cannot simply be
+   * unified on that name without changing how the login button looks.
+   */
+  shape = 'pill',
   // Keep a line's worth of space under the field whether or not there is a
   // message. See the note on `messageRow` below — this is not cosmetic.
   reserveMessage,
-  // `field` gives the 8px corner the add-venue redesign asked for; everything
-  // else stays a pill. See the note on Button's `shape`.
-  shape = 'pill',
   ...props
 }) {
   // Generated rather than derived from `name`: the same form renders once per
@@ -143,7 +155,7 @@ export function Input({
           aria-describedby={describedBy}
           className={clsx(
             'block w-full border-2 px-5 py-2.5 text-sm text-ink-900',
-            shape === 'field' ? 'rounded-lg' : 'rounded-full',
+            shape === 'field' || shape === 'rounded' ? 'rounded-lg' : 'rounded-full',
             'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
             'transition-colors duration-250',
             trailing && 'pr-11',
@@ -216,7 +228,7 @@ export function Input({
  * makes the toggle work at all; the field is `autoComplete="new-password"` on
  * the register form, so nothing is being re-typed into it anyway.
  */
-export function PasswordInput({ label, error, hint, className, id, ...props }) {
+export function PasswordInput({ label, error, hint, className, id, shape = 'pill', ...props }) {
   const generatedId = useId()
   const inputId = id || generatedId
   const [shown, setShown] = useState(false)
@@ -233,7 +245,8 @@ export function PasswordInput({ label, error, hint, className, id, ...props }) {
           id={inputId}
           type={shown ? 'text' : 'password'}
           className={clsx(
-            'block w-full rounded-full border-2 bg-white py-2.5 pr-24 pl-5 text-sm text-ink-900',
+            'block w-full border-2 bg-white py-2.5 pr-24 pl-5 text-sm text-ink-900',
+            shape === 'rounded' ? 'rounded-lg' : 'rounded-full',
             'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
             error ? 'border-red-700' : 'border-field',
           )}
@@ -245,7 +258,8 @@ export function PasswordInput({ label, error, hint, className, id, ...props }) {
           aria-pressed={shown}
           aria-controls={inputId}
           className={clsx(
-            'absolute inset-y-1 right-1.5 inline-flex items-center gap-1.5 rounded-full px-3',
+            'absolute inset-y-1 right-1.5 inline-flex items-center gap-1.5 px-3',
+            shape === 'rounded' ? 'rounded-md' : 'rounded-full',
             'text-xs font-semibold text-ink-700 hover:bg-brand-50 hover:text-ink-900',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1',
           )}
