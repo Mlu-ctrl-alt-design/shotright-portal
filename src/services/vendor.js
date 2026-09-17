@@ -792,11 +792,26 @@ export const createVenue = (payload) =>
         warnings.push('Public holiday hours were not saved — the app does not store them yet.')
       }
 
-      // Fields with no home on create_venue.
-      if (payload.manager_name || payload.contact_number || payload.summary) {
+      /**
+       * Fields with no home on create_venue.
+       *
+       * ⚠️ THE DESCRIPTION CAME OFF THIS LIST on 17 Sep, and the correction
+       * matters more than it looks. It used to be collected as `summary`, which
+       * really did go nowhere — but the add-venue redesign sends the partner's
+       * guided answers as `atmosphere` instead, and that maps onto the Venue's
+       * `atmosphere_desc` below. It IS saved now. Leaving it named here would
+       * tell partners their description was lost while it sat on their venue,
+       * which is the same class of untruth as claiming a save that never
+       * happened — just pointed the other way.
+       *
+       * Manager and contact number are still genuinely dropped. That is a real
+       * backend gap (docs/BACKEND-INTEGRATION.md), and a form that now REQUIRES
+       * both makes saying so more important rather than less.
+       */
+      if (payload.manager_name || payload.contact_number) {
         warnings.push(
-          'Manager details, contact number and the venue description were not saved — ' +
-            'the app has no fields for them yet.',
+          'Manager details and contact number were not saved — the app has no fields for them ' +
+            'yet. Everything else on your venue is safe.',
         )
       }
 

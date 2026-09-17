@@ -716,6 +716,35 @@ const apiHandlers = [
     })
   }),
 
+  /* ------------------------------------------------------------- paywall */
+
+  /**
+   * Entitlements, as PR #44 serves them.
+   *
+   * `bench.deploy.get_entitlements` is false by default — see the note there.
+   * When it IS deployed this answers ROWS, because that is how the backend
+   * stores them, and the portal has to be tested against the shape it will
+   * actually receive rather than a tidied-up one.
+   */
+  method('shotright.api.get_entitlements', () => ok(bench.entitlements)),
+
+  /* No Payfast adapter yet, so this is off by default and the upgrade dialog
+     has to say so rather than showing a button that takes no money. */
+  method('shotright.api.start_subscription', () =>
+    ok({ redirect_url: bench.checkoutUrl || null }),
+  ),
+
+  /**
+   * Facebook / Instagram / website import.
+   *
+   * Off by default — it has not been written on the bench at all, which is the
+   * state this suite has to be correct in. `bench.importedByUrl` maps a URL to
+   * the payload a working importer would return.
+   */
+  method('shotright.api.import_venue_from_url', ({ url }) =>
+    ok(bench.importedByUrl?.[String(url || '')] || null),
+  ),
+
   /* --------------------------------------------------------------- legal */
 
   /**

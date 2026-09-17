@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
+import { walkToReview } from './addVenue'
 
 /**
  * ACCEPTING THE LEGAL DOCUMENTS.
@@ -300,73 +301,37 @@ describe('what the portal refuses to enforce', () => {
 })
 
 /* ============================================================================
-   THE GATE, DRIVEN THROUGH THE WHOLE WIZARD.
+   THE GATE, DRIVEN THROUGH THE WHOLE FLOW.
 
    Placed here rather than in venue-add.test.jsx because what is being tested is
-   the legal rule, not the wizard. The five steps are walked in full every time
-   on purpose: the entire risk of gating at submit is that a partner reaches the
-   end of a long form and loses it, so a test that shortcuts to the last step
-   would be testing the version of this feature that cannot hurt anyone.
+   the legal rule, not the form. The whole flow is walked every time on purpose:
+   the entire risk of gating at submit is that a partner reaches the end of a
+   long form and loses it, so a test that shortcuts to the last screen would be
+   testing the version of this feature that cannot hurt anyone.
+
+   ⚠️ The walk itself now lives in `./addVenue`, shared with the other suites.
+   Four private copies of it drifted apart, and a flow change then broke them
+   one file at a time in four different ways.
    ========================================================================= */
 
-const next = (user) => user.click(screen.getByRole('button', { name: /^next$/i }))
-
-const chooseFirst = async (user, name) => {
-  const select = screen.getByRole('combobox', { name })
-  const option = [...select.options].find((o) => o.value)
-  if (option) await user.selectOptions(select, option.value)
-}
-
-async function walkToReview(user, name = 'Nomsa’s Shisanyama') {
-  await user.type(await screen.findByRole('textbox', { name: /^mood$/i }), 'Chilled')
-  await user.click(screen.getByRole('button', { name: /add \+|^add$/i }))
-  await next(user)
-
-  await user.type(await screen.findByRole('textbox', { name: /venue name/i }), name)
-  await user.type(screen.getByRole('textbox', { name: /manager name/i }), 'Nomsa')
-  await user.type(screen.getByRole('textbox', { name: /manager surname/i }), 'Dlamini')
-  await user.type(screen.getByRole('textbox', { name: /contact number/i }), '+27 82 111 2222')
-  await user.type(screen.getByRole('combobox', { name: /^address/i }), '4th Ave, Mamelodi')
-  await chooseFirst(user, /dress code/i)
-  await chooseFirst(user, /atmosphere/i)
-  /* Coordinates are set by picking an address now — the numeric fields are
-     gone, because a partner reads a street name rather than a decimal. */
-  await user.click(await screen.findByRole('button', { name: /Gauteng, South Africa/i }))
-  await waitFor(() => {
-    const node = document.querySelector('[data-field="latitude"]')
-    expect(node?.getAttribute('data-latitude')).toBeTruthy()
-  })
-
-  /* Photos are required as of 13 Aug — every walk through the wizard has to
-     add one. See venue-add.test.jsx for the requirement's own tests. */
-  const photo = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
-  await user.upload(screen.getByLabelText(/venue photos — choose files/i), photo)
-  await waitFor(() => expect(screen.getByText(/1 of 10/i)).toBeInTheDocument())
-
-  await next(user) // hours
-  await next(user) // menu
-  await next(user) // review
-  return name
-}
-
 describe('submitting a venue with something outstanding', () => {
-  it('warns on the review step, before Submit is pressed', async () => {
+  it('warns on the form, before anything is pressed', async () => {
     /* Being bounced off a finished form is a bad surprise however carefully the
        work is kept. Someone who is told first can accept and submit once. */
     seed(TERMS)
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
     await walkToReview(user)
 
-    expect(await screen.findByText(/one thing before you submit/i)).toBeInTheDocument()
+    expect(await screen.findByText(/one thing before you send this for review/i)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /read it now/i })).toBeInTheDocument()
   })
 
-  it('does not create the venue, and does not lose the five steps', async () => {
+  it('does not create the venue, and does not lose the whole form', async () => {
     /* THE WHOLE RISK OF GATING HERE, in one test. */
     seed(TERMS)
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
     const name = await walkToReview(user)
-    await user.click(screen.getByRole('button', { name: /^submit$/i }))
+    await user.click(await screen.findByRole('button', { name: /send for review/i }))
 
     expect(await screen.findByText(/standing between your venue and our reviewers/i)).toBeInTheDocument()
     expect(bench.venues.some((v) => v.venue_name === name)).toBe(false)
@@ -382,7 +347,7 @@ describe('submitting a venue with something outstanding', () => {
     seed(TERMS)
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
     await walkToReview(user)
-    await user.click(screen.getByRole('button', { name: /^submit$/i }))
+    await user.click(await screen.findByRole('button', { name: /send for review/i }))
 
     expect(await screen.findByText(/everything you filled in has been kept/i)).toBeInTheDocument()
     expect(screen.getByText(/won’t have to do any of it again/i)).toBeInTheDocument()
@@ -392,7 +357,7 @@ describe('submitting a venue with something outstanding', () => {
     seed({ ...TERMS, accepted: 1, accepted_on: '2026-08-07 10:15:00' })
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
     const name = await walkToReview(user)
-    await user.click(screen.getByRole('button', { name: /^submit$/i }))
+    await user.click(await screen.findByRole('button', { name: /send for review/i }))
 
     await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
   })
@@ -405,7 +370,7 @@ describe('submitting a venue with something outstanding', () => {
     bench.deploy.get_required_consents = false
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
     const name = await walkToReview(user)
-    await user.click(screen.getByRole('button', { name: /^submit$/i }))
+    await user.click(await screen.findByRole('button', { name: /send for review/i }))
 
     await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
   })

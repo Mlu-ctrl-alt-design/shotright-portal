@@ -250,10 +250,14 @@ describe('the round trip', () => {
 
     await user.click(screen.getByRole('link', { name: 'Corner Kitchen' }))
 
-    /* The details step, because that is where a photograph belongs. */
-    const name = await screen.findByLabelText(/venue name/i, {}, { timeout: 5000 })
+    /* Straight onto the form — a row that arrived in a spreadsheet has already
+       been imported, so offering the import screen again would invite the
+       partner to overwrite the values they just uploaded. */
+    const name = await screen.findByRole('textbox', { name: /venue name/i }, { timeout: 5000 })
     expect(name).toHaveValue('Corner Kitchen')
-    expect(screen.getByLabelText(/^address/i)).toHaveValue('12 Long St')
+    /* The address is behind the confirm row now, so it is read off the row
+       rather than out of an input — which is also what the partner sees. */
+    expect(screen.getByText('12 Long St')).toBeInTheDocument()
   })
 })
 
@@ -288,8 +292,111 @@ describe('end to end, from Excel to a draft the wizard opens', () => {
 
     await user.click(screen.getByRole('link', { name: 'Corner Kitchen' }))
 
-    const name = await screen.findByLabelText(/venue name/i, {}, { timeout: 5000 })
+    const name = await screen.findByRole('textbox', { name: /venue name/i }, { timeout: 5000 })
     expect(name).toHaveValue('Corner Kitchen')
-    expect(screen.getByLabelText(/^address/i)).toHaveValue('12 Long St')
+    expect(screen.getByText('12 Long St')).toBeInTheDocument()
+  })
+})
+
+/* ============================================================================
+   BULK IMPORT IS PRO — as of 17 Sep
+
+   Gated in TWO places, and the second one is the point: this route has its own
+   URL, is linked from the venues list, and is in partners' history. A paywall
+   with a hole in it is not a paywall — worse, it is one that punishes the
+   partners who followed the UI and rewards the ones who kept a bookmark.
+
+   The tests that matter here are the ones about NOT locking. A monetisation
+   feature that turns a bench outage into an apparent mass downgrade is a far
+   more expensive bug than a free upload.
+   ========================================================================= */
+describe('the Pro gate', () => {
+  const asFree = () => {
+    bench.deploy.get_entitlements = true
+    bench.entitlements = { plan: 'free', features: [] }
+  }
+
+  it('does not lock anybody when the bench has no paywall', async () => {
+    /* ⚠️ THE STATE EVERY PARTNER IS IN TODAY. `get_entitlements` shipped in
+       PR #44 but is not reachable over HTTP yet, and an unanswered question
+       must never read as "you have not paid". */
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await upload(user, csv(GOOD))
+
+    expect(await screen.findByText(/1 ready/i)).toBeInTheDocument()
+    expect(screen.queryByText(/this one’s on pro/i)).not.toBeInTheDocument()
+  })
+
+  it('locks the route for a free account', async () => {
+    asFree()
+    renderApp({ route: ROUTE, signedIn: true })
+
+    expect(await screen.findByText(/this one’s on pro/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/venue spreadsheet/i)).not.toBeInTheDocument()
+  })
+
+  it('leaves a way through that does not cost anything', async () => {
+    /* A paywall that leaves somebody with nowhere to go converts nobody and
+       loses the venue as well as the subscription. */
+    asFree()
+    renderApp({ route: ROUTE, signedIn: true })
+
+    const out = await screen.findByRole('link', { name: /add one venue instead/i })
+    expect(out.getAttribute('href')).toBe('/venues/new')
+  })
+
+  it('makes the case in a dialog rather than in the page', async () => {
+    /* The in-place lock is one line; the selling happens once somebody asks.
+       A permanent marketing block inside the product reads as an advert to
+       someone who came to do a job. */
+    asFree()
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /see what pro includes/i }))
+
+    const dialog = await screen.findByRole('dialog', { name: /stop typing your venues in/i })
+    expect(within(dialog).getByText('R149')).toBeInTheDocument()
+    expect(within(dialog).getByText(/per month/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/cancel any time/i)).toBeInTheDocument()
+  })
+
+  it('offers a plain way out of the dialog', async () => {
+    /* A modal whose only visible exit is a grey cross in a corner is a dark
+       pattern. This one closes four ways; here is the one with words on it. */
+    asFree()
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /see what pro includes/i }))
+    const dialog = await screen.findByRole('dialog', { name: /stop typing your venues in/i })
+    await user.click(within(dialog).getByRole('button', { name: /maybe later/i }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('does not pretend it can take money before there is a way to take it', async () => {
+    /* ⚠️ THERE IS NO PAYFAST ADAPTER YET. A button that looks like it charges
+       and silently does nothing is the worst outcome available: the partner
+       believes they have subscribed, finds the feature still locked, and now
+       distrusts both the paywall and the invoice they are waiting for. */
+    asFree()
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await user.click(await screen.findByRole('button', { name: /see what pro includes/i }))
+    const dialog = await screen.findByRole('dialog', { name: /stop typing your venues in/i })
+    await user.click(within(dialog).getByRole('button', { name: /^upgrade to pro$/i }))
+
+    expect(await screen.findByText(/pro isn’t on sale yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/nothing has been charged/i)).toBeInTheDocument()
+  })
+
+  it('unlocks for an account that has the entitlement', async () => {
+    bench.deploy.get_entitlements = true
+    bench.entitlements = { plan: 'pro', features: ['venue_import', 'bulk_import'] }
+    const { user } = renderApp({ route: ROUTE, signedIn: true })
+
+    await upload(user, csv(GOOD))
+
+    expect(await screen.findByText(/1 ready/i)).toBeInTheDocument()
   })
 })

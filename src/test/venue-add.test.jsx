@@ -2,139 +2,51 @@ import { describe, expect, it } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
+import {
+  NAME,
+  addPhoto,
+  completeVenue,
+  fillPage,
+  pickMood,
+  saveAndAddPhotos,
+  sendForReview,
+  setLocation,
+  skipImport,
+  walkToReview,
+} from './addVenue'
 
 /**
- * Adding a venue, through the five-step wizard.
+ * Adding a venue — import, one page, photos.
  *
- * Everything here is typed, selected and clicked. The assertions that matter
+ * ⚠️ REWRITTEN 17 Sep. This suite used to walk five steps and press Next four
+ * times. The flow it drove is gone; what it was PROTECTING is not, and every
+ * assertion below is the same claim made against the new shape:
+ *
+ *   - a venue reaches the server with what was typed into it
+ *   - the client never chooses its own approval state
+ *   - a venue with no name, no pin or no mood does not get through
+ *   - work is not lost when something fails
+ *
+ * Everything here is typed, clicked and uploaded. The assertions that matter
  * are about what reached the SERVER — `bench.venues` after the fact — because a
- * wizard that collects five steps of information and posts four of them is
- * exactly the bug a render test cannot see.
+ * form that collects a whole venue and posts three quarters of it is exactly
+ * the bug a render test cannot see.
  *
- * TWO THINGS THIS SUITE LEARNED BY DRIVING THE REAL UI, both of which an
- * assumption-based test would have got wrong:
+ * THREE THINGS THIS SUITE LEARNED BY DRIVING THE REAL UI:
  *
- *  1. Step one is **moods**, not venue details. Sho't Right is a mood-search
- *     product, so it asks for the vibe before the paperwork.
- *  2. The details step will not let you past without a location. That is right
- *     — a venue with no pin is found by nobody — and it means every test that
- *     wants to reach the end has to set one.
- *
- * Queries are by ROLE throughout. These inputs carry a visible <label> and an
- * aria-label with the same words, so a text lookup matches the same field twice
- * and RTL treats that as an error.
+ *  1. The first screen is IMPORT, not the form, whenever the bench can serve a
+ *     route — and the default fake bench deploys `search_places`, so it does.
+ *  2. The form will not be left without a location. A venue with no pin is
+ *     found by nobody, so every walk that wants to finish has to set one.
+ *  3. Moods are CHIPS off the canonical list now, not a text field. A mood the
+ *     bench does not have cannot be typed in, which is the point.
  */
-
-const NAME = 'Nomsa’s Shisanyama'
-
-const next = (user) => user.click(screen.getByRole('button', { name: /^next$/i }))
-
-const chooseFirst = async (user, name) => {
-  const select = screen.getByRole('combobox', { name })
-  const option = [...select.options].find((o) => o.value)
-  if (option) await user.selectOptions(select, option.value)
-  return option?.value
-}
-
-/**
- * Choose the first address suggestion, which sets the address AND its point.
- *
- * The combobox is the ARIA pattern, so the suggestion is an `option` — clicking
- * it is what a partner does and it is the only remaining keyboard-reachable way
- * to place a first pin.
- */
-async function pickAddress(user) {
-  /* The option is an <li role="option"> wrapping the real <button>. Clicking
-     the li does nothing — the handler is on the button, which is also what a
-     partner's pointer and a keyboard both land on. */
-  await user.click(await screen.findByRole('button', { name: /Gauteng, South Africa/i }))
-  /* Wait for the POINT, not for the map's heading — that heading renders with
-     or without a location, so waiting on it waits for nothing. The coordinate
-     is on the map wrapper, which is the only place it is exposed now that the
-     numeric fields are gone. Without this the next step validates a venue that
-     has an address and no location, which is the exact silent-invisibility
-     failure the map warns about. */
-  await waitFor(() => {
-    const node = document.querySelector('[data-field="latitude"]')
-    expect(node?.getAttribute('data-latitude')).toBeTruthy()
-  })
-}
-
-/**
- * Upload one photo.
- *
- * ⚠️ PHOTOS ARE REQUIRED as of 13 Aug — a venue with no picture is a name and
- * an address, and this is a product people choose with their eyes. Every walk
- * through this wizard has to add one now, which is why this helper exists
- * rather than each test doing it.
- *
- * The requirement is CONDITIONAL on the bench accepting uploads (see
- * `validateDetails`), and the fake bench accepts them by default — so the
- * happy path here is the enforced path. The unenforced path has its own test.
- */
-async function addPhoto(user) {
-  const file = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
-  await user.upload(screen.getByLabelText(/venue photos — choose files/i), file)
-  // Wait for the upload to land, not just for the input to accept the file:
-  // the counter only moves once the server has answered.
-  await waitFor(() => expect(screen.getByText(/1 of 10/i)).toBeInTheDocument())
-}
-
-/** Step 1 — the vibe. */
-async function pickMood(user, mood = 'Chilled') {
-  await user.type(await screen.findByRole('textbox', { name: /^mood$/i }), mood)
-  await user.click(screen.getByRole('button', { name: /add \+|^add$/i }))
-}
-
-/** Step 2 — the paperwork. `coords: false` deliberately leaves the pin unset. */
-async function fillDetails(user, { name = NAME, coords = true, photo = true } = {}) {
-  await user.type(await screen.findByRole('textbox', { name: /venue name/i }), name)
-  await user.type(screen.getByRole('textbox', { name: /manager name/i }), 'Nomsa')
-  await user.type(screen.getByRole('textbox', { name: /manager surname/i }), 'Dlamini')
-  await user.type(screen.getByRole('textbox', { name: /contact number/i }), '+27 82 111 2222')
-  await user.type(screen.getByRole('combobox', { name: /^address/i }), '4th Ave, Mamelodi')
-  await chooseFirst(user, /dress code/i)
-  await chooseFirst(user, /atmosphere/i)
-
-  if (coords) {
-    /**
-     * ⚠️ THE COORDINATES ARE NO LONGER TYPED. Changed 13 Aug.
-     *
-     * There used to be latitude and longitude inputs and this filled them in
-     * directly. They are gone — a partner reads a street name, not
-     * `-25.706900` — so the only ways to set a point are picking an address,
-     * clicking the map, or geolocation.
-     *
-     * Picking the suggestion is what a partner actually does, which makes this
-     * a better test than it was: it exercises the address→coordinates handoff
-     * that the old version skipped entirely by writing the numbers by hand.
-     */
-    await pickAddress(user)
-  }
-  if (photo) await addPhoto(user)
-  return name
-}
-
-/** Mood → details → hours → menu → review. Leaves the partner on Submit. */
-async function walkToReview(user, opts) {
-  await pickMood(user)
-  await next(user)
-  const name = await fillDetails(user, opts)
-  await next(user) // hours (pre-filled with sensible defaults)
-  await next(user) // menu (optional)
-  await next(user) // review
-  return name
-}
-
-const submit = async (user) =>
-  user.click(await screen.findByRole('button', { name: /^submit$/i }))
 
 describe('add a venue', () => {
-  it('walks the whole wizard and creates the venue on the server', async () => {
+  it('walks the whole flow and creates the venue on the server', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    const name = await walkToReview(user)
-    await submit(user)
+    const name = await completeVenue(user)
 
     await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
   })
@@ -145,8 +57,7 @@ describe('add a venue', () => {
        venue is the one real security hole on this API surface. */
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await walkToReview(user)
-    await submit(user)
+    await completeVenue(user)
 
     await waitFor(() => expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(true))
     expect(bench.calls.find((c) => c.method === 'create_venue').args).not.toHaveProperty(
@@ -155,15 +66,30 @@ describe('add a venue', () => {
     expect(bench.venues.find((v) => v.venue_name === NAME).workflow_state).toBe('Pending')
   })
 
-  it('will not move past the details step without a venue name', async () => {
+  it('says plainly that the manager and phone number had nowhere to go', async () => {
+    /* ⚠️ THE FORM REQUIRES BOTH AND THE BACKEND STORES NEITHER.
+       `create_venue` declares no field for a manager or a contact number, so
+       they are dropped — and the redesign made both REQUIRED, which makes
+       saying so more important rather than less. A form that demands a phone
+       number and silently bins it is the worst of both. */
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
-    await screen.findByRole('textbox', { name: /venue name/i })
-    await next(user)
+    await completeVenue(user)
 
-    // Still there, and told why rather than silently refusing to advance.
+    expect(
+      await screen.findByText(/manager details and contact number were not saved/i),
+    ).toBeInTheDocument()
+  })
+
+  it('will not save without a venue name', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await setLocation(user)
+    await pickMood(user)
+    await saveAndAddPhotos(user)
+
+    // Still on the form, and told why rather than silently refusing to move.
     expect(screen.getByRole('textbox', { name: /venue name/i })).toBeInTheDocument()
     expect((await screen.findAllByRole('alert')).length).toBeGreaterThan(0)
   })
@@ -173,42 +99,59 @@ describe('add a venue', () => {
        is on it. Being stopped here beats being approved and invisible. */
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
-    await fillDetails(user, { coords: false })
-    await next(user)
+    await skipImport(user)
+    await fillPage(user, { coords: false })
+    await saveAndAddPhotos(user)
 
     expect(screen.getByRole('textbox', { name: /venue name/i })).toBeInTheDocument()
     expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(false)
   })
 
-  it('keeps what was typed when stepping backwards and forwards', async () => {
-    /* Losing a step's input on Back is the wizard bug nobody reports — they
-       just start again, and then they don't. */
+  it('will not submit a venue with no description', async () => {
+    /* ⚠️ THIS IS THE BACKEND'S RULE, NOT OURS. `submit_venue_for_review`
+       refuses a venue with an empty description outright. The old wizard
+       satisfied it by accident through an atmosphere dropdown; the redesign
+       replaced that with mood chips, so without this the default path finishes
+       a whole venue and is then declined for a field the form called optional. */
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
-    const name = await fillDetails(user)
-    await next(user)
-    await user.click(screen.getByRole('button', { name: /back|previous/i }))
+    await skipImport(user)
+    await fillPage(user, { words: false })
+    await saveAndAddPhotos(user)
+
+    expect(screen.getByRole('textbox', { name: /venue name/i })).toBeInTheDocument()
+    expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(false)
+  })
+
+  it('will not submit a venue with no mood', async () => {
+    /* Sho't Right finds venues BY MOOD. One with none cannot be found by
+       anybody, so it is not a listing, it is a row in a table. */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await fillPage(user, { mood: false })
+    await saveAndAddPhotos(user)
+
+    expect(screen.getByRole('textbox', { name: /venue name/i })).toBeInTheDocument()
+    expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(false)
+  })
+
+  it('keeps what was typed when going back from the photos', async () => {
+    /* Losing the form on Back is the bug nobody reports — they just start
+       again, and then they don't. */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    const name = await walkToReview(user, { photo: false })
+    await user.click(screen.getByRole('button', { name: /back to details/i }))
 
     expect(await screen.findByRole('textbox', { name: /venue name/i })).toHaveValue(name)
-    /* The CANONICAL address, not the typed fragment. Picking a suggestion
-       replaces what you typed with the address the geocoder recognises — which
-       is the address the pin belongs to, and the one a customer will be
-       navigating to. Asserting the fragment would be asserting that we ignored
-       the thing the partner picked. */
-    expect(screen.getByRole('combobox', { name: /^address/i })).toHaveValue(
-      '4th Ave, Mamelodi, Gauteng, South Africa',
-    )
+    expect(screen.getByRole('textbox', { name: /^manager$/i })).toHaveValue('Nomsa Dlamini')
   })
 
   it('sends the moods the partner actually chose', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await walkToReview(user)
-    await submit(user)
+    await completeVenue(user)
 
     await waitFor(() => expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(true))
     expect(bench.venues.find((v) => v.venue_name === NAME).moods.length).toBeGreaterThan(0)
@@ -217,8 +160,7 @@ describe('add a venue', () => {
   it('shows the new venue in the list afterwards', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    const name = await walkToReview(user)
-    await submit(user)
+    const name = await completeVenue(user)
 
     // The point of the whole flow: it is there when they go looking.
     expect(await screen.findByText(name, {}, { timeout: 6000 })).toBeInTheDocument()
@@ -228,11 +170,10 @@ describe('add a venue', () => {
     bench.deploy.create_venue = false
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    const name = await walkToReview(user)
-    await submit(user)
+    const name = await completeVenue(user)
 
     expect((await screen.findAllByRole('alert')).length).toBeGreaterThan(0)
-    // Everything they entered is still on screen — no silent reset to step one.
+    // Their venue's name is still on screen — no silent reset to an empty form.
     expect(
       screen.getByText(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))),
     ).toBeInTheDocument()
@@ -243,8 +184,7 @@ describe('set a venue location', () => {
   it('sends the coordinates that were entered', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await walkToReview(user)
-    await submit(user)
+    await completeVenue(user)
 
     await waitFor(() => expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(true))
     const created = bench.venues.find((v) => v.venue_name === NAME)
@@ -258,8 +198,7 @@ describe('set a venue location', () => {
        nothing in the UI would ever show that. */
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await walkToReview(user)
-    await submit(user)
+    await completeVenue(user)
 
     await waitFor(() => expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(true))
     const call = bench.calls.find((c) => c.method === 'create_venue')
@@ -267,23 +206,43 @@ describe('set a venue location', () => {
     expect(typeof call.args.longitude).toBe('number')
   })
 
-  it('keeps the pin when the partner steps away and comes back', async () => {
+  it('keeps the pin when the partner goes to the photos and back', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
-    await fillDetails(user)
-    await next(user)
-    await user.click(screen.getByRole('button', { name: /back|previous/i }))
+    await walkToReview(user, { photo: false })
+    await user.click(screen.getByRole('button', { name: /back to details/i }))
 
-    /* The pin survives, read off the map wrapper rather than a coordinate
-       field — those are gone. What is being protected is unchanged: stepping
-       away and back must not quietly drop the one value that decides whether
-       customers can find this venue. */
+    /* What is being protected is unchanged: moving between screens must not
+       quietly drop the one value that decides whether customers find this
+       venue. */
     await waitFor(() => {
       const node = document.querySelector('[data-field="latitude"]')
       expect(node?.getAttribute('data-latitude')).toBe('-25.7069')
     })
+  })
+
+  it('keeps the map out of the way until somebody asks for it', async () => {
+    /* The map was the tallest thing on the old step and most partners never
+       touched it. Collapsed to a confirm row is most of why this page fits. */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+
+    expect(screen.queryByRole('combobox', { name: /^address/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /add address/i }))
+    expect(await screen.findByRole('combobox', { name: /^address/i })).toBeInTheDocument()
+  })
+
+  it('opens the map by itself when the thing it is blocking on is in there', async () => {
+    /* Scrolling somebody to a collapsed row and telling them to fix a field
+       they cannot see is worse than not scrolling at all. */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await fillPage(user, { coords: false })
+    await saveAndAddPhotos(user)
+
+    expect(await screen.findByRole('combobox', { name: /^address/i })).toBeInTheDocument()
   })
 })
 
@@ -294,27 +253,26 @@ describe('set a venue location', () => {
    nature." Agreed, and a venue with no picture competes badly in a product
    people choose with their eyes.
 
-   But the uploader was returning 403 in production on the day this was asked
-   (§19.b), and an unconditional requirement on a broken uploader does not
-   produce venues with photos — it produces NO VENUES AT ALL, because the
-   wizard refuses to advance and the partner has no way to make it advance.
-   So the rule is enforced only where it can be satisfied, which is the same
-   rule the legal gate follows.
+   But the uploader was returning 403 in production on the day this was asked,
+   and an unconditional requirement on a broken uploader does not produce
+   venues with photos — it produces NO VENUES AT ALL, because the flow refuses
+   to submit and the partner has no way to make it submit. So the rule is
+   enforced only where it can be satisfied, which is the same rule the legal
+   gate follows.
+
+   ⚠️ IT IS ENFORCED ON THE PHOTO SCREEN NOW, not inside the form. Photographs
+   moved out on 17 Sep — better taken standing in the room than remembered at a
+   desk — so the gate moved with them.
    ========================================================================= */
 describe('at least one photo', () => {
-  it('will not leave the details step without one', async () => {
+  it('will not send for review without one', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
-    await fillDetails(user, { photo: false })
-    await next(user)
+    await walkToReview(user, { photo: false })
+    await sendForReview(user)
 
-    /* Shown twice on purpose — inline on the uploader and in the gate banner,
-       the same pattern every other required field uses. */
     expect((await screen.findAllByText(/add at least one photo/i)).length).toBeGreaterThan(0)
-    // Still on details — the step did not advance.
-    expect(screen.getByRole('textbox', { name: /venue name/i })).toBeInTheDocument()
+    expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(false)
   })
 
   it('says why, in terms of what it costs the partner', async () => {
@@ -323,10 +281,8 @@ describe('at least one photo', () => {
        want to. */
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
-    await fillDetails(user, { photo: false })
-    await next(user)
+    await walkToReview(user, { photo: false })
+    await sendForReview(user)
 
     expect(
       (await screen.findAllByText(/people choose where to go by looking/i)).length,
@@ -337,8 +293,7 @@ describe('at least one photo', () => {
     /* A rule you only discover by hitting it is indistinguishable from a bug. */
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
+    await walkToReview(user, { photo: false })
 
     const heading = await screen.findByRole('heading', { name: /venue photos/i })
     expect(heading).toHaveTextContent(/required/i)
@@ -347,14 +302,13 @@ describe('at least one photo', () => {
   it('lets the venue through once a photo is added', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    const name = await walkToReview(user)
-    await submit(user)
+    const name = await completeVenue(user)
 
     await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
   })
 
   it('does NOT require one when the bench refuses uploads', async () => {
-    /* THE ASSERTION THIS WHOLE CHANGE HANGS ON.
+    /* THE ASSERTION THIS WHOLE RULE HANGS ON.
 
        On 13 Aug `upload_file` was returning 403 for every partner. Enforcing
        the requirement in that state would have stopped anybody listing a venue
@@ -363,9 +317,7 @@ describe('at least one photo', () => {
     bench.uploadRefused = 'always'
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
-    await fillDetails(user, { photo: false })
+    const name = await walkToReview(user, { photo: false })
 
     /* The partner TRIES, and is refused. That refusal is the signal — the read
        probe cannot tell us this, because reading photos and uploading them are
@@ -374,12 +326,10 @@ describe('at least one photo', () => {
     await user.upload(screen.getByLabelText(/venue photos — choose files/i), file)
     await screen.findByText(/the app isn’t allowed to/i)
 
-    await next(user)
+    await sendForReview(user)
 
-    // Advanced — not trapped behind a control that cannot succeed.
-    await waitFor(() =>
-      expect(screen.queryByRole('textbox', { name: /venue name/i })).not.toBeInTheDocument(),
-    )
+    // It went through — not trapped behind a control that cannot succeed.
+    await waitFor(() => expect(bench.venues.some((v) => v.venue_name === name)).toBe(true))
   })
 
   it('does not mark the uploader required when uploads are refused', async () => {
@@ -388,8 +338,7 @@ describe('at least one photo', () => {
     bench.uploadRefused = 'always'
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await pickMood(user)
-    await next(user)
+    await walkToReview(user, { photo: false })
 
     const file = new File(['png-bytes'], 'venue.png', { type: 'image/png' })
     await user.upload(await screen.findByLabelText(/venue photos — choose files/i), file)
@@ -405,33 +354,30 @@ describe('at least one photo', () => {
 
 /* ============================================================================
    THE SUBMISSION STEP — creation stopped meaning submission on the bench
-   (22 Aug gate, live 23 Aug). The wizard now calls submit_venue_for_review
-   after everything is saved, and the success screen only claims "sent to our
-   team" when that is what happened. These pin all three outcomes.
+   (22 Aug gate, live 23 Aug). The flow calls submit_venue_for_review after
+   everything is saved, and the success screen only claims "sent to our team"
+   when that is what happened. These pin all three outcomes.
    ========================================================================= */
 describe('submitting for review', () => {
   it('queues the finished venue and says so truthfully', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    const name = await walkToReview(user)
-    await submit(user)
+    const name = await completeVenue(user)
 
     await screen.findByText(/sent to our team for review/i)
-    const call = bench.calls.find((c) => c.method === 'submit_venue_for_review')
-    expect(call).toBeTruthy()
+    expect(bench.calls.find((c) => c.method === 'submit_venue_for_review')).toBeTruthy()
     expect(bench.venues.find((v) => v.venue_name === name).workflow_state).toBe('Pending')
   })
 
   it('shows every reason when the rules refuse the listing, and offers the way forward', async () => {
     /* Photos saved pre-venue can fail to attach (the endpoint may be behind);
-       the completeness rules then refuse the listing. The partner must see
-       ALL the reasons and where to go — never "sent for review" over a venue
-       that is actually Declined. */
+       the completeness rules then refuse the listing. The partner must see ALL
+       the reasons and where to go — never "sent for review" over a venue that
+       is actually Declined. */
     bench.deploy.set_venue_photos = false
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    const name = await walkToReview(user)
-    await submit(user)
+    const name = await completeVenue(user)
 
     await screen.findByText(/not ready for review yet/i)
     expect(screen.getByText(/at least one photograph/i)).toBeInTheDocument()
@@ -444,12 +390,153 @@ describe('submitting for review', () => {
     bench.deploy.submit_venue_for_review = false
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    const name = await walkToReview(user)
-    await submit(user)
+    const name = await completeVenue(user)
 
     await screen.findByText(/couldn’t send it to our team/i)
     expect(screen.queryByText(/sent to our team for review/i)).toBeNull()
     // The venue exists and is safe — in Draft, where My venues can submit it.
     expect(bench.venues.find((v) => v.venue_name === name).workflow_state).toBe('Draft')
+  })
+})
+
+/* ============================================================================
+   THE PROGRESS RAIL — the thing the redesign was actually for
+
+   "Not knowing how much is left" was one of the four pain points behind this
+   rewrite. The rail answers it, and it is only worth anything if it is honest:
+   it must count FINISHED sections, never the one being worked on, and it must
+   agree with the gate. A full bar over a blocked button is worse than no bar.
+   ========================================================================= */
+describe('the progress rail', () => {
+  it('starts partly done, because the hours already have sensible defaults', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+
+    expect((await screen.findAllByText(/1 of 6 done/i)).length).toBeGreaterThan(0)
+  })
+
+  it('ticks as each section is finished', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await fillPage(user)
+
+    /* Five of six: basics, where, vibe, hours, description. Only the photos
+       are outstanding, and they are deliberately NOT counted until one is
+       actually uploaded — counting work nobody has done is the small lie that
+       makes a progress bar worthless. */
+    await waitFor(() =>
+      expect(screen.getAllByText(/5 of 6 done/i).length).toBeGreaterThan(0),
+    )
+  })
+
+  it('counts the photo once it is there', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await walkToReview(user)
+    await user.click(screen.getByRole('button', { name: /back to details/i }))
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/6 of 6 done/i).length).toBeGreaterThan(0),
+    )
+  })
+})
+
+/* ============================================================================
+   THE GUIDED DESCRIPTION
+
+   The blank rich-text box was the most abandoned control in the old wizard —
+   it asked someone to be a copywriter at the end of a form. Three short
+   questions get a usable paragraph out of people who would have left it empty,
+   and they see what we made of their answers before it is saved.
+   ========================================================================= */
+describe('describing the venue', () => {
+  it('assembles the answers into the paragraph and shows it back first', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await user.type(screen.getByLabelText(/known for\?/i), 'slow-cooked lamb')
+
+    expect(await screen.findByText(/what customers will read/i)).toBeInTheDocument()
+    expect(screen.getByText(/Known for slow-cooked lamb\./i)).toBeInTheDocument()
+  })
+
+  it('sends the assembled paragraph as the venue description', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await fillPage(user, { words: false })
+    await user.type(screen.getByLabelText(/known for\?/i), 'slow-cooked lamb')
+    await saveAndAddPhotos(user)
+    await addPhoto(user)
+    await sendForReview(user)
+
+    await waitFor(() => expect(bench.calls.some((c) => c.method === 'create_venue')).toBe(true))
+    expect(bench.calls.find((c) => c.method === 'create_venue').args.atmosphere_desc).toMatch(
+      /Known for slow-cooked lamb\./i,
+    )
+  })
+
+  it('does not repeat the phrase back when they answer in a full sentence', async () => {
+    /* People answer "Known for?" with "we are known for our ribs". Pasting that
+       in verbatim produces "Known for we are known for our ribs." */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await user.type(screen.getByLabelText(/known for\?/i), 'we are known for our ribs')
+
+    expect(await screen.findByText(/^Known for our ribs\.$/i)).toBeInTheDocument()
+  })
+})
+
+/* ============================================================================
+   SUGGESTING A VIBE WE DO NOT HAVE
+
+   The design shows chips only, which is right for almost everybody — partners
+   could not guess a vocabulary nobody had shown them. But the old mood step
+   let someone type a vibe of their own and have it filed for review, and a
+   venue whose whole character is a word we do not stock still has to be able
+   to say so. Deleting a shipped feature because a prototype did not draw it is
+   an accident, not a design decision — so it is kept, behind one line, closed.
+   ========================================================================= */
+describe('suggesting a vibe', () => {
+  it('stays out of the way until somebody needs it', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+
+    expect(screen.queryByRole('textbox', { name: /suggest a vibe/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /nothing fits\? suggest a vibe/i })).toBeInTheDocument()
+  })
+
+  it('files a new one and puts it on the venue', async () => {
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await user.click(screen.getByRole('button', { name: /nothing fits\? suggest a vibe/i }))
+    await user.type(await screen.findByRole('textbox', { name: /suggest a vibe/i }), 'Shisanyama')
+    await user.click(screen.getByRole('button', { name: /^add$/i }))
+
+    /* It has to be VISIBLE and removable. A vibe they added, cannot see and
+       cannot take off again would still be sent at save. */
+    const chip = await screen.findByRole('button', { name: /Shisanyama/i })
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    expect(chip).toHaveTextContent(/pending/i)
+    expect(bench.calls.some((c) => c.method === 'resolve_mood')).toBe(true)
+  })
+
+  it('refuses one the bench could not file, rather than dropping it at save', async () => {
+    /* `create_venue` rejects moods it does not know, so accepting an unmatched
+       one here would fail the save later — after the partner had finished. */
+    bench.deploy.resolve_mood = false
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await user.click(screen.getByRole('button', { name: /nothing fits\? suggest a vibe/i }))
+    await user.type(await screen.findByRole('textbox', { name: /suggest a vibe/i }), 'Masepa')
+    await user.click(screen.getByRole('button', { name: /^add$/i }))
+
+    expect(await screen.findByText(/doesn’t have “Masepa” yet/i)).toBeInTheDocument()
   })
 })

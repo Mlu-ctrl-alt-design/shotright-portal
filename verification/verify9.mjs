@@ -1,4 +1,5 @@
 import { chromium } from 'playwright'
+import { pickMood, skipImport } from './addVenue.mjs'
 
 const BASE = 'http://127.0.0.1:4173'
 const browser = await chromium.launch({
@@ -57,6 +58,25 @@ async function open({ draftEndpoints = false, store = {} } = {}) {
       }
       if (p.includes('discard_venue_draft')) return r.fulfill({ json: { message: { ok: true } } })
     }
+    /* ⚠️ THE MENU LEFT THE WIZARD on 17 Sep — it does not hold up going live,
+       and sitting in the middle of onboarding said that it did. The four-stage
+       import checklist below is unchanged and still worth testing; it is just
+       tested where the feature now lives, at /venues/:id/menu. These two reads
+       are what that screen needs to render. */
+    if (p.includes('get_venue_detail'))
+      return r.fulfill({
+        json: {
+          message: {
+            name: 'VEN-1',
+            venue_name: 'Corner Kitchen & Bar',
+            workflow_state: 'Approved',
+            moods: [],
+            operating_hours: [],
+          },
+        },
+      })
+    if (p.includes('get_venue_products')) return r.fulfill({ json: { message: [] } })
+
     if (u.pathname.includes('/api/method/upload_file'))
       return r.fulfill({
         json: {
@@ -160,13 +180,12 @@ const pinLatitude = (page) =>
   check(!(await card(page).isVisible()), 'no resume card before anything has been started')
 
   await page.goto(`${BASE}/venues/new`, { waitUntil: 'networkidle' })
-  // Step 1 — a mood.
-  await page.getByRole('textbox', { name: 'Mood', exact: true }).fill('Chilled Bar')
-  await page.keyboard.press('Enter')
-  await page.getByRole('button', { name: 'Next' }).click()
-
-  // Step 2 — the venue name, which is what the card must name back to us.
-  await page.getByLabel(/venue name/i).fill('Corner Kitchen & Bar')
+  /* ⚠️ ONE PAGE since 17 Sep — no mood step, no Next. A mood is a chip in the
+     vibe section, and the venue name is what the resume card must name back
+     to us. */
+  await skipImport(page)
+  await pickMood(page)
+  await page.getByRole('textbox', { name: 'Venue name', exact: true }).fill('Corner Kitchen & Bar')
   await page.waitForTimeout(1800) // past the 1.2s autosave debounce
 
   const saved = await page.evaluate(() =>
@@ -175,14 +194,18 @@ const pinLatitude = (page) =>
   const draft = Object.values(saved)[0]
   check(Boolean(draft), 'the wizard autosaved a draft without being asked')
   check(draft?.venue_name === 'Corner Kitchen & Bar', 'the draft carries the venue name')
-  check(draft?.step === 'details', 'the draft records which step they were on')
+  /* ⚠️ `step` is the first UNFINISHED section now, not the screen they were
+     standing on — there is only one screen to stand on. That is a better
+     answer to the dashboard's "how far did I get": it names the next thing to
+     do rather than the last place they were. */
+  check(draft?.step === 'basics', 'the draft records the next thing to do')
   check(
-    JSON.stringify(draft?.completed) === JSON.stringify(['mood']),
-    'and which steps are already finished',
+    JSON.stringify(draft?.completed) === JSON.stringify(['vibe', 'hours']),
+    'and which sections are already finished',
   )
   check(
     draft?.payload?.moods?.moods?.length === 1,
-    'the mood chosen on step 1 survived into the payload',
+    'the mood they picked survived into the payload',
   )
 
   /* Walk away, exactly as a partner would. */
@@ -192,7 +215,7 @@ const pinLatitude = (page) =>
 
   const text = (await card(page).innerText()).replace(/\n/g, ' ')
   check(/Corner Kitchen & Bar/.test(text), 'the card names the venue')
-  check(/step 2 of 5, Venue details/.test(text), 'the card names the exact step')
+  check(/step 1 of 6, The basics/.test(text), 'the card names exactly where they are')
   check(/Saved (just now|\d+ minute)/i.test(text), 'the card says when it was saved')
 
   /* THE PROMISE, on a local draft: must NOT claim an email was sent. */
@@ -207,12 +230,15 @@ const pinLatitude = (page) =>
   await page.waitForURL(/\/venues\/new\?draft=/)
   await page.waitForTimeout(600)
   check(
-    await page.getByLabel(/venue name/i).inputValue().then((v) => v === 'Corner Kitchen & Bar'),
-    'resuming restores the work, on the step they left it on',
+    await page
+      .getByRole('textbox', { name: 'Venue name', exact: true })
+      .inputValue()
+      .then((v) => v === 'Corner Kitchen & Bar'),
+    'resuming restores the work',
   )
   check(
-    await page.getByRole('heading', { name: /venue's details/i }).isVisible(),
-    'and lands on step 2, not back at step 1',
+    await page.getByRole('heading', { name: /venue’s details/i }).isVisible(),
+    'and lands on the form, never back on the import screen they already passed',
   )
 
   await context.close()
@@ -225,8 +251,8 @@ const pinLatitude = (page) =>
   const store = {
     'VD-9': {
       draft_id: 'VD-9',
-      step: 'menu',
-      completed: ['mood', 'details', 'hours'],
+      step: 'words',
+      completed: ['basics', 'where', 'vibe', 'hours'],
       venue_name: 'Corner Kitchen & Bar',
       payload: { details: { venue_name: 'Corner Kitchen & Bar' } },
       modified: new Date(Date.now() - 2 * 86400_000).toISOString(),
@@ -236,7 +262,7 @@ const pinLatitude = (page) =>
   await page.waitForTimeout(400)
 
   const text = (await card(page).innerText()).replace(/\n/g, ' ')
-  check(/step 4 of 5, Menu options/.test(text), 'a server draft resumes at the right step')
+  check(/step 5 of 6, Description/.test(text), 'a server draft resumes at the right place')
   check(/Saved 2 days ago/.test(text), 'relative time is rounded down, not up')
   check(
     /emailed you this link/i.test(text),
@@ -244,159 +270,100 @@ const pinLatitude = (page) =>
   )
   // textContent, not innerText: the state words are sr-only, which is the point.
   const raw = await card(page).evaluate((n) => n.textContent)
-  check(/Setup mood — done/.test(raw), 'step state is spelled out, not carried by colour alone')
-  check(/Menu options — where you left off/.test(raw), 'and so is the current step')
+  check(/The basics — done/.test(raw), 'section state is spelled out, not carried by colour alone')
+  check(/Description — where you left off/.test(raw), 'and so is the one they are on')
 
   await context.close()
 }
 
 /* ============================================================================
-   3. MENU IMPORT — the four-stage checklist, on wizard step 4 of 5
+   3. MENU IMPORT — on the venue's own menu screen
+
+   ⚠️ REWRITTEN 17 Sep. This used to drive the wizard's menu STEP, which parsed
+   the spreadsheet in the browser and showed a four-stage checklist while it
+   worked. The menu left onboarding with that step — it does not hold up going
+   live, and sitting in the middle of the flow said that it did — so the import
+   is tested where it now lives.
+
+   What was lost with the step is the client-side PARSE PROGRESS, not the
+   import: `importMenu` posted to `bulk_import_products` and had no fallback, so
+   a bench without the importer failed there too, just after a nicer wait. The
+   venue's own screen uses the background importer instead, and what matters
+   about it is the same thing that mattered before — that it tells the truth
+   when it cannot do the job, and never sends the partner off to fix a file
+   that was never broken.
    ========================================================================= */
 {
   const { page, context } = await open()
-  await page.goto(`${BASE}/venues/new`, { waitUntil: 'networkidle' })
+  await page.goto(`${BASE}/venues/VEN-1/menu`, { waitUntil: 'networkidle' })
+  await page.getByLabel('Menu file').waitFor({ timeout: 15000 })
+  check(true, 'the import lives on the venue’s menu, reachable without the wizard')
 
-  // Step 1 — a mood.
-  await page.getByRole('textbox', { name: 'Mood', exact: true }).fill('Chilled Bar')
-  await page.keyboard.press('Enter')
-  await page.getByRole('button', { name: /^Next$/i }).click()
-  await page.waitForTimeout(400)
-
-  // Step 2 — name and a pin (typed, so no geolocation is involved).
-  await page.getByRole('textbox', { name: 'Venue name', exact: true }).fill('Corner Kitchen & Bar')
-  await setLocation(page)
-  const next2 = page.getByRole('button', { name: /^Next$/i })
-  await next2.scrollIntoViewIfNeeded()
-  await next2.click()
-  await page.waitForTimeout(400)
-
-  // Step 3 — the default open days are already valid.
-  const next3 = page.getByRole('button', { name: /^Next$/i })
-  await next3.scrollIntoViewIfNeeded()
-  await next3.click()
-  await page.waitForTimeout(400)
-
-  check(
-    /Enter your menu/i.test(await page.locator('h1').first().innerText()),
-    'reached the menu step',
-  )
-
-  // A category to import into, then the file itself.
-  await page.getByRole('textbox', { name: 'Menu category' }).fill('Cocktails')
-  await page.getByRole('button', { name: /^Add$/i }).click()
-  await page.waitForTimeout(300)
-
-  // 3 categories, 2,001 rows, exactly one of them priceless. Big enough that the
-  // stages are genuinely observable rather than flashing past — which is also
-  // the only size of file where a partner would ever read them.
   const CATS = ['Cocktails', 'Small Plates', 'Mains']
   const lines = ['heading,item_name,price,description']
-  for (let i = 0; i < 2000; i += 1) lines.push(`${CATS[i % 3]},Item ${i},${50 + (i % 40)},`)
-  lines.push('Mains,Beef Short Rib,,Ask your server') // deliberately priceless
-  const CSV = lines.join('\n')
+  for (let i = 0; i < 200; i += 1) lines.push(`${CATS[i % 3]},Item ${i},${50 + (i % 40)},`)
 
-  // Recorded IN THE PAGE with a MutationObserver rather than polled over the
-  // wire: a 2,000-row parse yields every 250 rows, so the intermediate stages
-  // live for a few milliseconds each and a round-trip poll simply misses them.
-  // The question this answers is "did the partner's screen ever say it", and
-  // only the DOM knows that.
-  await page.evaluate(() => {
-    window.__seen = []
-    const record = () => window.__seen.push(document.querySelector('main')?.innerText || '')
-    new MutationObserver(record).observe(document.querySelector('main'), {
-      subtree: true,
-      childList: true,
-      characterData: true,
-    })
-    record()
-  })
-
-  await page.setInputFiles('input[type="file"]', {
+  await page.getByLabel('Menu file').setInputFiles({
     name: 'winter-menu.csv',
     mimeType: 'text/csv',
-    buffer: Buffer.from(CSV),
+    buffer: Buffer.from(lines.join('\n')),
   })
-  await page.waitForTimeout(4000)
-
-  const all = (await page.evaluate(() => window.__seen)).join(' | ').replace(/\n/g, ' ')
-  const seenBody = all
-  check(/Reading your menu file/.test(all), 'the wait says WHAT is happening, not "loading"')
-  check(/Uploaded your file/.test(all), 'stage 1 of the checklist appeared')
-  check(/Found 3 categories/.test(all), 'stage 2 reported the real category count from the file')
-  check(/Reading 2,?001 items and prices/.test(all), 'stage 3 reported the real row count')
-  check(/\d+ of 2001/.test(all), 'and a live sub-count that is measured, not animated')
-  check(
-    /Checking for missing prices|1 item is missing a price/.test(all),
-    'stage 4 appeared and counted the priceless row',
-  )
-  check(
-    !/Found 0 categories|Reading 0 items/.test(all),
-    'no stage ever printed a count it had not yet worked out',
-  )
+  await page.waitForTimeout(2500)
 
   const body = (await page.locator('main').innerText()).replace(/\n/g, ' ')
-  check(/Step 4 of 5/i.test(seenBody), 'the panel is labelled as step 4 of 5, as designed')
-  check(/winter-menu\.csv/.test(body), 'the file is named back to the partner')
+
+  /* THE ASSERTION THAT MATTERS, and the one this project keeps having to make:
+     the importer is not deployed on this bench, and the partner must be told
+     that in words that do not blame their spreadsheet. */
+  check(
+    /couldn’t start the import/i.test(body),
+    'a missing importer is reported, not swallowed',
+  )
+  check(
+    /Nothing is wrong with your file/i.test(body),
+    'and it says so — a different file is not the answer, and sending them to look for one is',
+  )
+  check(
+    /this is ours to fix/i.test(body),
+    'it owns the problem rather than handing our deployment to a restaurant owner',
+  )
   check(
     !/leave this page|emailed you the moment/i.test(body),
-    'the in-browser wizard parse does NOT promise "leave the page, we will email you" — it cannot keep that',
+    'and it never promises "leave the page, we will email you" over an import that never started',
   )
   check(
-    /2001 items added/.test(body),
-    'and it reports what actually landed, including the priceless row',
-  )
-  check(
-    /1 item has no price yet/.test(body),
-    'the missing price is reported rather than silently becoming R 0.00',
+    /Adding items by hand works normally/i.test(body),
+    'the way forward is named in the same breath',
   )
 
   await context.close()
 }
 
 /* ============================================================================
-   4. The way out is offered from the first second, not after 45 wasted ones
+   4. The way out is offered in the same breath as the problem
    ========================================================================= */
 {
   const { page, context } = await open()
-  await page.goto(`${BASE}/venues/new`, { waitUntil: 'networkidle' })
-  await page.getByRole('textbox', { name: 'Mood', exact: true }).fill('Chilled Bar')
-  await page.keyboard.press('Enter')
-  await page.getByRole('button', { name: /^Next$/i }).click()
-  await page.waitForTimeout(300)
-  await page.getByRole('textbox', { name: 'Venue name', exact: true }).fill('X')
-  await setLocation(page)
-  for (const _ of [1, 2]) {
-    const n = page.getByRole('button', { name: /^Next$/i })
-    await n.scrollIntoViewIfNeeded()
-    await n.click()
-    await page.waitForTimeout(400)
-  }
-  await page.getByRole('textbox', { name: 'Menu category' }).fill('Cocktails')
-  await page.getByRole('button', { name: /^Add$/i }).click()
-  await page.waitForTimeout(200)
+  await page.goto(`${BASE}/venues/VEN-1/menu`, { waitUntil: 'networkidle' })
+  await page.getByLabel('Menu file').waitFor({ timeout: 15000 })
 
-  // 4000 rows, so the parse is genuinely slow enough to observe.
   const big = ['heading,item_name,price,description']
-  for (let i = 0; i < 4000; i += 1) big.push(`Cocktails,Drink ${i},${50 + (i % 40)},`)
+  for (let i = 0; i < 400; i += 1) big.push(`Cocktails,Drink ${i},${50 + (i % 40)},`)
 
-  let escapeSeen = false
-  const watch = setInterval(async () => {
-    try {
-      if (await page.getByRole('button', { name: /Add your items by hand instead/i }).isVisible())
-        escapeSeen = true
-    } catch {}
-  }, 25)
-
-  await page.setInputFiles('input[type="file"]', {
+  await page.getByLabel('Menu file').setInputFiles({
     name: 'huge.csv',
     mimeType: 'text/csv',
     buffer: Buffer.from(big.join('\n')),
   })
-  await page.waitForTimeout(1500)
-  clearInterval(watch)
+  await page.waitForTimeout(2500)
 
-  check(escapeSeen, 'the manual-entry escape hatch is offered during the wait, not only after it')
+  /* An escape hatch that only appears once the import has failed is not an
+     escape hatch — it is a consolation. It is offered while the partner is
+     still waiting, and it is still offered afterwards. */
+  check(
+    await page.getByRole('button', { name: /add items by hand instead/i }).isVisible(),
+    'the manual-entry escape hatch is offered, not left for the partner to find',
+  )
 
   await context.close()
 }

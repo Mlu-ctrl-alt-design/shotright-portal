@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
+import { fillBasics, skipImport } from './addVenue'
 
 /**
  * Resuming a half-finished setup, and putting photographs on a venue.
@@ -94,10 +95,24 @@ describe('resume a venue addition', () => {
   it('saves progress as the partner works, without being asked', async () => {
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await user.type(await screen.findByRole('textbox', { name: /^mood$/i }), 'Chilled')
-    await user.click(screen.getByRole('button', { name: /add \+|^add$/i }))
+    await skipImport(user)
+    await fillBasics(user)
 
     await waitFor(() => expect(bench.drafts.length).toBeGreaterThan(0), { timeout: 6000 })
+  })
+
+  it('does not litter the dashboard with a draft for somebody who only looked', async () => {
+    /* Autosave starts once there is something to save. Creating a draft the
+       moment the screen mounts puts "Untitled venue" on the dashboard of
+       everyone who ever clicked Add New and changed their mind — and the import
+       screen, which is now the first thing they see, is exactly where changing
+       your mind happens. */
+    const { user } = renderApp({ route: '/venues/new', signedIn: true })
+
+    await skipImport(user)
+    await new Promise((r) => setTimeout(r, 1500))
+
+    expect(bench.drafts).toHaveLength(0)
   })
 
   it('does not claim to have saved when the draft endpoint is missing', async () => {
@@ -106,8 +121,8 @@ describe('resume a venue addition', () => {
     bench.deploy.save_venue_draft = false
     const { user } = renderApp({ route: '/venues/new', signedIn: true })
 
-    await user.type(await screen.findByRole('textbox', { name: /^mood$/i }), 'Chilled')
-    await user.click(screen.getByRole('button', { name: /add \+|^add$/i }))
+    await skipImport(user)
+    await fillBasics(user)
     await new Promise((r) => setTimeout(r, 1500))
 
     expect(document.body.textContent).not.toMatch(/\bSaved\b/)

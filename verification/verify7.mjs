@@ -1,4 +1,11 @@
 import { chromium } from 'playwright'
+import {
+  describeVenue,
+  openLocation,
+  pickMood,
+  saveAndAddPhotos,
+  skipImport,
+} from './addVenue.mjs'
 
 const BASE = 'http://127.0.0.1:4173'
 const browser = await chromium.launch({
@@ -107,6 +114,8 @@ async function setLocation(page, label = '70 Juta') {
       ],
     }),
   )
+  /* The map and the address field live behind a confirm row since 17 Sep. */
+  await openLocation(page)
   const address = page.getByRole('combobox', { name: 'Address', exact: true })
   await address.fill(label)
   await page.getByRole('option').first().waitFor({ timeout: 10000 })
@@ -114,20 +123,22 @@ async function setLocation(page, label = '70 Juta') {
   // The pin lands with the pick; wait for it, or the next step validates a
   // venue that has an address and no point.
   await page.locator('[data-field="latitude"][data-latitude]').waitFor({ timeout: 10000 })
-
-  await addPhoto(page)
 }
 
 /**
  * Add one photo — REQUIRED as of 13 Aug.
  *
  * A venue with no picture is a name and an address, and this is a product
- * people choose by looking. Folded into `setLocation` because every caller of
- * that is a caller who needs the details step to be VALID, and photos are now
- * part of what valid means.
+ * people choose by looking.
+ *
+ * ⚠️ NO LONGER FOLDED INTO `setLocation`. Photographs moved to a screen of
+ * their own on 17 Sep — better taken standing in the room than remembered at a
+ * desk — so this is called after Save, on the photo screen, not while filling
+ * the form. It was silently a no-op for a while, which is how the submit walk
+ * ended up blocked by a requirement the helper thought it had satisfied.
  *
  * The requirement lifts itself if the bench refuses the upload — see
- * `validateDetails` — so a suite that stubs a 403 does not need to change.
+ * `validatePhotos` — so a suite that stubs a 403 does not need to change.
  */
 async function addPhoto(page) {
   const input = page.getByLabel('Venue photos — choose files')
@@ -151,49 +162,48 @@ async function addPhoto(page) {
 const pinLatitude = (page) =>
   page.locator('[data-field="latitude"]').getAttribute('data-latitude')
 
-/* ============ step 1 gates before you can leave it ============ */
+/* ============================================================================
+   ⚠️ REWRITTEN 17 Sep, when the five-step wizard became one scrolling page.
+
+   There are no steps to gate between any more, so every "Next is blocked"
+   check became a "Save is blocked" check. What this suite is FOR has not
+   moved an inch: validation happens where the work happens, it reveals
+   everything outstanding at once, and submit is never where somebody finds
+   out. Those are the claims, and they are all still here.
+   ========================================================================= */
+
+/** Fill everything the page requires except the one thing under test. */
+async function fillAllBut(page, skip = '') {
+  if (skip !== 'name') await field(page, 'Venue name').fill('The Rooftop')
+  if (skip !== 'manager') await field(page, 'Manager').fill('Thabo Mokoena')
+  if (skip !== 'phone') await field(page, 'Contact number').fill('012 460 1188')
+  if (skip !== 'mood') await pickMood(page)
+  if (skip !== 'words') await describeVenue(page)
+  if (skip !== 'location') await setLocation(page)
+}
+
+/* ============ arriving does not accuse you of anything ============ */
 {
   const { page, context } = await wizard()
 
-  check(await on(page, 'Chisa!'), 'starts on the mood step')
-  await next(page)
-  await page.waitForTimeout(400)
-
-  check(await on(page, 'Chisa!'), 'Next is blocked with no moods — you do not leave step 1')
   check(
-    await on(page, 'Add at least one mood'),
-    'and the reason is stated on the step, not saved for submit',
+    await on(page, "Your venue’s details"),
+    'the form is the screen — no step to walk to',
   )
-
-  await field(page, 'Mood').fill('Chilled Bar')
-  await page.getByRole('button', { name: /^Add/ }).click()
-  await page.waitForTimeout(600)
   check(
-    !(await on(page, 'Add at least one mood')),
-    'the banner clears the moment it is fixed — it does not outlive the block',
+    !(await on(page, 'Your venue needs a name')),
+    'arriving does not accuse you of everything you have not done yet',
   )
-
-  await next(page)
-  await page.getByText("Enter your venue's details").waitFor({ timeout: 10000 })
-  check(true, 'and then Next works')
+  check(
+    await on(page, '1 of 6 done'),
+    'and the rail says how much is left, which is what partners actually asked for',
+  )
   await context.close()
 }
 
-/* ============ step 2: inline, on blur, not on keystroke ============ */
+/* ============ inline, on blur, not on keystroke ============ */
 {
   const { page, context } = await wizard()
-  await field(page, 'Mood').fill('Chilled Bar')
-  await page.getByRole('button', { name: /^Add/ }).click()
-  await page.waitForTimeout(500)
-  await next(page)
-  await page.getByText("Enter your venue's details").waitFor({ timeout: 10000 })
-  await page.waitForTimeout(400)
-
-  // Arriving on a step must not paint every empty required field red.
-  check(
-    !(await on(page, 'Your venue needs a name')),
-    'arriving on a step does not accuse you of everything you have not done yet',
-  )
 
   // Typing a bad phone number must not scold mid-entry.
   const phone = field(page, 'Contact number')
@@ -205,7 +215,7 @@ const pinLatitude = (page) =>
   )
 
   // ...but it is flagged on blur.
-  await field(page, 'Manager name').click()
+  await field(page, 'Manager').click()
   await page.waitForTimeout(300)
   check(
     await on(page, 'does not look like a phone number'),
@@ -231,24 +241,21 @@ const pinLatitude = (page) =>
   await context.close()
 }
 
-/* ============ step 2: Next reveals everything outstanding at once ============ */
+/* ============ Save reveals everything outstanding at once ============ */
 {
   const { page, context } = await wizard()
-  await field(page, 'Mood').fill('Chilled Bar')
-  await page.getByRole('button', { name: /^Add/ }).click()
-  await page.waitForTimeout(500)
-  await next(page)
-  await page.getByText("Enter your venue's details").waitFor({ timeout: 10000 })
-  await page.waitForTimeout(300)
-
-  await next(page)
+  await saveAndAddPhotos(page)
   await page.waitForTimeout(600)
 
-  check(await on(page, "Enter your venue's details"), 'Next is blocked on the details step')
+  check(await on(page, "Your venue’s details"), 'Save is blocked while anything is missing')
   check(await onSoon(page, 'Your venue needs a name'), 'the missing venue name is shown inline')
   check(
     await onSoon(page, 'Set your location'),
     'AND the missing location is shown at the same time, not one at a time',
+  )
+  check(
+    await onSoon(page, 'Pick at least one'),
+    'AND the missing mood, so fixing one thing does not reveal the next',
   )
 
   /* Focus is moved in the same tick as the errors render, so poll for it
@@ -258,50 +265,69 @@ const pinLatitude = (page) =>
     focused = await field(page, 'Venue name').evaluate((n) => n === document.activeElement)
     if (!focused) await page.waitForTimeout(100)
   }
-  check(
-    focused,
-    'focus moves to the FIRST problem in DOM order, not a random key',
-  )
+  check(focused, 'focus moves to the FIRST problem in DOM order, not a random key')
+  await context.close()
+}
 
-  // Location is required now, not a post-hoc warning on the success screen.
-  await field(page, 'Venue name').fill('The Rooftop')
-  await page.waitForTimeout(300)
-  await next(page)
+/* ============ a venue with no location would be invisible ============ */
+{
+  const { page, context } = await wizard()
+  await fillAllBut(page, 'location')
+  await saveAndAddPhotos(page)
   await page.waitForTimeout(600)
   check(
-    await on(page, "Enter your venue's details"),
-    'a venue with no coordinates still cannot proceed — it would be invisible',
+    await on(page, "Your venue’s details"),
+    'a venue with no coordinates cannot proceed — it would be invisible to every search',
+  )
+  /* And the collapsed panel OPENS. Scrolling somebody to a confirm row and
+     telling them to fix a field inside it is a gate with no key. */
+  check(
+    await field(page, 'Address').isVisible(),
+    'and the panel holding the address opens itself, rather than pointing at a closed one',
   )
 
   await setLocation(page)
   await page.waitForTimeout(300)
-  await next(page)
-  await page.getByText('Enter your operating hours').waitFor({ timeout: 10000 })
+  await saveAndAddPhotos(page)
+  await page.getByRole('heading', { name: /now the photos/i }).waitFor({ timeout: 10000 })
   check(true, 'with a location it proceeds')
   await context.close()
 }
 
-/* ============ step 3: hours ============ */
+/* ============ a venue nobody has described is refused by the bench ============ */
+{
+  /* ⚠️ NOT OUR RULE. `submit_venue_for_review` blocks on an empty description,
+     so without this the partner finishes a whole venue and is then declined
+     for a field the old form did not even ask for. */
+  const { page, context } = await wizard()
+  await fillAllBut(page, 'words')
+  await saveAndAddPhotos(page)
+  await page.waitForTimeout(600)
+  check(
+    await on(page, "Your venue’s details"),
+    'a venue with nothing written about it does not get through',
+  )
+  check(
+    await onSoon(page, 'Answer one of these'),
+    'and it is asked for up front, not discovered at the review queue',
+  )
+  await context.close()
+}
+
+/* ============ hours ============ */
 {
   const { page, context } = await wizard()
-  await field(page, 'Mood').fill('Chilled Bar')
-  await page.getByRole('button', { name: /^Add/ }).click()
-  await page.waitForTimeout(500)
-  await next(page)
-  await field(page, 'Venue name').fill('The Rooftop')
-  await setLocation(page)
-  await next(page)
-  await page.getByText('Enter your operating hours').waitFor({ timeout: 10000 })
+  await fillAllBut(page)
 
   // Unselect every day.
-  for (const d of ['SUN', 'MON', 'TUES', 'WED', 'THUR', 'FRI', 'SAT']) {
+  for (const d of ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']) {
     const chip = page.getByRole('button', { name: d, exact: true })
     if (await chip.count()) {
       const pressed = await chip.getAttribute('aria-pressed')
       if (pressed === 'true') await chip.click()
     }
   }
-  await next(page)
+  await saveAndAddPhotos(page)
   await page.waitForTimeout(500)
   check(
     await on(page, 'Pick at least one day'),
@@ -312,11 +338,11 @@ const pinLatitude = (page) =>
   await page.waitForTimeout(300)
 
   // Closing before opening.
-  await page.getByLabel('Week day hours end time').fill('06:00')
-  await next(page)
+  await page.getByRole('textbox', { name: 'Closes', exact: true }).fill('06:00')
+  await saveAndAddPhotos(page)
   await page.waitForTimeout(500)
   check(
-    await on(page, 'closing time must be after'),
+    await on(page, 'must be after the opening time'),
     'a closing time before the opening time is refused',
   )
   await context.close()
@@ -325,20 +351,12 @@ const pinLatitude = (page) =>
 /* ============ the whole point: submit is never where you find out ============ */
 {
   const { page, context } = await wizard()
-  await field(page, 'Mood').fill('Chilled Bar')
-  await page.getByRole('button', { name: /^Add/ }).click()
-  await page.waitForTimeout(500)
-  await next(page)
-  await field(page, 'Venue name').fill('The Rooftop')
-  await setLocation(page)
-  await next(page)
-  await page.getByText('Enter your operating hours').waitFor({ timeout: 10000 })
-  await next(page)
-  await page.getByText('Enter your menu').waitFor({ timeout: 10000 })
-  await next(page)
-  await page.getByRole('heading', { name: /Almost done/ }).waitFor({ timeout: 10000 })
+  await fillAllBut(page)
+  await saveAndAddPhotos(page)
+  await page.getByRole('heading', { name: /now the photos/i }).waitFor({ timeout: 10000 })
+  await addPhoto(page)
 
-  const submit = page.getByRole('button', { name: /^Submit$/i })
+  const submit = page.getByRole('button', { name: /send for review/i })
   await submit.scrollIntoViewIfNeeded()
   await submit.click()
   await page.waitForTimeout(1500)
@@ -351,20 +369,22 @@ const pinLatitude = (page) =>
   await context.close()
 }
 
-/* ============ step rail: back is free, forward is gated ============ */
+/* ============ the rail is the navigation now ============ */
 {
+  /* The step list is gone. What replaced it is a rail of anchors into the
+     sections of one page — which cannot "block" anybody, because there is
+     nowhere to be blocked from. What it still has to do is tell the truth
+     about what is done. */
   const { page, context } = await wizard()
-  await field(page, 'Mood').fill('Chilled Bar')
-  await page.getByRole('button', { name: /^Add/ }).click()
-  await page.waitForTimeout(500)
-  await next(page)
-  await page.getByText("Enter your venue's details").waitFor({ timeout: 10000 })
 
-  await page.getByRole('button', { name: 'Setup Mood' }).click()
+  const rail = page.getByRole('navigation', { name: 'Getting listed' })
+  check(await rail.getByRole('link', { name: /The basics/ }).isVisible(), 'the rail links to each section')
+
+  await pickMood(page)
   await page.waitForTimeout(400)
   check(
-    await on(page, 'Chisa!'),
-    'the rail always lets you go BACK — never blocked by the thing you are going back to fix',
+    await on(page, '2 of 6 done'),
+    'and ticks as each one is finished, counting only what is actually done',
   )
   await context.close()
 }
