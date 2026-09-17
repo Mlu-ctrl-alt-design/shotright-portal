@@ -41,9 +41,14 @@ describe('password reset', () => {
     await sendCode(user)
     await screen.findByLabelText(/reset code/i)
 
-    const call = bench.calls.find((c) => c.method === 'request_password_reset')
+    /* `send_otp` with the reset purpose — there is no `request_password_reset`
+       on the bench, and asserting the name we wished for is what let this ship
+       broken. The purpose is asserted too: `send_otp` throws on one it does
+       not recognise, so a near-miss fails the whole request. */
+    const call = bench.calls.find((c) => c.method === 'send_otp')
     expect(call).toBeTruthy()
     expect(call.args.email).toBe(KNOWN)
+    expect(call.args.purpose).toBe('Password Reset')
   })
 
   it('says the same thing for an address with no account', async () => {
@@ -128,7 +133,7 @@ describe('password reset', () => {
   it('shows a server failure rather than pretending a code went out', async () => {
     /* Mail is configured now, which means it can also fail. Saying "check your
        email" over a send that errored leaves someone waiting for nothing. */
-    bench.deploy.request_password_reset = false
+    bench.deploy.send_otp = false
     const { user } = renderApp({ route: RESET })
 
     await sendCode(user)
@@ -158,7 +163,7 @@ describe('resending a verification code', () => {
 
     await user.click(screen.getByRole('button', { name: /send a new code/i }))
 
-    expect(bench.calls.some((c) => c.method === 'resend_otp')).toBe(true)
+    expect(bench.calls.some((c) => c.method === 'send_otp')).toBe(true)
     expect(await screen.findByText(/sent a new code/i)).toBeInTheDocument()
   })
 
