@@ -1,4 +1,11 @@
 import { chromium } from 'playwright'
+import {
+  describeVenue,
+  openLocation,
+  pickMood,
+  saveAndAddPhotos,
+  toVenueForm,
+} from './addVenue.mjs'
 
 const BASE = 'http://127.0.0.1:4173'
 const browser = await chromium.launch({
@@ -189,12 +196,35 @@ const settled = (page, name) =>
   page.locator(`section[aria-labelledby="venue-photos-heading"] img[alt="${name}"]`)
     .waitFor({ timeout: 15000 })
 
-async function toDetailsStep(page) {
-  await page.goto(`${BASE}/venues/new`, { waitUntil: 'networkidle' })
-  await page.getByRole('textbox', { name: 'Mood', exact: true }).fill('Chilled Bar')
-  await page.keyboard.press('Enter')
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByLabel(/venue name/i).waitFor()
+/**
+ * ⚠️ PHOTOS HAVE THEIR OWN SCREEN NOW (17 Sep).
+ *
+ * They used to sit at the bottom of the details step, which is where people
+ * gave up on them. This walks the form, saves, and lands on the photo screen —
+ * which is where every assertion in this suite now belongs.
+ */
+/**
+ * Fill the whole form and land on the PHOTO SCREEN.
+ *
+ * ⚠️ Photographs moved to a screen of their own on 17 Sep — better taken
+ * standing in the room than remembered at a desk. Everything this suite
+ * asserts on lives there now, so getting there is one helper rather than a
+ * walk repeated nine times.
+ *
+ * The form is filled completely because Save gates on it: a venue needs a
+ * name, a manager, a number, a location, a mood and a description before
+ * anybody reaches the photos.
+ */
+async function toPhotoScreen(page, name = 'Corner Kitchen & Bar') {
+  await toVenueForm(page, BASE)
+  await page.getByRole('textbox', { name: 'Venue name', exact: true }).fill(name)
+  await page.getByRole('textbox', { name: 'Manager', exact: true }).fill('Thabo Mokoena')
+  await page.getByRole('textbox', { name: 'Contact number', exact: true }).fill('012 460 1188')
+  await pickMood(page)
+  await describeVenue(page)
+  await setLocation(page)
+  await saveAndAddPhotos(page)
+  await page.getByRole('heading', { name: /now the photos/i }).waitFor({ timeout: 10000 })
 }
 
 /**
@@ -226,6 +256,8 @@ async function setLocation(page, label = '70 Juta') {
       ],
     }),
   )
+  /* The map and the address field live behind a confirm row since 17 Sep. */
+  await openLocation(page)
   const address = page.getByRole('combobox', { name: 'Address', exact: true })
   await address.fill(label)
   await page.getByRole('option').first().waitFor({ timeout: 10000 })
@@ -242,6 +274,18 @@ async function setLocation(page, label = '70 Juta') {
 }
 
 
+/**
+ * Wait for the SUCCESS screen, not for a word.
+ *
+ * ⚠️ This used to wait for `/Chisa|submitted|review/`, which since 17 Sep
+ * matches the "Send for review" button that was just clicked — so it returned
+ * instantly, every assertion after it ran against the photo screen, and nine
+ * checks failed for a reason that had nothing to do with photos. Waiting for
+ * something only the success screen has is the fix.
+ */
+const awaitSuccess = (page) =>
+  page.getByRole('button', { name: /add another venue/i }).waitFor({ timeout: 15000 })
+
 /** What the map is holding, now that no input displays it. */
 const pinLatitude = (page) =>
   page.locator('[data-field="latitude"]').getAttribute('data-latitude')
@@ -251,7 +295,7 @@ const pinLatitude = (page) =>
    ========================================================================= */
 {
   const { page, context, uploads } = await open()
-  await toDetailsStep(page)
+  await toPhotoScreen(page)
 
   const region = page.locator('section[aria-labelledby="venue-photos-heading"]')
   check(await region.isVisible(), 'the wizard has a place to upload venue photos at all')
@@ -286,7 +330,7 @@ const pinLatitude = (page) =>
    ========================================================================= */
 {
   const { page, context, uploads } = await open()
-  await toDetailsStep(page)
+  await toPhotoScreen(page)
 
   // 3200x2400 — the shape of a photo off a current handset.
   const originalBytes = await addPhoto(page, { name: 'big-room.png', w: 3200, h: 2400 })
@@ -315,7 +359,7 @@ const pinLatitude = (page) =>
    ========================================================================= */
 {
   const { page, context } = await open()
-  await toDetailsStep(page)
+  await toPhotoScreen(page)
 
   await addPhoto(page, { name: 'one.png' })
   await settled(page, 'one.png')
@@ -362,7 +406,7 @@ const pinLatitude = (page) =>
    ========================================================================= */
 {
   const { page, context, uploads } = await open()
-  await toDetailsStep(page)
+  await toPhotoScreen(page)
 
   await addPhoto(page, { name: 'braai-night.heic', type: 'image/heic', broken: true })
   await page.waitForTimeout(600)
@@ -393,10 +437,7 @@ const pinLatitude = (page) =>
    ========================================================================= */
 {
   const { page, context } = await open()
-  await toDetailsStep(page)
-
-  await page.getByLabel(/venue name/i).fill('Corner Kitchen & Bar')
-  await setLocation(page)
+  await toPhotoScreen(page)
   await addPhoto(page, { name: 'front-bar.png' })
   await settled(page, 'front-bar.png')
   await addPhoto(page, { name: 'terrace.png' })
@@ -416,22 +457,18 @@ const pinLatitude = (page) =>
     'as urls — which is the whole reason they upload now rather than at submit',
   )
 
-  // Details → hours → menu → review.
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('heading', { name: /Almost done/i }).waitFor()
-
-  const review = await page.locator('main').evaluate((n) => n.textContent)
-  check(
-    /2 photos, in order/.test(review),
-    'the review screen shows the gallery — the one thing you cannot check by re-reading a field',
-  )
+  /* ⚠️ THE REVIEW STEP IS GONE (17 Sep). There is nothing to re-check on a
+     separate screen when the whole venue is one page you can see all of, and
+     the gallery — the one thing you genuinely cannot check by re-reading a
+     field — is on screen right here, in the partner's order, at the moment
+     they submit. */
+  const gallery = await page.locator('main').evaluate((n) => n.textContent)
+  check(/2 of 10/.test(gallery), 'the photos are on screen at the moment of submitting')
   const reviewCover = page.locator('main img[alt="front-bar.png"]')
   check(await reviewCover.isVisible(), 'with the real photos, in the partner’s order')
 
-  await page.getByRole('button', { name: 'Submit' }).click()
-  await page.getByText(/Chisa|submitted|review/i).first().waitFor({ timeout: 8000 })
+  await page.getByRole('button', { name: /send for review/i }).click()
+  await awaitSuccess(page)
 
   const success = await page.locator('main').evaluate((n) => n.textContent)
   check(
@@ -451,7 +488,7 @@ const pinLatitude = (page) =>
    ========================================================================= */
 {
   const { page, context, saves } = await open({ photoEndpoints: true })
-  await toDetailsStep(page)
+  await toPhotoScreen(page)
 
   const region = page.locator('section[aria-labelledby="venue-photos-heading"]')
   const body = await region.evaluate((n) => n.textContent)
@@ -460,19 +497,14 @@ const pinLatitude = (page) =>
     'with the endpoint deployed, the warning is gone — no frontend release involved',
   )
 
-  await page.getByLabel(/venue name/i).fill('Corner Kitchen & Bar')
-  await setLocation(page)
   await addPhoto(page, { name: 'one.png' })
   await settled(page, 'one.png')
   await addPhoto(page, { name: 'two.png' })
   await settled(page, 'two.png')
   await page.getByRole('button', { name: /Move two\.png earlier/ }).click()
 
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Submit' }).click()
-  await page.getByText(/Chisa|submitted|review/i).first().waitFor({ timeout: 8000 })
+  await page.getByRole('button', { name: /send for review/i }).click()
+  await awaitSuccess(page)
 
   check(saves.length === 1, 'the photo set is sent to the backend on submit')
   const sent = saves[0]?.photos || []
@@ -573,19 +605,14 @@ const pinLatitude = (page) =>
      promise these reach customers. That is worse than the missing endpoint we
      started with, because nobody is looking for it. */
   const { page, context, saves } = await open({ photoEndpoints: true, deaf: true })
-  await toDetailsStep(page)
-  await page.getByLabel(/venue name/i).fill('Corner Kitchen & Bar')
-  await setLocation(page)
+  await toPhotoScreen(page)
   await addPhoto(page, { name: 'one.png' })
   await settled(page, 'one.png')
   await addPhoto(page, { name: 'two.png' })
   await settled(page, 'two.png')
 
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Submit' }).click()
-  await page.getByText(/Chisa|submitted|review/i).first().waitFor({ timeout: 8000 })
+  await page.getByRole('button', { name: /send for review/i }).click()
+  await awaitSuccess(page)
 
   check(saves.length === 1, 'the save was attempted and answered 200')
   const success = await page.locator('main').evaluate((n) => n.textContent)

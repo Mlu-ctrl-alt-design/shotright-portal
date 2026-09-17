@@ -38,26 +38,33 @@ const draftPayload = (venue) => ({
     latitude: venue.latitude ?? undefined,
     longitude: venue.longitude ?? undefined,
     dress_code: venue.dress_code,
-    atmosphere: venue.atmosphere,
   },
   hours: {
     weekday: venue.operating_hours.weekday,
     weekend: venue.operating_hours.weekend,
   },
-  menu: { categories: [] },
   photos: [],
+  /* Straight to the form. A row that arrived in a spreadsheet has already been
+     "imported" — offering the import screen again would invite the partner to
+     overwrite the values they just uploaded. */
+  stage: 'form',
 })
 
 /**
- * Which steps the spreadsheet actually answered.
+ * Which sections the spreadsheet actually answered.
  *
- * `menu` and `review` are deliberately absent: the file carries neither, and
- * marking a step complete that nobody has looked at is how a partner submits a
- * venue believing they have seen it. `details` is where they are dropped,
- * because that is the step a photograph belongs to.
+ * `basics` is deliberately absent even though the sheet carries a venue name:
+ * it also wants a manager and a contact number, and neither is a column. A
+ * section marked complete that nobody has looked at is how a partner submits a
+ * venue believing they have seen it — so they land on `basics`, which is also
+ * the first thing on the page.
+ *
+ * ⚠️ These are the SECTION keys from `wizardSteps.js`, not the old step keys.
+ * They changed on 17 Sep when the wizard became one page; a draft written with
+ * the old ones still opens, because `stepIndex` maps the retired names.
  */
-const COMPLETED_BY_SHEET = ['mood', 'hours']
-const LANDS_ON = 'details'
+const COMPLETED_BY_SHEET = ['vibe', 'hours']
+const LANDS_ON = 'basics'
 
 export async function importVenueDrafts(rows, { onProgress, signal } = {}) {
   const created = []

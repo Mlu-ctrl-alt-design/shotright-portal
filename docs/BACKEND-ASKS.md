@@ -464,6 +464,103 @@ send the actual list of states in the workflow.
 
 ---
 
+## P1 — the Add Venue redesign (17 Sep)
+
+Four asks, in the order they cost partners something. The first is the only one
+that can lock a paying customer out, so it is first.
+
+### 1. Confirm the entitlement KEY STRINGS — before the paywall is switched on
+
+The portal reads entitlements as rows and asks "is `<key>` on for this
+account". Only one of the keys it asks for is confirmed:
+
+| Key the portal asks for | Confirmed? | Gates |
+|---|---|---|
+| `venue_import` | ❌ guessed | Google / Facebook / website import |
+| `bulk_import` | ❌ guessed | the spreadsheet route, and `/venues/import` |
+| `menu_import` | ❌ guessed | listed in the dialog, not enforced |
+| `booking_analytics` | ✅ yours | registered, nothing enforces it yet |
+| `unlimited_venues` | ❌ guessed | listed in the dialog, not enforced |
+
+⚠️ **This is the one place the fall-open rule does not protect anybody.** If a
+key does not match a registered row, the bench answers perfectly well and the
+answer is "not entitled" — so a paying Pro partner sees a paywall. Everywhere
+else a wrong answer unlocks; here it locks.
+
+They live in one map: `FEATURE` in `src/services/plan.js`. Tell us the real
+strings and it is a one-line change.
+
+### 2. Confirm the paywall `exc_type`
+
+You said the gate raises a dedicated exception subclassing `ValidationError`
+specifically so clients branch on `exc_type` rather than English prose — which
+is exactly right, and the portal does. It currently matches a PATTERN, because
+we have not seen the real name on the wire:
+
+```
+/PlanRequired|EntitlementRequired|UpgradeRequired|SubscriptionRequired|PaywallError/
+```
+
+`isPaywalled()` in `plan.js`. Name it and we narrow it to the one.
+
+### 3. `start_subscription` — so the Upgrade button can do something
+
+```python
+@frappe.whitelist()
+def start_subscription(plan: str) -> dict:
+    """-> {"redirect_url": "https://www.payfast.co.za/eng/process?..."}"""
+```
+
+Until it exists the dialog says *"Pro isn't on sale yet — nothing has been
+charged"* rather than showing a button that takes no money. It starts working
+the day the adapter lands, with no portal release.
+
+### 4. The import endpoints — the whole first screen depends on them
+
+`search_places` / `get_place_details` are specified in `src/services/places.js`
+and are still absent from `api.py`. The URL importer has never been written:
+
+```python
+@frappe.whitelist()
+def import_venue_from_url(url: str, source: str = "") -> dict:
+    """source is a hint ('social' | 'website'), not a contract.
+
+    Return the identity fields a form can hold and NOTHING else — no
+    description, no rating, no scraped photo set. Same shape as
+    get_place_details:
+      {place_id, display_name, formatted_address,
+       location: {latitude, longitude}, national_phone_number}
+    """
+```
+
+**One method for both the social and the website route**, deliberately: they
+are the same job — fetch a page, pull out name, address, phone, hours — and
+splitting them buys nothing but a second thing to deploy.
+
+Until at least one of these lands, **the import screen does not render at all**
+and partners go straight to the form. That is on purpose: a screen offering
+three shortcuts where all three are dead costs a click and delivers a broken
+promise.
+
+### Also worth an answer, not blocking
+
+- **Average spend fieldname.** Asked since August. "Typical spend" is in the
+  approved design and is not built, because `averageSpend.js` resolves the name
+  by reading it off a venue payload and in the add flow there is no venue yet.
+  One confirmed name and the field appears.
+- **Manager and contact number have nowhere to go.** `create_venue` declares
+  neither, and the redesign makes both *required* of the partner. The portal
+  says plainly that they were not saved. Either is fine — a field on
+  `create_venue`, or a decision that we stop asking — but the current state is
+  a form that demands a phone number and bins it.
+- **Booking numbers.** Your call not to gate `get_venue_bookings` is right: a
+  venue has to be able to see bookings it must honour. That is table service,
+  not a premium report. "Booking numbers per venue" in the Pro list is genuinely
+  ambiguous between *analytics* and *contact numbers for bookings*, and it is a
+  product question — flagged to the product owner rather than answered here.
+
+---
+
 ## P1 — features that are built and waiting on you
 
 Each of these is **fully built and shipping**. The portal detects whether the

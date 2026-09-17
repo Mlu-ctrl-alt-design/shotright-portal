@@ -162,24 +162,33 @@ const newPage = async (bench) => {
   await page.getByText('Your venues').waitFor({ timeout: 15000 })
 
   await page.goto(`${BASE}/venues/new`, { waitUntil: 'networkidle' })
-  await page.getByText('Most used by venues').waitFor({ timeout: 15000 })
-  check(true, 'popular moods are front-loaded before anything is typed')
+
+  /* ⚠️ The mood STEP is gone (17 Sep). The whole canonical vocabulary is now
+     chips inside the form's vibe section, which is the same smart default the
+     "most used" block was reaching for, done properly: nobody has to recall a
+     word they were never shown. */
+  await page.getByRole('button', { name: 'Chilled Bar', exact: true }).waitFor({ timeout: 15000 })
+  check(true, 'the whole vocabulary is on screen before anything is typed')
   check(
-    (await page.locator('body').innerText()).includes('42'),
-    'popular moods show how many venues use them',
+    await page.getByRole('button', { name: 'Rooftop', exact: true }).isVisible(),
+    'every mood is offered, not a sample of them',
   )
 
   // A brand-new mood is ACCEPTED and marked pending, not refused.
-  await page.getByLabel('Mood').fill('Amapiano Sundays')
-  await page.getByRole('button', { name: /^Add/ }).click()
+  await page.getByRole('button', { name: /nothing fits/i }).click()
+  await page.getByLabel('Suggest a vibe').fill('Amapiano Sundays')
+  await page.getByRole('button', { name: /^Add$/ }).click()
 
-  // Scope to the step's own region — the sidebar has a "Pending" nav link.
+  // Scope to the form's own region — the sidebar has a "Pending" nav link.
   const pill = page.locator('main').getByText('Amapiano Sundays', { exact: false }).first()
   await pill.waitFor({ timeout: 10000 })
   const main = await page.locator('main').innerText()
   check(main.includes('Amapiano Sundays'), 'a vendor-authored mood is added to the venue')
   check(/pending/i.test(main), 'it is visibly marked pending, not shown as a normal mood')
-  check(main.includes('review'), 'the partner is told what pending means without leaving the step')
+  check(
+    /approve/i.test(main),
+    'the partner is told what pending means without leaving the page',
+  )
   check(seen.includes('shotright.api.resolve_mood'), 'resolve_mood was called')
   await page.close()
 }
@@ -199,16 +208,24 @@ const newPage = async (bench) => {
   await page.getByText('Your venues').waitFor({ timeout: 15000 })
 
   await page.goto(`${BASE}/venues/new`, { waitUntil: 'networkidle' })
-  await page.getByLabel('Mood').fill('Amapiano Sundays')
-  await page.getByRole('button', { name: /^Add/ }).click()
+  await page.getByRole('button', { name: /nothing fits/i }).click()
+  await page.getByLabel('Suggest a vibe').fill('Amapiano Sundays')
+  await page.getByRole('button', { name: /^Add$/ }).click()
   await page.getByText(/doesn.t have/i).waitFor({ timeout: 10000 })
   check(true, 'old backend: an unknown mood is refused at entry, not accepted-then-dropped')
 
-  // The canonical list still works via the resource-API fallback.
-  await page.getByLabel('Mood').fill('Chilled Bar')
-  await page.getByRole('button', { name: /^Add/ }).click()
-  await page.getByText('added').waitFor({ timeout: 10000 })
-  check(true, 'old backend: a canonical mood still resolves')
+  // The canonical list still works via the resource-API fallback — and it is
+  // now a chip, so picking one needs no resolver at all.
+  const chilled = page.getByRole('button', { name: 'Chilled Bar', exact: true })
+  await chilled.click()
+  await page.waitForFunction(
+    () => document.querySelector('[aria-pressed="true"]') !== null,
+    { timeout: 10000 },
+  )
+  check(
+    (await chilled.getAttribute('aria-pressed')) === 'true',
+    'old backend: a canonical mood still goes on the venue',
+  )
   await page.close()
 }
 

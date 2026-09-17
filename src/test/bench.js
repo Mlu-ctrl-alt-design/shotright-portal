@@ -173,7 +173,48 @@ const initial = () => ({
        guess landing; tests that want the wizard without it set them false. */
     search_places: true,
     get_place_details: true,
+
+    /**
+     * The URL importer — Facebook / Instagram / a venue's own website.
+     *
+     * ⚠️ FALSE, because it does not exist. It has not been written on the
+     * bench at all, and the truthful default is what makes an opt-in test
+     * meaningful: the add-venue screen must be correct on the bench partners
+     * are actually using, which is one with no URL import.
+     */
+    import_venue_from_url: false,
+
+    /**
+     * The paywall, landed on the bench in PR #44.
+     *
+     * ⚠️ FALSE by default, and that default is load-bearing rather than lazy.
+     * `get_entitlements` is not reachable over HTTP yet — gunicorn runs
+     * `--preload` and has not been restarted — so "absent" is the state every
+     * partner is in today, and it must resolve to EVERYTHING UNLOCKED. A suite
+     * that defaulted this on would prove the locks work and never prove the
+     * thing that actually matters: that a bench which cannot answer does not
+     * lock a paying partner out. Set true, with `bench.entitlements`, to model
+     * a bench that sells Pro.
+     */
+    get_entitlements: false,
+    start_subscription: false,
   },
+
+  /**
+   * What `get_entitlements` answers when it is deployed.
+   *
+   * Rows, not a plan name — the backend stores capabilities as data because the
+   * Pro list went from three items to six while the screen was being designed.
+   * `[]` is a FREE account with the paywall switched on, which is a different
+   * state to the endpoint being absent, and the two must not be confused.
+   */
+  entitlements: { plan: 'free', features: [] },
+
+  /** Where `start_subscription` sends them. null models "no adapter yet". */
+  checkoutUrl: null,
+
+  /** URL → the payload a working social/website importer would return. */
+  importedByUrl: {},
 
   /** Registration path: true makes register_vendor return otp_required. */
   otpRequired: false,

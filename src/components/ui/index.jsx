@@ -22,6 +22,13 @@ export function Button({
   size = 'md',
   // Wizard and dashboard actions are uppercase pills; the login button is a
   // sentence-case rounded rectangle. Both shapes come from the designs.
+  //
+  // `field` is the third: an 8px corner, asked for directly on 16 Sep for the
+  // redesigned add-venue screen ("on the form fields the border radius should
+  // be 8px") and used by its buttons, fields and paywall so the whole screen
+  // shares one radius. Scoped to that flow rather than applied globally — the
+  // rest of the portal, and the customer app it takes its shape language from,
+  // are pills throughout, and restyling every screen was not what was asked.
   caps = true,
   shape = 'pill',
   // `as="a"` for actions that are genuinely navigations — a mailto, a download.
@@ -61,7 +68,7 @@ export function Button({
         'inline-flex items-center justify-center gap-2 font-semibold transition',
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        shape === 'pill' ? 'rounded-full' : 'rounded-2xl',
+        { pill: 'rounded-full', field: 'rounded-lg' }[shape] || 'rounded-2xl',
         caps && 'tracking-wide uppercase',
         variants[variant],
         sizes[size],
@@ -98,6 +105,9 @@ export function Input({
   // Keep a line's worth of space under the field whether or not there is a
   // message. See the note on `messageRow` below — this is not cosmetic.
   reserveMessage,
+  // `field` gives the 8px corner the add-venue redesign asked for; everything
+  // else stays a pill. See the note on Button's `shape`.
+  shape = 'pill',
   ...props
 }) {
   // Generated rather than derived from `name`: the same form renders once per
@@ -132,7 +142,8 @@ export function Input({
           data-prefilled={prefilled ? 'true' : undefined}
           aria-describedby={describedBy}
           className={clsx(
-            'block w-full rounded-full border-2 px-5 py-2.5 text-sm text-ink-900',
+            'block w-full border-2 px-5 py-2.5 text-sm text-ink-900',
+            shape === 'field' ? 'rounded-lg' : 'rounded-full',
             'placeholder:text-ink-500 focus:border-brand-edge focus:outline-none',
             'transition-colors duration-250',
             trailing && 'pr-11',
@@ -259,7 +270,18 @@ export function PasswordInput({ label, error, hint, className, id, ...props }) {
 
 /* ---------------------------------------------------------------- Select */
 // UNTITLED UI: https://www.untitledui.com/react/components/select
-export function Select({ label, error, className, id, children, prefilled, reserveMessage, ...props }) {
+export function Select({
+  label,
+  error,
+  className,
+  id,
+  children,
+  prefilled,
+  reserveMessage,
+  // See Button's `shape` — 8px for the add-venue redesign, pill everywhere else.
+  shape = 'pill',
+  ...props
+}) {
   const generatedId = useId()
   const inputId = id || generatedId
   const msgId = `${inputId}-msg`
@@ -281,7 +303,8 @@ export function Select({ label, error, className, id, children, prefilled, reser
           {...props}
           aria-describedby={describedBy}
           className={clsx(
-            'block w-full appearance-none rounded-full border-2 py-2.5 pr-11 pl-5 text-sm text-ink-900',
+            'block w-full appearance-none border-2 py-2.5 pr-11 pl-5 text-sm text-ink-900',
+            shape === 'field' ? 'rounded-lg' : 'rounded-full',
             'focus:border-brand-edge focus:outline-none',
             'transition-colors duration-250',
             'disabled:cursor-not-allowed disabled:opacity-60',

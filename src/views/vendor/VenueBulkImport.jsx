@@ -1,8 +1,12 @@
-import { useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useMoods } from '../../hooks/useVendor'
+import { useFeature } from '../../hooks/usePlan'
+import { FEATURE } from '../../services/plan'
 import { Alert, Button, Card } from '../../components/ui'
+import ProBadge from '../../components/paywall/ProBadge'
+import UpgradeDialog from '../../components/paywall/UpgradeDialog'
 import {
   VENUE_TEMPLATE_HEADERS,
   MOOD_SEPARATOR,
@@ -26,6 +30,7 @@ import { importVenueDrafts } from '../../services/venueImport'
  */
 export default function VenueBulkImport() {
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
   const { data: moods = [] } = useMoods()
   const fileInput = useRef(null)
@@ -35,10 +40,23 @@ export default function VenueBulkImport() {
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState(null)
   const [result, setResult] = useState(null)
+  const [paywall, setPaywall] = useState(false)
 
-  const onFile = async (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = '' // so the same file can be re-picked after a fix
+  /**
+   * ⚠️ PRO, as of 17 Sep — and gated HERE as well as on the add-venue screen.
+   *
+   * The add screen's "Several venues" route shows the lock, but this route has
+   * its own URL, is linked from the venues list, and is in partners' history.
+   * A paywall with a hole in it is not a paywall; worse, it is one that punishes
+   * the partners who followed the UI and rewards the ones who kept a bookmark.
+   *
+   * `locked` is false while the answer is in flight and false whenever the
+   * bench cannot be asked — see `usePlan.js` and `plan.js`. Nobody is ever shown
+   * a lock this portal is not sure about.
+   */
+  const bulk = useFeature(FEATURE.BULK_IMPORT)
+
+  const read = async (file) => {
     if (!file) return
     setError(null)
     setResult(null)
@@ -51,6 +69,33 @@ export default function VenueBulkImport() {
       setError(err.message)
     }
   }
+
+  const onFile = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = '' // so the same file can be re-picked after a fix
+    await read(file)
+  }
+
+  /**
+   * A file handed over by the add-venue screen's dropzone.
+   *
+   * It rides on router state, which survives the navigation because history
+   * state is structured-cloned and a File clones. The point of routing it here
+   * rather than reading it there is the review step below — nothing is created
+   * until the partner has seen what we understood, and that is the feature.
+   *
+   * Waits for the mood list, because parsing checks every mood against it and a
+   * file read too early reports every mood as unknown. Cleared from history
+   * afterwards so a refresh does not silently re-read a file they have moved on
+   * from.
+   */
+  const handed = location.state?.file
+  useEffect(() => {
+    if (!handed || !moods.length || bulk.locked) return
+    read(handed)
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handed, moods.length, bulk.locked])
 
   const run = async () => {
     if (!parsed?.ready.length) return
@@ -78,7 +123,10 @@ export default function VenueBulkImport() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-ink-900">Add venues from a spreadsheet</h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl font-semibold text-ink-900">Add venues from a spreadsheet</h1>
+            <ProBadge />
+          </div>
           <p className="mt-1 text-sm text-ink-500">
             One row per venue. They arrive as drafts, so you can add photos before anything goes
             for review.
@@ -88,6 +136,32 @@ export default function VenueBulkImport() {
           <Button variant="ghost">Back to venues</Button>
         </Link>
       </div>
+
+      {/* ----------------------------------------------------------- locked */}
+      {bulk.locked && (
+        <Card title="This one’s on Pro">
+          <p className="text-sm text-ink-700">
+            Upload one spreadsheet and every row becomes a draft venue, filled in and waiting for
+            photos. Nothing is submitted until you say so.
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <Button shape="field" onClick={() => setPaywall(true)}>
+              See what Pro includes
+            </Button>
+            {/* The way through without paying, said plainly. A paywall that
+                leaves someone with nowhere to go converts nobody and loses the
+                venue as well as the subscription. */}
+            <Link
+              to="/venues/new"
+              className="text-sm font-medium text-ink-500 underline underline-offset-2 hover:text-ink-900"
+            >
+              Add one venue instead
+            </Link>
+          </div>
+        </Card>
+      )}
+
+      <UpgradeDialog open={paywall} onClose={() => setPaywall(false)} />
 
       {error && (
         <Alert variant="danger">
@@ -182,7 +256,7 @@ export default function VenueBulkImport() {
       )}
 
       {/* ---------------------------------------------------------- picking */}
-      {!parsed && !result && !progress && (
+      {!bulk.locked && !parsed && !result && !progress && (
         <Card title="Your spreadsheet">
           <p className="text-sm text-ink-700">
             Start from the template. One row per venue, and separate moods with a semicolon.

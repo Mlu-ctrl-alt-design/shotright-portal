@@ -17,7 +17,132 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 13 Sep 2026 (latest) — two 417s, one regex, and a test double that could not fail
+---
+
+## 17 Sep 2026 (latest) — the five-step wizard became one page, and import went Pro
+
+Implemented the Claude Design handoff for **Add Venue**. Four scope decisions
+were confirmed with the user before any code was written: replace the wizard
+(not sit beside it), read entitlements off the bench, photos get their own
+screen after the form, and gate bulk import in both places it is reachable.
+
+### What the flow is now
+
+`/venues/new` is **import → one page → photos**.
+
+| Was | Is |
+|---|---|
+| step 1 mood | the vibe section, canonical moods as chips |
+| step 2 details | split into basics / where you are / the vibe |
+| step 3 hours | the hours section, one pair of times |
+| step 4 menu | **gone from onboarding** — lives at `/venues/:id/menu` |
+| step 5 review | **gone** — there is nothing to review on a page you can see all of |
+| photos, buried in step 2 | a screen of their own, after Save |
+
+The complaint behind the redesign was never "too many screens". It was *too
+many fields at once and no idea how much is left*. So the fix is not fewer
+questions — it is questions in labelled groups with an honest count beside
+them, and a rail that ticks.
+
+### The three things that surprised us
+
+**1. The description was never optional.** The design marks "In your own words"
+optional. `submit_venue_for_review` treats an empty description as a BLOCKER
+and refuses the listing to Declined. The old wizard satisfied that *by
+accident*, through an atmosphere dropdown that `create_venue` maps onto
+`atmosphere_desc` — and the redesign replaced that dropdown with mood chips.
+Shipping the design as drawn would have let every partner finish a whole venue
+and then be declined for a field the form told them not to bother with. So the
+rail has **six** sections, not the design's five, and one four-word answer
+satisfies it. The guided prompts now feed the real venue description, which is
+a straight improvement on `"Out door laid back"` picked off a list.
+
+**2. `create_venue` stores neither the manager nor the contact number.** The
+redesign made both *required*. That is not a contradiction we can resolve from
+here, so the success screen says plainly that those two were not saved and
+everything else is safe. The old warning also claimed the description was lost;
+it is not lost any more, so that clause came off — a false "we lost it" is the
+same class of untruth as a false "we saved it", pointed the other way.
+
+**3. A gate with no key.** Wiring the smart-default chip for only the manager
+field meant a Tier B contact-number default could block the save while offering
+nothing to confirm it with. Same shape as scrolling somebody to a collapsed map
+panel and telling them to fix the pin inside it. Both fixed: every defaulted
+field gets its chip, and the location panel opens itself when it is what is
+blocking.
+
+### The paywall
+
+`services/plan.js`, built on the same `withFallback` capability detection as
+everything else. **One rule: an unanswered question unlocks.** Endpoint absent,
+shape unrecognised, network failed, gate switched off at the bench — all
+resolve to everything unlocked.
+
+That is not timidity. `get_entitlements` landed in PR #44 and is not reachable
+over HTTP yet (gunicorn runs `--preload`, no restart), so "we could not ask" is
+the state **every partner is in today**. If that read as "you have not paid",
+the portal would show a paywall to everyone for something nobody is selling,
+and would do it again on any future bench hiccup. A monetisation feature that
+turns an outage into an apparent mass downgrade is far more expensive than a
+free upload.
+
+Features are read as **rows, not a plan name**, matching how the bench stores
+them — the Pro list went from three items to six while the screen was being
+designed, which is precisely why neither half hard-codes it.
+
+The upgrade button **refuses to pretend**. There is no Payfast adapter yet, so
+it asks the bench, gets nothing, and says "Pro isn't on sale yet — nothing has
+been charged". It starts working the day the adapter lands with no change here.
+
+### Owed to somebody
+
+- **Feature key strings are a guess.** Only `booking_analytics` is confirmed.
+  `venue_import`, `bulk_import`, `menu_import`, `unlimited_venues` must be
+  checked against the registered rows before the paywall is switched on for
+  real accounts — a key that does not match a row reads as "not entitled", and
+  the fall-open rule does not save us there because the bench answered fine.
+- **The paywall `exc_type` is a guess too** (`isPaywalled` matches a pattern).
+  Narrow it once the exception has been seen on the wire.
+- **Google / Facebook / website import do not exist.** `search_places` is
+  absent from `api.py` and the URL importer was never written. The import
+  screen therefore **does not render at all** on the live bench, and partners
+  go straight to the form exactly as they do now. An import screen whose every
+  route is dead costs a click and delivers a broken promise.
+- **"Typical spend" is in the design and is not built.** `averageSpend.js`
+  resolves the fieldname by reading it off a venue the bench has already sent,
+  and in this flow there is no venue yet. One confirmed fieldname and it comes
+  back.
+- **Weekend / public-holiday hours cannot be set during onboarding any more.**
+  The design cut three ranges to one pair; the single pair is written to all
+  three so nothing downstream changed, and the venue's edit form still has all
+  three. Deliberate, and worth knowing before it surprises somebody.
+
+### Kept, against the design
+
+The design shows mood chips only. The old step let a partner type a vibe of
+their own and have it filed for review. That is behind one line of text now
+("Nothing fits? Suggest a vibe"), closed by default. Deleting a shipped feature
+because a prototype did not draw it is an accident, not a design decision.
+
+### Tests
+
+327 RTL checks (was 288), 17 files. `src/test/addVenue.js` holds the walk that
+four suites were each doing their own version of — they had already drifted,
+and a flow change then broke them one file at a time in four different ways.
+
+20 of 23 Playwright suites pass. **verify4, verify5 and verify8 were already
+failing on `main` before this work** — confirmed by building the pristine
+commit in a worktree and running them against it. Not touched here.
+
+`verify9`'s menu-import section moved to `/venues/:id/menu`. What it used to
+test was the wizard step's *client-side parse progress*; the import itself went
+to `bulk_import_products` and had no fallback, so a bench without the importer
+failed there too, just after a nicer wait. It now tests what that screen does
+when the importer is absent — which is the thing this project keeps having to
+get right: tell the truth, and never send a partner off to fix a file that was
+never broken.
+
+## 13 Sep 2026 — two 417s, one regex, and a test double that could not fail
 
 Reported: "when I try to rename a venue it throws a 417 error, same as when I
 accept terms of service." Both reproduced from the bench's own nginx log. The

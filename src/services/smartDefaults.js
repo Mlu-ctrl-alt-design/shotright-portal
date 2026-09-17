@@ -64,18 +64,28 @@ export const CHIP_COPY = {
 export const FIELD_MATRIX = {
   venue_name: { tier: TIER.NEVER },
 
-  manager_name: {
+  /**
+   * ⚠️ ONE FIELD, not two, since 17 Sep.
+   *
+   * The add-venue redesign merged "Manager name" and "Manager surname" into a
+   * single "Manager" input — one of several halvings that took the form from
+   * something partners abandoned to something they finish. The page splits it
+   * back apart on the way to `create_venue`, so the backend still receives
+   * both and nothing downstream changed.
+   *
+   * The old `manager_name` / `manager_surname` entries are gone rather than
+   * left in place, because a default applied to a field with no input on screen
+   * is a value the partner cannot see, cannot check and cannot clear — which
+   * fails all three of the principles at the top of this file at once.
+   */
+  manager: {
     tier: TIER.COMMIT,
     source: SOURCE.PROFILE,
-    label: 'manager name',
-    apply: ({ profile }) => splitName(profile?.vendor_name).first_name || undefined,
-  },
-
-  manager_surname: {
-    tier: TIER.COMMIT,
-    source: SOURCE.PROFILE,
-    label: 'manager surname',
-    apply: ({ profile }) => splitName(profile?.vendor_name).last_name || undefined,
+    label: 'manager',
+    apply: ({ profile }) => {
+      const { first_name, last_name } = splitName(profile?.vendor_name)
+      return [first_name, last_name].filter(Boolean).join(' ') || undefined
+    },
   },
 
   contact_number: {
@@ -94,13 +104,12 @@ export const FIELD_MATRIX = {
     share: ({ popular }) => popular?.dress_code?.share,
   },
 
-  atmosphere: {
-    tier: TIER.SUGGEST,
-    source: SOURCE.POPULAR,
-    label: 'atmosphere',
-    apply: ({ popular }) => popular?.atmosphere?.value || undefined,
-    share: ({ popular }) => popular?.atmosphere?.share,
-  },
+  /* ⚠️ `atmosphere` IS DELIBERATELY ABSENT since 17 Sep. The redesign replaced
+     the atmosphere dropdown with the mood chips — the same question, asked in
+     the vocabulary customers actually search by — so there is no longer an
+     input for it. Defaulting a field nobody can see or correct is exactly what
+     the VISIBLE and REVERSIBLE principles above forbid. If the dropdown ever
+     comes back, so does this entry. */
 }
 
 /** Fields whose default blocks submission until edited or acknowledged (§3). */
