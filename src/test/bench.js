@@ -420,6 +420,14 @@ const initial = () => ({
     ],
   },
 
+  /**
+   * Which feature key the bench should refuse as locked, if any.
+   *
+   * Models the drift `get_entitlements` cannot rule out: it is decoration, the
+   * endpoint is the enforcement, and the two can disagree.
+   */
+  lockFeature: null,
+
   /** Where `get_upgrade_checkout` sends a vendor. */
   checkoutUrl: 'https://pay.rev.cat/testtoken/srv_abc?email=thabo%40cornerkitchen.co.za',
 

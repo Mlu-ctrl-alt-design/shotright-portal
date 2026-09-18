@@ -819,6 +819,31 @@ const apiHandlers = [
    * Served straight from `bench.entitlements`, whose default is the paywall
    * SWITCHED OFF — see the note there. A test that wants locks has to ask.
    */
+  /**
+   * The paywall refusing a gated endpoint.
+   *
+   * ⚠️ NOTE WHAT IS *NOT* HERE: a `feature` key. The real bench raises
+   * `FeatureLockedError(msg, feature=key)`, but Frappe serialises only
+   * `exc_type.__name__`, the traceback and the message log — a custom exception
+   * attribute never reaches the wire. A double that helpfully included one
+   * would let the portal ship a lookup that is always undefined in production.
+   */
+  http.all('*/api/method/shotright.api.start_venue_import', async () => {
+    if (bench.lockFeature !== 'venue_bulk_import') {
+      return ok({ queued: true })
+    }
+    return HttpResponse.json(
+      {
+        exc_type: 'FeatureLockedError',
+        exception: 'FeatureLockedError: Several venues at once is a Pro feature. Upgrade to use it.',
+        _server_messages: JSON.stringify([
+          JSON.stringify({ message: 'Several venues at once is a Pro feature. Upgrade to use it.' }),
+        ]),
+      },
+      { status: 417 },
+    )
+  }),
+
   method('shotright.api.get_entitlements', () =>
     bench.entitlementsRefuses
       ? validationError('Could not read entitlements')

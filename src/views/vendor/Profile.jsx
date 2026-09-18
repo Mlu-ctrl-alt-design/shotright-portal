@@ -5,6 +5,7 @@ import { useAuthStore } from '../../store/authStore'
 import { WRITABLE_PROFILE_FIELDS } from '../../services/profile'
 import { Button, Input, PasswordInput, Card, Alert } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
+import PlanCard from '../../components/ui/PlanCard'
 
 /**
  * Issue #19 — Vendor profile edit.
@@ -141,6 +142,10 @@ export default function Profile() {
       <Alert variant="success">{notice}</Alert>
       <Alert variant="warning">{warning}</Alert>
       <Alert variant="danger">{formError}</Alert>
+
+      {/* Settings is where someone goes looking for their plan. Renders nothing
+          unless there is genuinely a plan to be on — see PlanCard. */}
+      <PlanCard />
 
       <Card title="Your details">
         <form onSubmit={saveDetails} className="space-y-4">

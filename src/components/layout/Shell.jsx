@@ -5,6 +5,7 @@ import { clsx } from '../../utils/clsx'
 import Logo from './Logo'
 import NavDrawer from './NavDrawer'
 import LegalBanner from './LegalBanner'
+import SubscriptionBanner from './SubscriptionBanner'
 
 /**
  * The authenticated partner shell.
@@ -259,6 +260,9 @@ export default function Shell() {
             {/* Above the page, inside the content column: it belongs to
                 whatever the partner is doing, not to the chrome. */}
             <LegalBanner />
+            {/* Below the legal one deliberately: an unaccepted document blocks
+                a submit today, a failing card blocks nothing yet. */}
+            <SubscriptionBanner />
             <Outlet />
           </div>
         </main>

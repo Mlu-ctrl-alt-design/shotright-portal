@@ -13,6 +13,8 @@ import {
 } from '../../hooks/useVendor'
 import { Button, Input, Card, Alert, EmptyState } from '../../components/ui'
 import { MENU_TEMPLATE_HEADERS, buildTemplateCsv } from '../../utils/menuImport'
+import FeatureLock from '../../components/ui/FeatureLock'
+import { useEntitlements } from '../../hooks/useEntitlements'
 import { useMenuImport } from '../../hooks/useMenuImport'
 import MenuImportStatus from '../../components/ui/MenuImportStatus'
 import MenuSkeleton from '../../components/ui/MenuSkeleton'
@@ -130,6 +132,8 @@ export default function VenueMenu() {
    * state cannot live in this component's `useState` — it is picked back up from
    * storage on mount. See `useMenuImport`.
    */
+  const { canPrompt, locked } = useEntitlements()
+  const menuImportLocked = canPrompt && locked('menu_import')
   const menuImport = useMenuImport(venueId, {
     onComplete: () => qc.invalidateQueries({ queryKey: ['menu', venueId] }),
   })
@@ -258,9 +262,14 @@ export default function VenueMenu() {
       <Alert variant="success">{notice}</Alert>
       <Alert variant="danger">{importError}</Alert>
 
+      {/* Unlike bulk venue import, the page around this is free — typing a menu
+          by hand always was. So only the importer is withheld, and the partner
+          keeps every other control on the screen. */}
+      {menuImportLocked && <FeatureLock feature="menu_import" />}
+
       {/* Open by default on an empty menu, because then it IS the task; folded
           away once there is a menu, because then it is an occasional one. */}
-      {(importOpen || sections.length === 0) && (
+      {!menuImportLocked && (importOpen || sections.length === 0) && (
         <Card title="Import a spreadsheet">
           <p className="text-sm text-ink-700">
             Start from our template. Headings are created as they appear.

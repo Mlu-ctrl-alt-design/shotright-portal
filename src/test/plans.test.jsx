@@ -164,3 +164,90 @@ describe('coming back from checkout', () => {
     expect(bench.calls.filter((c) => c.method === 'refresh_subscription')).toHaveLength(0)
   })
 })
+
+describe('the other locked features', () => {
+  it('locks the menu importer without taking the menu screen away', async () => {
+    onFreePlan()
+    renderApp({ route: '/venues/VEN-00001/menu', signedIn: true })
+
+    expect(await screen.findByText(/Menu import/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /see plans/i })).toBeInTheDocument()
+    // Unlike bulk import, the page itself is free — only one button is Pro.
+    expect(screen.getByRole('heading', { level: 1, name: /^menu$/i })).toBeInTheDocument()
+  })
+
+  it('locks booking numbers', async () => {
+    onFreePlan()
+    renderApp({ route: '/venues/VEN-00001/bookings', signedIn: true })
+
+    expect(await screen.findByText(/Booking numbers per venue/i)).toBeInTheDocument()
+  })
+})
+
+describe('when the server refuses something we thought was allowed', () => {
+  /**
+   * ⚠️ THE FEATURE KEY DOES NOT COME BACK FROM THE BENCH.
+   *
+   * The backend raises `FeatureLockedError(msg, feature=key)` and its docstring
+   * says the client can read `feature` off the wire. It cannot: Frappe's error
+   * response carries `exc_type.__name__`, the traceback and the message log, and
+   * nothing else — a custom exception attribute is never serialised
+   * (frappe/utils/response.py, ApiVersion.V1).
+   *
+   * So the only thing this portal can trust is `exc_type`, and the feature key
+   * has to come from the call site, which knows perfectly well what it was
+   * trying to do. Asserting otherwise would be a double that is kinder than the
+   * bench — the failure this repo has had six times.
+   */
+  it('recognises the paywall refusing, from exc_type alone', async () => {
+    bench.entitlements = {
+      ...bench.entitlements,
+      features: [...bench.entitlements.gated],
+      grandfathered: false,
+      paywall_active: true,
+      upgrade_available: true,
+    }
+    bench.lockFeature = 'venue_bulk_import'
+
+    const { isFeatureLocked, callGated } = await import('../services/entitlements')
+
+    let caught = null
+    try {
+      await callGated('venue_bulk_import', 'shotright.api.start_venue_import', {})
+    } catch (err) {
+      caught = err
+    }
+
+    expect(caught).toBeTruthy()
+    expect(isFeatureLocked(caught)).toBe(true)
+    // Supplied by the caller, not read off the response.
+    expect(caught.feature).toBe('venue_bulk_import')
+  })
+
+  it('does not mistake an ordinary validation error for the paywall', async () => {
+    const { isFeatureLocked } = await import('../services/entitlements')
+    expect(isFeatureLocked({ excType: 'ValidationError' })).toBe(false)
+    expect(isFeatureLocked(null)).toBe(false)
+  })
+})
+
+describe('the plan home', () => {
+  it('tells a Free vendor where their plan lives, from Settings', async () => {
+    onFreePlan()
+    renderApp({ route: '/profile', signedIn: true })
+
+    expect(await screen.findByText(/you.re on free/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /see plans|your plan/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/plans'),
+    )
+  })
+
+  it('says nothing about plans in Settings when there is no paywall', async () => {
+    renderApp({ route: '/profile', signedIn: true })
+
+    // The real settings screen, no plan card bolted on.
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
+    expect(screen.queryByText(/you.re on free/i)).not.toBeInTheDocument()
+  })
+})

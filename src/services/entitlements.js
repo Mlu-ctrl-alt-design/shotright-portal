@@ -41,6 +41,32 @@ export const FEATURE_LOCKED = 'FeatureLockedError'
 export const isFeatureLocked = (error) => error?.excType === FEATURE_LOCKED
 
 /**
+ * Make a gated call, and tag a paywall refusal with what was being attempted.
+ *
+ * ⚠️ THE FEATURE KEY CANNOT BE READ OFF THE RESPONSE, and the backend's own
+ * docstring is wrong about this. `require_feature` raises
+ * `FeatureLockedError(msg, feature=key)`, but Frappe serialises only
+ * `exc_type.__name__`, the traceback and the message log — a custom exception
+ * attribute never reaches the client (frappe/utils/response.py, ApiVersion.V1).
+ *
+ * So the key comes from here, the call site, which knows exactly what it was
+ * trying to do. That is not a workaround: the caller is a better source than
+ * the server for "which lock did I just hit", because it is the thing that
+ * chose to make the call.
+ *
+ * `exc_type` IS on the wire, so `isFeatureLocked` is still trustworthy — which
+ * is the part the backend got right and the reason it has its own class.
+ */
+export const callGated = async (feature, method, args = {}) => {
+  try {
+    return await call(method, args)
+  } catch (error) {
+    if (isFeatureLocked(error)) error.feature = feature
+    throw error
+  }
+}
+
+/**
  * An empty standing — what every caller gets when we could not ask.
  *
  * Deliberately NOT "nothing is entitled". An unanswered question must never

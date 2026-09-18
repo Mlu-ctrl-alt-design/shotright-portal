@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Alert, Badge, Button, Card } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { BOOKING_LIMIT, getVenueBookings, localDate } from '../../services/bookings'
+import FeatureLock from '../../components/ui/FeatureLock'
+import { useEntitlements } from '../../hooks/useEntitlements'
 
 /**
  * Who is coming, and when.
@@ -101,6 +103,8 @@ function BookingRow({ booking }) {
 
 export default function VenueBookings() {
   const { venueId } = useParams()
+  const { canPrompt, locked } = useEntitlements()
+  const bookingsLocked = canPrompt && locked('booking_analytics')
   /* Upcoming is the working view: a door only cares about who is still coming.
      Earlier exists so that "where did Friday's booking go?" has an answer other
      than us having quietly hidden it. */
@@ -135,6 +139,17 @@ export default function VenueBookings() {
       ))}
     </div>
   )
+
+  /* The whole screen is the gated feature, so it is withheld rather than
+     decorated: a booking list is the thing being sold, and showing it with a
+     lock beside it gives it away. */
+  if (bookingsLocked) {
+    return (
+      <Card title="Bookings">
+        <FeatureLock feature="booking_analytics" />
+      </Card>
+    )
+  }
 
   /* Deployed, and it threw. A bad minute, not a missing feature — so the way
      out is to try again, not to explain our roadmap. */

@@ -8,6 +8,7 @@ import { Badge, Button, Card, MetricCard, EmptyState, Alert } from '../../compon
 import Spinner from '../../components/ui/Spinner'
 import ResumeSetupCard from '../../components/ui/ResumeSetupCard'
 import { inBucket, stateLabel, stateTone } from '../../services/workflowState'
+import PlanCard from '../../components/ui/PlanCard'
 
 /**
  * Issue #18 — Vendor Portal Dashboard.
@@ -110,6 +111,10 @@ export default function Dashboard() {
           <Button>Add venue</Button>
         </Link>
       </div>
+
+      {/* Below the resume-setup card and above the counts: their plan is
+          context for the numbers, not a task competing with them. */}
+      <PlanCard />
 
       {/* Above the tiles, deliberately. An unfinished setup is the only thing on
           this page with a deadline attached to a human being's attention — the
