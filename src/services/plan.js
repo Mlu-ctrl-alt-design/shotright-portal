@@ -63,16 +63,34 @@ export const ENTITLEMENTS_METHOD = 'shotright.api.get_entitlements'
  * paying partner out, so it is worth one message to confirm the strings.
  */
 export const FEATURE = {
-  /** Google / Facebook / Instagram / website import on the add-venue screen. */
-  VENUE_IMPORT: 'venue_import',
+  /** Import one venue from a Google Business Profile. */
+  VENUE_IMPORT_GOOGLE: 'venue_import_google',
+  /** Import one venue from a public Facebook or Instagram page. */
+  VENUE_IMPORT_SOCIAL: 'venue_import_social',
+  /** Import one venue from its own website. */
+  VENUE_IMPORT_WEBSITE: 'venue_import_website',
   /** Many venues from one spreadsheet. */
-  BULK_IMPORT: 'bulk_import',
+  BULK_IMPORT: 'venue_bulk_import',
   /** Menu imported from a photo, PDF or spreadsheet. */
   MENU_IMPORT: 'menu_import',
-  /** Confirmed key. Registered on the bench, not yet enforced anywhere. */
+  /** How many bookings each venue is taking, over time. */
   BOOKING_ANALYTICS: 'booking_analytics',
-  UNLIMITED_VENUES: 'unlimited_venues',
 }
+
+/**
+ * The "import a venue from somewhere" group.
+ *
+ * ⚠️ There is no single `venue_import` row and there never was. The bench
+ * registers three — Google, social and website — because they are three
+ * different integrations that can be sold and switched off separately. A screen
+ * offering "import from anywhere" holds the feature if it holds ANY of them,
+ * which is what this is for.
+ */
+export const VENUE_IMPORT_FEATURES = [
+  FEATURE.VENUE_IMPORT_GOOGLE,
+  FEATURE.VENUE_IMPORT_SOCIAL,
+  FEATURE.VENUE_IMPORT_WEBSITE,
+]
 
 /** What the upgrade dialog charges. One place, because it is said three times. */
 export const PRO_PRICE = { amount: 'R149', cadence: 'per month' }
@@ -143,9 +161,26 @@ export const normaliseEntitlements = (payload) => {
    * not being sold here yet. That is a different state to "this partner has not
    * paid", and the only correct response to it is to show nobody a lock.
    */
-  if (payload.gate_active === false || payload.paywall === false || payload.enforced === false) {
+  /**
+   * ⚠️ FIELD NAMES CORRECTED 19 Sep, read off the live response.
+   *
+   * The bench sends `paywall_active`. It has never sent `gate_active`,
+   * `paywall` or `enforced` — those were guesses made while the endpoint was
+   * unreachable, so this branch never fired and a site with the paywall
+   * switched off fell through to ordinary key matching.
+   */
+  if (payload.paywall_active === false || payload.gate_active === false) {
     return OPEN
   }
+
+  /**
+   * Grandfathered: this partner predates the paywall and keeps every feature,
+   * permanently. The backend decides it from the Vendor Profile's creation date
+   * against the cutoff, and EVERY partner on the live site is in this state
+   * today. Showing them a lock is showing a paywall to somebody who has already
+   * been told they will never see one.
+   */
+  if (payload.grandfathered === true) return OPEN
 
   const features = readFeatures(
     payload.features ?? payload.entitlements ?? payload.capabilities ?? payload,

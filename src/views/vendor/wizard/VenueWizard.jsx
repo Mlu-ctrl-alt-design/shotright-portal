@@ -8,9 +8,9 @@ import {
 import { useSmartDefaults } from '../../../hooks/useSmartDefaults'
 import { useDraft, useSetupDraft } from '../../../hooks/useSetupDraft'
 import { useLegalStanding } from '../../../hooks/useLegalStanding'
-import { useFeature } from '../../../hooks/usePlan'
+import { useAnyFeature, useFeature } from '../../../hooks/usePlan'
 import { WIZARD_STEPS } from '../../../services/wizardSteps'
-import { FEATURE, isPaywalled } from '../../../services/plan'
+import { FEATURE, VENUE_IMPORT_FEATURES, isPaywalled } from '../../../services/plan'
 import { availableSources, hasSingleVenueSource } from '../../../services/venueSources'
 import { FIELD_SECTION, firstInvalid, validateSection } from '../../../services/venueValidation'
 import { splitName } from '../../../services/profile'
@@ -179,7 +179,8 @@ function AddVenue({ resumeId, draft, draftError }) {
    */
   const defaults = useSmartDefaults({ values: details, onChange: setDetails })
 
-  const importFeature = useFeature(FEATURE.VENUE_IMPORT)
+  /* Three registered features behind one button — see VENUE_IMPORT_FEATURES. */
+  const importFeature = useAnyFeature(VENUE_IMPORT_FEATURES)
   const bulkFeature = useFeature(FEATURE.BULK_IMPORT)
 
   /**
