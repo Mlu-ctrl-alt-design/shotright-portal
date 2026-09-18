@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import { renderApp } from './render'
 import { bench } from './bench'
 
@@ -27,6 +27,10 @@ const onFreePlan = () => {
     subscription: null,
   }
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('the plans page', () => {
   it('says what Pro costs and what it unlocks', async () => {
@@ -102,5 +106,61 @@ describe('the partners who are already here', () => {
 
     expect(await screen.findByRole('button', { name: /download the template/i })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /see plans/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('buying it', () => {
+  it('asks the server where to pay, and goes there', async () => {
+    onFreePlan()
+    const go = vi.fn()
+    vi.stubGlobal('open', go)
+
+    const { user } = renderApp({ route: '/plans', signedIn: true })
+    await user.click(await screen.findByRole('button', { name: /upgrade to pro/i }))
+
+    // What reached the server, not what the screen says.
+    const asked = bench.calls.filter((c) => c.method === 'get_upgrade_checkout').at(-1)
+    expect(asked?.args.plan).toBe('Pro')
+
+    // Same tab, per the design: checkout leaves the SPA and returns via a
+    // redirect configured in RevenueCat's dashboard.
+    await waitFor(() => expect(go).toHaveBeenCalledWith(bench.checkoutUrl, '_self'))
+  })
+
+  it('never offers to sell what this server cannot sell', async () => {
+    // Paywall on, RevenueCat unconfigured — get_upgrade_checkout would 417.
+    bench.entitlements = {
+      ...bench.entitlements,
+      features: [],
+      grandfathered: false,
+      paywall_active: true,
+      upgrade_available: false,
+    }
+    renderApp({ route: '/plans', signedIn: true })
+
+    expect(await screen.findByRole('heading', { name: /^pro$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /upgrade to pro/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('coming back from checkout', () => {
+  it('waits out the webhook lag instead of showing Free to someone who just paid', async () => {
+    onFreePlan()
+    // RevenueCat's webhook is documented at 5-60s; the vendor is back in two.
+    // The first refresh still says Free, the second has the purchase.
+    bench.refreshesBeforePro = 1
+
+    renderApp({ route: '/plans?checkout=return', signedIn: true })
+
+    expect(await screen.findByText(/you're on pro/i, {}, { timeout: 8000 })).toBeInTheDocument()
+    expect(bench.calls.filter((c) => c.method === 'refresh_subscription').length).toBeGreaterThan(1)
+  }, 15000)
+
+  it('does not write on an ordinary visit to the page', async () => {
+    onFreePlan()
+    renderApp({ route: '/plans', signedIn: true })
+
+    await screen.findByRole('heading', { name: /^pro$/i })
+    expect(bench.calls.filter((c) => c.method === 'refresh_subscription')).toHaveLength(0)
   })
 })

@@ -1,5 +1,8 @@
+import { useState } from 'react'
+import { useCheckoutReturn } from '../../hooks/useCheckoutReturn'
 import { useEntitlements } from '../../hooks/useEntitlements'
-import { featureCopy } from '../../services/entitlements'
+import { featureCopy, startUpgrade } from '../../services/entitlements'
+import { Alert, Button } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 
 /**
@@ -17,9 +20,26 @@ const rands = (amount) =>
   Number(amount) === 0 ? 'Free' : `R${Number(amount || 0).toLocaleString('en-ZA')}`
 
 export default function Plans() {
-  const { standing, isLoading, plans, subscription } = useEntitlements()
+  const { standing, isLoading, plans, subscription, canPrompt } = useEntitlements()
+  const checkout = useCheckoutReturn()
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState(null)
 
   if (isLoading) return <Spinner />
+
+  const buy = async (plan) => {
+    setError(null)
+    setBusy(plan)
+    try {
+      await startUpgrade(plan)
+    } catch (err) {
+      // Left on the page with a reason, rather than sent to a checkout that
+      // isn't there. `canPrompt` should already have hidden the button, so this
+      // is the server changing its mind between render and click.
+      setError(err?.message || 'We could not open the checkout just now.')
+      setBusy(null)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -31,6 +51,26 @@ export default function Plans() {
             : 'What you can do today, and what more would cost.'}
         </p>
       </header>
+
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      {/* They have just been charged. Saying nothing while we wait reads as
+          "it didn't work". */}
+      {checkout.state === 'checking' && (
+        <Alert variant="info">Confirming your payment&hellip;</Alert>
+      )}
+      {checkout.state === 'slow' && (
+        <Alert variant="info">
+          <p className="font-bold">Your payment may still be going through</p>
+          <p className="mt-1">
+            It can take a minute to reach us. Nothing has gone wrong, and you have not
+            been charged twice.{' '}
+            <button type="button" className="font-bold underline" onClick={checkout.checkAgain}>
+              Check again
+            </button>
+          </p>
+        </Alert>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {plans.map((plan) => {
@@ -80,6 +120,18 @@ export default function Plans() {
                   </li>
                 )}
               </ul>
+
+              {/* Only when this server can actually sell it — see canPrompt in
+                  useEntitlements. A button that 417s is worse than no button. */}
+              {canPrompt && !current && !plan.is_default && (
+                <Button
+                  className="mt-4"
+                  onClick={() => buy(plan.plan)}
+                  disabled={busy === plan.plan}
+                >
+                  {busy === plan.plan ? 'Opening checkout…' : `Upgrade to ${plan.plan}`}
+                </Button>
+              )}
             </section>
           )
         })}

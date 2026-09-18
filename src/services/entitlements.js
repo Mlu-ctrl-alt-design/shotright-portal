@@ -139,5 +139,24 @@ export const shouldPromptUpgrade = (standing) =>
 /** Where to send a partner to buy `plan`. */
 export const getUpgradeCheckout = async (plan) => await call(CHECKOUT_METHOD, { plan })
 
+/**
+ * Ask the server where to pay, then go there.
+ *
+ * **Same tab, and `window.open(url, '_self')` rather than
+ * `window.location.assign`.** RevenueCat's checkout leaves this app entirely and
+ * comes back through a redirect configured in their dashboard, so there is no
+ * SPA state worth preserving in a second tab — and two tabs showing the same
+ * account is its own confusion on a phone.
+ *
+ * The URL cannot be a plain `<a href>`: it is minted per vendor per plan by the
+ * server, so it does not exist until asked for.
+ */
+export const startUpgrade = async (plan) => {
+  const checkout = await getUpgradeCheckout(plan)
+  if (!checkout?.url) throw new Error('No checkout URL came back')
+  window.open(checkout.url, '_self')
+  return checkout
+}
+
 /** Re-read the subscription from RevenueCat. POST: it writes. */
 export const refreshSubscription = async () => await call(REFRESH_METHOD, {})
