@@ -31,6 +31,7 @@ const VenueOverview = lazy(() => import('./views/vendor/VenueOverview'))
 const VenueBookings = lazy(() => import('./views/vendor/VenueBookings'))
 const Profile = lazy(() => import('./views/vendor/Profile'))
 const Legal = lazy(() => import('./views/vendor/Legal'))
+const Plans = lazy(() => import('./views/vendor/Plans'))
 const VenueBulkImport = lazy(() => import('./views/vendor/VenueBulkImport'))
 
 export default function App() {
@@ -113,6 +114,8 @@ export default function App() {
               submit. Always reachable — a partner must be able to re-read what
               they agreed to without having to ask us for a copy. */}
           <Route path="/legal" element={<Legal />} />
+          {/* Where every upgrade surface points, and RevenueCat's return URL. */}
+          <Route path="/plans" element={<Plans />} />
         </Route>
       </Route>
 

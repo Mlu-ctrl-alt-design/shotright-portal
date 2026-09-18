@@ -172,6 +172,14 @@ const initial = () => ({
     get_outstanding_consents: true,
     accept_terms: true,
 
+    /* The Pro paywall. All three are live on the bench as of 18 Sep — but the
+       site is NOT configured, so `get_entitlements` answers with the paywall
+       off and `upgrade_available: false`. See `bench.entitlements`, whose
+       defaults are that same off state on purpose. */
+    get_entitlements: true,
+    get_upgrade_checkout: true,
+    refresh_subscription: true,
+
     /* The Places proxy. No method name has been agreed, so this models the
        guess landing; tests that want the wizard without it set them false. */
     search_places: true,
@@ -325,6 +333,102 @@ const initial = () => ({
    * path are unaffected on a bench with nothing to accept.
    */
   legal: [],
+
+  /**
+   * What `get_entitlements` answers. Verified against the live site, 18 Sep.
+   *
+   * ⚠️ THE DEFAULT IS THE PAYWALL SWITCHED OFF, because that is what the live
+   * bench actually returns today: `shotright_pro_cutoff` is unset, so every
+   * existing partner is `grandfathered` and holds every feature, and no
+   * RevenueCat keys are set, so `upgrade_available` is false.
+   *
+   * A double that defaulted to a live paywall would let every upgrade banner
+   * test pass while the real portal showed a partner an Upgrade button that
+   * 417s and a lock on a feature they already have. Tests that want the paywall
+   * ON must say so — `bench.entitlements.grandfathered = false` and
+   * `upgrade_available = true` — which is the same discipline as `deploy`.
+   *
+   * `management_url` is TOP LEVEL, not inside `subscription`. That is not a
+   * simplification: a lapsed vendor has no `subscription` at all, and they are
+   * exactly who needs the link.
+   */
+  entitlements: {
+    features: [
+      'booking_analytics',
+      'menu_import',
+      'venue_bulk_import',
+      'venue_import_google',
+      'venue_import_social',
+      'venue_import_website',
+    ],
+    gated: [
+      'booking_analytics',
+      'menu_import',
+      'venue_bulk_import',
+      'venue_import_google',
+      'venue_import_social',
+      'venue_import_website',
+    ],
+    catalogue: {
+      venue_import_google: {
+        label: 'Import from Google',
+        description: 'Pull name, address, hours, phone and photos from a Google Business Profile.',
+      },
+      venue_import_social: {
+        label: 'Import from Facebook or Instagram',
+        description: "Read a public page's details and recent photos. Nothing is posted.",
+      },
+      venue_import_website: {
+        label: 'Import from your website',
+        description: "Read hours, contact details and a menu from a venue's own site.",
+      },
+      venue_bulk_import: {
+        label: 'Several venues at once',
+        description: 'Import a whole spreadsheet of venues — CSV or XLSX, one venue a row.',
+      },
+      menu_import: {
+        label: 'Menu import',
+        description:
+          'Build a menu from a photograph, a PDF or a spreadsheet instead of typing it.',
+      },
+      booking_analytics: {
+        label: 'Booking numbers per venue',
+        description: 'How many bookings each venue is taking, over time.',
+      },
+    },
+    grandfathered: true,
+    paywall_active: false,
+    upgrade_available: false,
+    subscription: null,
+    management_url: null,
+    plans: [
+      { plan: 'Free', price_zar: 0, interval: 'Monthly', is_default: 1, features: [] },
+      {
+        plan: 'Pro',
+        price_zar: 149,
+        interval: 'Monthly',
+        is_default: 0,
+        features: [
+          'booking_analytics',
+          'menu_import',
+          'venue_bulk_import',
+          'venue_import_google',
+          'venue_import_social',
+          'venue_import_website',
+        ],
+      },
+    ],
+  },
+
+  /** Where `get_upgrade_checkout` sends a vendor. */
+  checkoutUrl: 'https://pay.rev.cat/testtoken/srv_abc?email=thabo%40cornerkitchen.co.za',
+
+  /**
+   * How many `refresh_subscription` calls happen before RevenueCat admits the
+   * purchase. Models the webhook lag the portal retries through; 0 means the
+   * very first call already sees Pro.
+   */
+  refreshesBeforePro: 0,
 
   /** The live 417: the consent list exists and throws. */
   legalListRefuses: false,

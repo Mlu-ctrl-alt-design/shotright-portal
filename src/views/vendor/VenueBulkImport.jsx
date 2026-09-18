@@ -10,6 +10,8 @@ import {
   parseVenueFile,
 } from '../../utils/venueImport'
 import { importVenueDrafts } from '../../services/venueImport'
+import FeatureLock from '../../components/ui/FeatureLock'
+import { useEntitlements } from '../../hooks/useEntitlements'
 
 /**
  * Many venues from one spreadsheet.
@@ -28,7 +30,15 @@ export default function VenueBulkImport() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { data: moods = [] } = useMoods()
+  const { canPrompt, locked } = useEntitlements()
   const fileInput = useRef(null)
+
+  /* The whole page is the gated feature here, unlike the menu importer where
+     it is one button. So the rest of the screen is withheld rather than
+     decorated with a lock: offering a file picker, a template download and a
+     column mapper to somebody whose import will be refused at the end wastes
+     their afternoon to make a point the banner already made. */
+  const isLocked = canPrompt && locked('venue_bulk_import')
 
   const [fileName, setFileName] = useState('')
   const [parsed, setParsed] = useState(null)
@@ -74,20 +84,35 @@ export default function VenueBulkImport() {
     URL.revokeObjectURL(url)
   }
 
+  const header = (
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold text-ink-900">Add venues from a spreadsheet</h1>
+        <p className="mt-1 text-sm text-ink-500">
+          One row per venue. They arrive as drafts, so you can add photos before anything goes
+          for review.
+        </p>
+      </div>
+      <Link to="/venues">
+        <Button variant="ghost">Back to venues</Button>
+      </Link>
+    </div>
+  )
+
+  /* The header stays so the partner knows where they are and can get back —
+     a locked page that is only a banner reads like an error. */
+  if (isLocked) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <FeatureLock feature="venue_bulk_import" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-ink-900">Add venues from a spreadsheet</h1>
-          <p className="mt-1 text-sm text-ink-500">
-            One row per venue. They arrive as drafts, so you can add photos before anything goes
-            for review.
-          </p>
-        </div>
-        <Link to="/venues">
-          <Button variant="ghost">Back to venues</Button>
-        </Link>
-      </div>
+      {header}
 
       {error && (
         <Alert variant="danger">

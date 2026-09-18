@@ -811,6 +811,85 @@ const apiHandlers = [
    * Answers `[]` once everything is signed — which is what `acceptDocument`
    * reads back as its proof.
    */
+  /* ------------------------------------------------------ The Pro paywall */
+
+  /**
+   * What a vendor may use, and what it would cost to use more.
+   *
+   * Served straight from `bench.entitlements`, whose default is the paywall
+   * SWITCHED OFF — see the note there. A test that wants locks has to ask.
+   */
+  method('shotright.api.get_entitlements', () =>
+    bench.entitlementsRefuses
+      ? validationError('Could not read entitlements')
+      : ok(structuredClone(bench.entitlements)),
+  ),
+
+  /**
+   * Where to go and pay.
+   *
+   * ⚠️ REFUSES WHEN THE SITE IS UNCONFIGURED, exactly as the bench does. The
+   * real endpoint raises `RevenueCatNotConfigured` — a ValidationError subclass,
+   * so 417 — when `shotright_revenuecat_checkout_url` is unset. A double that
+   * always handed back a URL would let the portal ship an Upgrade button that
+   * dead-ends on every site that has not bought RevenueCat yet, which is all of
+   * them today.
+   */
+  method('shotright.api.get_upgrade_checkout', (args) => {
+    if (!bench.entitlements.upgrade_available) {
+      return HttpResponse.json(
+        {
+          exc_type: 'RevenueCatNotConfigured',
+          exception: 'RevenueCatNotConfigured: Upgrades are not available on this server yet.',
+          _server_messages: JSON.stringify([
+            JSON.stringify({ message: 'Upgrades are not available on this server yet.' }),
+          ]),
+        },
+        { status: 417 },
+      )
+    }
+    const plan = bench.entitlements.plans.find((p) => p.plan === args.plan)
+    if (!plan || plan.is_default) return validationError(`${args.plan} is not a plan you can buy.`)
+    return ok({
+      url: bench.checkoutUrl,
+      plan: plan.plan,
+      price_zar: plan.price_zar,
+      interval: plan.interval,
+      app_user_id: 'srv_abc',
+    })
+  }),
+
+  /**
+   * Re-read the subscription from RevenueCat.
+   *
+   * `bench.refreshesBeforePro` models the webhook lag the portal retries
+   * through: until that many calls have been made, the vendor is still on Free.
+   * It is the only way to test the retry without a real 8-second wait.
+   */
+  method('shotright.api.refresh_subscription', () => {
+    bench.refreshCalls = (bench.refreshCalls || 0) + 1
+    if (bench.refreshCalls > (bench.refreshesBeforePro || 0)) {
+      bench.entitlements = {
+        ...bench.entitlements,
+        features: [...bench.entitlements.gated],
+        subscription: {
+          plan: 'Pro',
+          status: 'Active',
+          period_end: '2026-10-18 00:00:00',
+          cancel_at_period_end: false,
+          payment_failed: false,
+        },
+        management_url: 'https://pay.rev.cat/manage/abc',
+      }
+    }
+    return ok({
+      found: true,
+      changed: bench.refreshCalls > (bench.refreshesBeforePro || 0),
+      plan: bench.entitlements.subscription?.plan || null,
+      entitlements: structuredClone(bench.entitlements),
+    })
+  }),
+
   method('shotright.api.get_outstanding_consents', () =>
     bench.legalOutstandingRefuses
       ? validationError('Could not read outstanding consents')
