@@ -109,12 +109,19 @@ const asArray = (value) => (Array.isArray(value) ? value : [])
 /**
  * Pull a set of enabled feature keys out of whatever the bench sent.
  *
- * Handles the four shapes `get_entitlements` could plausibly answer with:
+ * Handles the four shapes `get_entitlements` could plausibly answer with. The
+ * bench sends the first one; the rest are tolerated rather than expected.
  *
- *   ['venue_import', 'bulk_import']               bare keys
- *   [{key: 'venue_import', enabled: 1}, …]        rows, as the doctype holds them
- *   {venue_import: true, bulk_import: false}      a map
- *   {features: […], plan: 'Pro'}                  either of the above, wrapped
+ *   ['menu_import', 'venue_bulk_import']              bare keys — what it sends
+ *   [{key: 'menu_import', enabled: 1}, …]             rows, as a doctype holds them
+ *   {menu_import: true, venue_bulk_import: false}     a map
+ *   {features: […], plan: 'Pro'}                      any of the above, wrapped
+ *
+ * ⚠️ The keys in these examples are REAL registered ones, and that matters more
+ * than it looks. They used to read `venue_import` and `bulk_import`, neither of
+ * which the bench has ever registered — and the same two invented strings were
+ * in `FEATURE`, gating live screens. An example is where the next person looks
+ * to learn the vocabulary, so a wrong one propagates.
  *
  * Anything else returns null, which means "we did not understand this" and is
  * treated exactly like "we could not ask".
