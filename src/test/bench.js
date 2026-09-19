@@ -199,7 +199,10 @@ const initial = () => ({
      * lock a paying partner out. Set true, with `bench.entitlements`, to model
      * a bench that sells Pro.
      */
-    get_entitlements: false,
+    /* Live since 18 Sep — the bench has been restarted and answers over HTTP.
+       It was false while the endpoint was unreachable, which meant the suite
+       only ever proved the fall-open path. */
+    get_entitlements: true,
     start_subscription: false,
   },
 
@@ -211,7 +214,35 @@ const initial = () => ({
    * `[]` is a FREE account with the paywall switched on, which is a different
    * state to the endpoint being absent, and the two must not be confused.
    */
-  entitlements: { plan: 'free', features: [] },
+  entitlements: {
+    /* The LIVE response, copied from the bench 2026-09-19. The previous fixture
+       was `{plan: 'free', features: []}` — a legitimate state, but one that
+       exercises no real feature key, which is how three wrong keys survived a
+       green suite. Every partner on the live site is grandfathered today, so
+       that is what this defaults to. */
+    features: [
+      'booking_analytics',
+      'menu_import',
+      'venue_bulk_import',
+      'venue_import_google',
+      'venue_import_social',
+      'venue_import_website',
+    ],
+    gated: [
+      'booking_analytics',
+      'menu_import',
+      'venue_bulk_import',
+      'venue_import_google',
+      'venue_import_social',
+      'venue_import_website',
+    ],
+    grandfathered: true,
+    paywall_active: false,
+    upgrade_available: false,
+    subscription: null,
+    management_url: null,
+    plans: [],
+  },
 
   /** Where `start_subscription` sends them. null models "no adapter yet". */
   checkoutUrl: null,

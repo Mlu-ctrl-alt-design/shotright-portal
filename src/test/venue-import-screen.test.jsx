@@ -41,7 +41,7 @@ const asFree = () => {
 
 const asPro = () => {
   bench.deploy.get_entitlements = true
-  bench.entitlements = { plan: 'pro', features: ['venue_import', 'bulk_import'] }
+  bench.entitlements = { plan: 'pro', features: ['venue_import_google', 'venue_import_social', 'venue_import_website', 'venue_bulk_import'] }
 }
 
 describe('when the screen appears at all', () => {
@@ -208,7 +208,7 @@ describe('importing is Pro', () => {
        the whole reason the bench stores capabilities as data. */
     withPlaces()
     bench.deploy.get_entitlements = true
-    bench.entitlements = { plan: 'pro', features: ['venue_import'] }
+    bench.entitlements = { plan: 'pro', features: ['venue_import_google', 'venue_import_social', 'venue_import_website'] }
     const { user } = renderApp({ route: ROUTE, signedIn: true })
 
     expect(await screen.findByLabelText(/find your listing/i)).toBeInTheDocument()
@@ -224,7 +224,14 @@ describe('importing is Pro', () => {
     bench.deploy.get_entitlements = true
     bench.entitlements = {
       plan: 'pro',
-      features: [{ key: 'venue_import', enabled: 0 }, { key: 'bulk_import', enabled: 1 }],
+      /* All three import integrations off, bulk on — the point of the test is
+         that one entitlement does not carry the other. */
+      features: [
+        { key: 'venue_import_google', enabled: 0 },
+        { key: 'venue_import_social', enabled: 0 },
+        { key: 'venue_import_website', enabled: 0 },
+        { key: 'venue_bulk_import', enabled: 1 },
+      ],
     }
     renderApp({ route: ROUTE, signedIn: true })
 

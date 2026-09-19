@@ -43,3 +43,20 @@ export function useFeature(feature) {
     plan: data?.plan ?? null,
   }
 }
+
+/**
+ * Is ANY of a group of features available?
+ *
+ * For a screen that offers one capability the bench registers as several — the
+ * add-venue importer is Google, social and website, three separately sellable
+ * integrations behind one button. Locking it needs all three to be locked;
+ * holding any one of them means the screen has something to offer.
+ */
+export function useAnyFeature(features) {
+  const { data, isPending } = useEntitlements()
+  return {
+    locked: !isPending && !features.some((f) => hasFeature(data, f)),
+    ready: !isPending,
+    plan: data?.plan ?? null,
+  }
+}

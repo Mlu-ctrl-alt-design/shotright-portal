@@ -392,7 +392,7 @@ describe('the Pro gate', () => {
 
   it('unlocks for an account that has the entitlement', async () => {
     bench.deploy.get_entitlements = true
-    bench.entitlements = { plan: 'pro', features: ['venue_import', 'bulk_import'] }
+    bench.entitlements = { plan: 'pro', features: ['venue_import_google', 'venue_import_social', 'venue_import_website', 'venue_bulk_import'] }
     const { user } = renderApp({ route: ROUTE, signedIn: true })
 
     await upload(user, csv(GOOD))
