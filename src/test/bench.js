@@ -204,6 +204,9 @@ const initial = () => ({
        only ever proved the fall-open path. */
     get_entitlements: true,
     start_subscription: false,
+    /* The real checkout endpoint, live on the bench since 19 Sep. It replaced
+       `start_subscription`, which has never existed. */
+    get_upgrade_checkout: true,
   },
 
   /**
@@ -242,6 +245,35 @@ const initial = () => ({
     subscription: null,
     management_url: null,
     plans: [],
+  },
+
+  /**
+   * What `get_upgrade_checkout` answers.
+   *
+   * ⚠️ PAYFAST IS A SIGNED FORM POST, NOT A LINK. There is no URL to send the
+   * browser to — the portal has to submit `fields` to `action`. `gateway` and
+   * `method` are the discriminator, because a RevenueCat site answers with a
+   * `url` instead and a client that assumed either would break on the other.
+   */
+  checkout: {
+    gateway: 'Payfast',
+    method: 'POST',
+    action: 'https://sandbox.payfast.co.za/eng/process',
+    fields: {
+      merchant_id: '10000100',
+      merchant_key: '46f0cd694581a',
+      m_payment_id: 'VPA-0000000001',
+      amount: '149.00',
+      item_name: "Sho't Right Pro",
+      subscription_type: '1',
+      recurring_amount: '149.00',
+      frequency: '3',
+      cycles: '0',
+    },
+    payment_attempt: 'VPA-0000000001',
+    plan: 'Pro',
+    price_zar: 149,
+    interval: 'Monthly',
   },
 
   /** Where `start_subscription` sends them. null models "no adapter yet". */

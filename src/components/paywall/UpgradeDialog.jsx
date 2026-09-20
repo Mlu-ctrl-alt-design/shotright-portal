@@ -93,25 +93,20 @@ export default function UpgradeDialog({ open, onClose }) {
   if (!open) return null
 
   /**
-   * ⚠️ THERE IS NO CHECKOUT YET, and this button refuses to pretend there is.
+   * ⚠️ Payfast's checkout is a form POST, so `startCheckout` navigates on its
+   * own — there is no URL to hand back here. It returns `available: false` only
+   * when the bench has no gateway configured, which the dialog says plainly
+   * rather than pretending a payment was started.
    *
-   * The Payfast adapter is still to be built — `Vendor Subscription` and
-   * `Subscription Event` exist on the bench with nowhere for a payment to come
-   * from. A button that looks like it takes payment and silently does nothing
-   * is the worst available outcome here: the partner believes they have
-   * subscribed, finds the feature still locked, and now distrusts both the
-   * paywall and the invoice they are waiting for.
-   *
-   * So the portal ASKS the bench, and says plainly what came back. The moment
-   * the adapter lands this starts working with no change here.
+   * A button that looks like it takes payment and silently does nothing is the
+   * worst available outcome: the partner believes they have subscribed, finds
+   * the feature still locked, and now distrusts both the paywall and the
+   * invoice they are waiting for.
    */
   const upgrade = async () => {
     setCheckout({ status: 'starting' })
     const result = await startCheckout()
-    if (result.redirectUrl) {
-      window.location.assign(result.redirectUrl)
-      return
-    }
+    if (result.available) return // already navigating to Payfast
     setCheckout({ status: 'unavailable' })
   }
 

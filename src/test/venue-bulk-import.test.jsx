@@ -374,12 +374,17 @@ describe('the Pro gate', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
-  it('does not pretend it can take money before there is a way to take it', async () => {
-    /* ⚠️ THERE IS NO PAYFAST ADAPTER YET. A button that looks like it charges
-       and silently does nothing is the worst outcome available: the partner
+  it('does not pretend it can take money when the bench cannot', async () => {
+    /* ⚠️ THE PAYFAST ADAPTER NOW EXISTS — this test used to say it did not, and
+       that premise expired on 20 Sep. What it protects has not: a SITE may
+       still have no gateway configured, and a button that looks like it charges
+       and silently does nothing is the worst outcome available. The partner
        believes they have subscribed, finds the feature still locked, and now
-       distrusts both the paywall and the invoice they are waiting for. */
+       distrusts both the paywall and the invoice they are waiting for.
+
+       `bench.checkout = null` is that site: the endpoint exists and refuses. */
     asFree()
+    bench.checkout = null
     const { user } = renderApp({ route: ROUTE, signedIn: true })
 
     await user.click(await screen.findByRole('button', { name: /see what pro includes/i }))
