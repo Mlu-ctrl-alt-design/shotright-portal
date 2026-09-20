@@ -249,25 +249,81 @@ export const hasFeature = (entitlements, feature) => {
  * Never throws — a checkout that cannot start is a sentence on screen, not a
  * stack trace over a payment flow.
  */
-export const CHECKOUT_METHOD = 'shotright.api.start_subscription'
+/**
+ * ⚠️ RENAMED 20 Sep, from the bench's own source.
+ *
+ * `start_subscription` has never existed. The real endpoint is
+ * `get_upgrade_checkout`, and it does not answer with a URL — it answers with a
+ * `gateway` and a `method`, because the two gateways have different shapes:
+ *
+ *   Payfast     method="POST"  action + fields, submitted as a form
+ *   RevenueCat  method="GET"   url, sent to the browser
+ *
+ * Payfast is the web portal's gateway because RevenueCat's Web Billing is
+ * Stripe-backed and Stripe does not serve South African merchants. RevenueCat
+ * remains for a future iOS in-app purchase.
+ */
+export const CHECKOUT_METHOD = 'shotright.api.get_upgrade_checkout'
 
-export const startCheckout = async () => {
-  if (USE_MOCKS) return { available: false }
-
+/**
+ * Ask the bench where to pay, and go there.
+ *
+ * @returns `{available}` — and on success it has already navigated, so nothing
+ *          after the call runs. `available: false` means the bench has no
+ *          gateway configured, which the dialog says plainly rather than
+ *          pretending a payment was started.
+ */
+export const startCheckout = async (plan = 'Pro') => {
+  let payload
   try {
-    return await withFallback(
-      CHECKOUT_METHOD,
-      async () => {
-        const payload = await call(CHECKOUT_METHOD, { plan: 'pro' })
-        const redirectUrl = payload?.redirect_url || payload?.url || payload?.checkout_url || null
-        return redirectUrl ? { available: true, redirectUrl } : { available: false }
-      },
-      async () => ({ available: false }),
-    )
+    payload = await call(CHECKOUT_METHOD, { plan })
   } catch (error) {
-    console.warn('[shotright] could not start a subscription:', error?.message || error)
+    console.warn(
+      `[shotright] ${CHECKOUT_METHOD} answered ${error?.status || 'an error'}: ` +
+        `${error?.message || 'no message'}. No payment has been started.`,
+    )
     return { available: false }
   }
+
+  if (payload?.method === 'POST' && payload.action && payload.fields) {
+    submitPayfastForm(payload.action, payload.fields)
+    return { available: true }
+  }
+
+  const redirectUrl = payload?.url || payload?.redirect_url || payload?.checkout_url
+  if (redirectUrl) {
+    window.location.assign(redirectUrl)
+    return { available: true }
+  }
+
+  return { available: false }
+}
+
+/**
+ * Build and submit Payfast's checkout form.
+ *
+ * ⚠️ THE FIELDS GO AS RECEIVED. Payfast's signature is an MD5 over the fields
+ * **in the order the server sent them**, so reordering, filtering or adding one
+ * invalidates it — and Payfast answers an invalid signature with a 400 that
+ * says nothing a partner could act on. `Object.entries` preserves the server's
+ * order; nothing here may sort it.
+ *
+ * A real form POST rather than fetch: Payfast responds with a redirect to its
+ * own hosted payment page, which the browser has to follow as a navigation.
+ */
+const submitPayfastForm = (action, fields) => {
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = action
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = name
+    input.value = String(value)
+    form.appendChild(input)
+  }
+  document.body.appendChild(form)
+  form.submit()
 }
 
 /**

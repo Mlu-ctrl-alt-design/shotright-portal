@@ -745,6 +745,10 @@ const apiHandlers = [
 
   /* No Payfast adapter yet, so this is off by default and the upgrade dialog
      has to say so rather than showing a button that takes no money. */
+  method('shotright.api.get_upgrade_checkout', () =>
+    bench.checkout ? ok(structuredClone(bench.checkout)) : validationError('No gateway configured'),
+  ),
+
   method('shotright.api.start_subscription', () =>
     ok({ redirect_url: bench.checkoutUrl || null }),
   ),
