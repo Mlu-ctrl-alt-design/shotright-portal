@@ -464,83 +464,96 @@ send the actual list of states in the workflow.
 
 ---
 
-## P1 — the Add Venue redesign (17 Sep)
+## P1 — the Add Venue redesign
 
-Four asks, in the order they cost partners something. The first is the only one
-that can lock a paying customer out, so it is first.
+Two of the four original asks here are **closed**. What is left is the import
+half, and both methods now have drop-in reference implementations in this repo
+rather than a description of one.
 
-### 1. Confirm the entitlement KEY STRINGS — before the paywall is switched on
+### ✅ Closed — entitlement key strings (PR #43)
 
-The portal reads entitlements as rows and asks "is `<key>` on for this
-account". Only one of the keys it asks for is confirmed:
+The portal was guessing, and it was guessing wrong in a way that would have
+locked paying partners out: it asked for a single `venue_import` row that has
+never existed. The bench registers **three**, because Google, social and website
+are three different integrations that can be sold and switched off separately:
 
-| Key the portal asks for | Confirmed? | Gates |
-|---|---|---|
-| `venue_import` | ❌ guessed | Google / Facebook / website import |
-| `bulk_import` | ❌ guessed | the spreadsheet route, and `/venues/import` |
-| `menu_import` | ❌ guessed | listed in the dialog, not enforced |
-| `booking_analytics` | ✅ yours | registered, nothing enforces it yet |
-| `unlimited_venues` | ❌ guessed | listed in the dialog, not enforced |
+    venue_import_google · venue_import_social · venue_import_website
+    venue_bulk_import · menu_import · booking_analytics
 
-⚠️ **This is the one place the fall-open rule does not protect anybody.** If a
-key does not match a registered row, the bench answers perfectly well and the
-answer is "not entitled" — so a paying Pro partner sees a paywall. Everywhere
-else a wrong answer unlocks; here it locks.
+`FEATURE` in `src/services/plan.js` is the one place these live.
 
-They live in one map: `FEATURE` in `src/services/plan.js`. Tell us the real
-strings and it is a one-line change.
+### ✅ Closed — Payfast checkout (PR #45)
 
-### 2. Confirm the paywall `exc_type`
+`start_subscription` is wired. The upgrade button takes payment instead of
+saying "Pro isn't on sale yet".
 
-You said the gate raises a dedicated exception subclassing `ValidationError`
-specifically so clients branch on `exc_type` rather than English prose — which
-is exactly right, and the portal does. It currently matches a PATTERN, because
-we have not seen the real name on the wire:
+### 1. The Places proxy — `backend/places_proxy.py`
+
+Drop-in. `search_places` and `get_place_details`, with the claimed-listing
+dedupe, the opening-hours mapping, and field masks that make rule 2 ("we store
+the `place_id` and nothing else of Google's") true by construction rather than
+by remembering.
+
+⚠️ **It corrects a cost assumption the portal has been carrying.**
+`src/services/places.js` says a search returning ids only is free and unlimited.
+That is true of an ids-only field mask — and it is not the call we can make,
+because a partner choosing between three results needs to see a name and an
+address, which moves it to a charged SKU. Still cheap (once per venue, ever,
+debounced, three-character minimum, and the billable detail call fires only on a
+deliberate pick), but it is a charged call and the file says so in full.
+
+One field is needed on `Venue`, and `create_venue` **must declare it**:
+
+    place_id   Data, 255, unique, optional
+
+If the kwarg is not declared Frappe drops it at HTTP 200, the venue saves
+perfectly, and the duplicate-listing check silently never fires — so the second
+partner to claim the same restaurant is told nothing and the bookings split.
+Nothing in the UI would ever show that.
+
+### 2. The URL importer — `backend/venue_url_import.py`
+
+Drop-in. One method for both the social and the website route, because they are
+the same job.
+
+⚠️ **Read the two warnings at the top of that file before deploying it.**
+
+**Facebook and Instagram need a product decision, not more code.** Scraping
+those pages server-side does not work and will not be made to work: both serve a
+login wall to datacentre IPs, render from JavaScript, block bot traffic, and
+forbid it in their terms. A scraper passes a test on somebody's laptop and then
+returns nothing for real partners. The three honest options — the official Graph
+API with a partner login (which also *proves* they own the page), dropping the
+route, or shipping the website importer alone — are laid out in the file. The
+website route can ship on its own; the portal renders routes independently.
+
+**The SSRF defence is the part that can actually hurt somebody.** This method
+fetches a user-supplied URL from inside the bench, and the bench shares a box
+with other sites, a Redis, a MariaDB and a cloud metadata endpoint. The file
+validates the scheme, the port, and every address the hostname resolves to — and
+re-validates on **every redirect hop**, which is the bypass people forget:
+validating what the partner typed and then handing it to `requests` with
+`allow_redirects=True` defends nothing at all. If you change the fetch, re-read
+that section.
+
+### 3. Confirm the paywall `exc_type`
+
+Still open, and still a guess. The gate raises a dedicated exception subclassing
+`ValidationError` so clients branch on `exc_type` rather than English prose —
+which is right, and the portal does. It matches a PATTERN because the real name
+has never been seen on the wire:
 
 ```
 /PlanRequired|EntitlementRequired|UpgradeRequired|SubscriptionRequired|PaywallError/
 ```
 
-`isPaywalled()` in `plan.js`. Name it and we narrow it to the one.
+`isPaywalled()` in `src/services/plan.js`. Name it and we narrow it to the one.
 
-### 3. `start_subscription` — so the Upgrade button can do something
-
-```python
-@frappe.whitelist()
-def start_subscription(plan: str) -> dict:
-    """-> {"redirect_url": "https://www.payfast.co.za/eng/process?..."}"""
-```
-
-Until it exists the dialog says *"Pro isn't on sale yet — nothing has been
-charged"* rather than showing a button that takes no money. It starts working
-the day the adapter lands, with no portal release.
-
-### 4. The import endpoints — the whole first screen depends on them
-
-`search_places` / `get_place_details` are specified in `src/services/places.js`
-and are still absent from `api.py`. The URL importer has never been written:
-
-```python
-@frappe.whitelist()
-def import_venue_from_url(url: str, source: str = "") -> dict:
-    """source is a hint ('social' | 'website'), not a contract.
-
-    Return the identity fields a form can hold and NOTHING else — no
-    description, no rating, no scraped photo set. Same shape as
-    get_place_details:
-      {place_id, display_name, formatted_address,
-       location: {latitude, longitude}, national_phone_number}
-    """
-```
-
-**One method for both the social and the website route**, deliberately: they
-are the same job — fetch a page, pull out name, address, phone, hours — and
-splitting them buys nothing but a second thing to deploy.
-
-Until at least one of these lands, **the import screen does not render at all**
-and partners go straight to the form. That is on purpose: a screen offering
-three shortcuts where all three are dead costs a click and delivers a broken
-promise.
+Both new files also call `require_entitlement(...)` from a module they assume is
+called `shotright.entitlements` — **rename that import to whatever PR #44
+actually calls it.** The client-side check is a courtesy; the server is where
+the gate has to be, and a lapsed subscription between page load and submit walks
+straight past the UI.
 
 ### Also worth an answer, not blocking
 
