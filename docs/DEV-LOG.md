@@ -19,7 +19,63 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 17 Sep 2026 (latest) — the five-step wizard became one page, and import went Pro
+---
+
+## 21 Sep 2026 (latest) — the server half of the venue import
+
+Wrote the two backend methods the add-venue import screen has been waiting on,
+as drop-in reference implementations in `backend/` — the same way every other
+backend ask on this project has been handed over.
+
+`backend/places_proxy.py`      search_places, get_place_details
+`backend/venue_url_import.py`  import_venue_from_url
+
+Both are gated on the real entitlement keys and both are safe to leave
+undeployed: the portal hides an import route the bench cannot serve, so the
+screen simply does not appear until they answer.
+
+### Three things worth more than the code
+
+**A cost assumption we have been carrying is wrong.** `places.js` says a search
+returning ids only is free and unlimited. True — and not the call we can make.
+A partner choosing between three results has to see a name and an address, and
+asking for `places.displayName` moves the request off the free ID-only SKU onto
+a charged one. It is still the cheap shape (once per venue ever, debounced,
+three-character minimum, and the dearer detail call only on a deliberate pick),
+but "free" was doing work in that comment that it cannot do, and an assumption
+like that is discovered on an invoice.
+
+**The Facebook/Instagram route is a product decision, not an engineering one.**
+Scraping those pages server-side does not work and will not be made to work:
+login wall to datacentre IPs, JavaScript rendering, active bot-blocking, and
+against both platforms' terms. A scraper passes on somebody's laptop and returns
+nothing for real partners — intermittently, which is worse. The three honest
+options are in the file: the official Graph API with a partner login (which also
+*proves* they own the page, which scraping never does), dropping the route, or
+shipping the website importer alone. The website route can ship by itself.
+
+**Fetching a user-supplied URL from inside the bench is an SSRF hole**, and this
+bench shares a box with other sites, a Redis, a MariaDB and a cloud metadata
+endpoint. The scheme, the port, and every address the hostname resolves to are
+checked — and re-checked on **every redirect hop**, which is the bypass people
+forget: validating what the partner typed and then handing it to `requests` with
+`allow_redirects=True` defends nothing. The residual DNS-rebinding window is
+named in the file rather than left for somebody to assume was considered.
+
+### Also
+
+`create_venue` must declare `place_id` or the duplicate-listing check silently
+never fires — the venue saves at HTTP 200, the kwarg is dropped, and the second
+partner claiming the same restaurant is told nothing while the bookings split.
+Seventh instance of that failure shape on this project.
+
+Two of the four asks from 17 Sep closed themselves while this was being written:
+the entitlement keys (PR #43 — the portal was asking for a single `venue_import`
+row that never existed; the bench registers three) and Payfast (PR #45). The
+`exc_type` is still a pattern, and both new files import
+`require_entitlement` from a module name that is a guess — rename it.
+
+## 17 Sep 2026 — the five-step wizard became one page, and import went Pro
 
 Implemented the Claude Design handoff for **Add Venue**. Four scope decisions
 were confirmed with the user before any code was written: replace the wizard

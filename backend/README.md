@@ -12,6 +12,32 @@ and its doctypes.
 Drop it into `shotright/api/` when the app is scaffolded, and the portal works
 with `VITE_USE_MOCKS=false` and no frontend changes.
 
+## What is in here
+
+| File | Adds |
+|---|---|
+| `api_reference.py` | the base server surface the portal is written against |
+| `otp_and_email.py` | registration OTP and the confirmation mail |
+| `venue_drafts.py` | autosave and resume for a half-finished venue |
+| `venue_photos.py` | somewhere for a venue's pictures to live, in order |
+| `venue_review.py` | the completeness rules and the review queue |
+| `venue_option_popularity.py` | the aggregates behind the smart defaults |
+| `mood_suggestions.py` | a partner-authored mood, filed for review |
+| `menu_import.py` | the background menu import |
+| `places_proxy.py` | **new** — "is your venue already on Google?" |
+| `venue_url_import.py` | **new** — read a venue off its own website |
+
+The two new ones are the server half of the 17 Sep add-venue redesign. Both are
+gated on entitlements (`venue_import_google`, `venue_import_social`,
+`venue_import_website`) and both are safe to leave undeployed: the portal hides
+an import route it cannot serve, so nothing shows a dead control in the
+meantime.
+
+⚠️ `venue_url_import.py` carries two warnings worth reading before it ships —
+one about Facebook and Instagram being a product decision rather than a coding
+problem, and one about SSRF, because it fetches a URL a user supplied from
+inside the bench.
+
 ## Doctypes this assumes
 
 | DocType | Introduced by | Key fields |
