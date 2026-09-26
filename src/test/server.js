@@ -529,41 +529,60 @@ const apiHandlers = [
   }),
 
   /**
-   * Google sign-in, as a bench that HAS it would answer.
-   *
-   * Off by default (`bench.deploy.login_with_google`), so the ordinary suite
-   * runs against a bench that has never heard of it — which is the state the
-   * live one is in until the backend says otherwise, and the state in which no
-   * button may appear.
-   *
-   * The parameter is `credential` here. The portal does not know that, so it
-   * tries `credential`, `id_token` and `token` in turn; this rejects the wrong
-   * ones the way Frappe does, with a TypeError about an unexpected keyword,
-   * rather than quietly accepting them.
+   * The CUSTOMER Google door. Always "deployed" — it is on the live bench — so
+   * that a portal which strays onto it is caught: the tests assert it is never
+   * called. Calling it is how partner accounts were made without a Vendor
+   * Profile on 26 Sep.
    */
-  method('shotright.api.login_with_google', (args) => {
-    if (!bench.deploy.login_with_google) return methodMissing('shotright.api.login_with_google')
+  method('shotright.api.login_with_google', () => ok({ api_key: 'CUSTOMER', api_secret: 'CUSTOMER' })),
 
-    const unexpected = Object.keys(args).filter((k) => k !== 'credential' && k !== 'cmd')
+  /**
+   * The PARTNER Google door, `login_vendor_with_google(id_token, business_name)`,
+   * answering the way the real one does (shotright/google_signin.py):
+   *  - a wrong keyword is Frappe's TypeError, which on this bench is a 500 —
+   *    the previous double used `credential` and a 417, and so passed the
+   *    guessing code the live bench punished;
+   *  - no token at all is AuthenticationError, 401 — the capability probe;
+   *  - a new partner without a business name gets `business_name_required`
+   *    and nothing is created.
+   */
+  method('shotright.api.login_vendor_with_google', (args) => {
+    if (!bench.deploy.login_vendor_with_google) {
+      return methodMissing('shotright.api.login_vendor_with_google')
+    }
+
+    const unexpected = Object.keys(args).filter((k) => !['id_token', 'business_name', 'cmd'].includes(k))
     if (unexpected.length) {
       return HttpResponse.json(
         {
           exc_type: 'TypeError',
-          exception: `TypeError: login_with_google() got an unexpected keyword argument '${unexpected[0]}'`,
+          exception: `TypeError: login_vendor_with_google() got an unexpected keyword argument '${unexpected[0]}'`,
         },
-        { status: 417 },
+        { status: 500 },
       )
     }
 
-    // The probe: no credential at all. A method that EXISTS says so by
-    // refusing, and that refusal is what tells the portal it is there.
-    if (!args.credential) return validationError('credential is required')
-
-    if (args.credential === 'unverified-account') {
-      return ok({ otp_required: true, email: 'new@partner.co.za' })
+    if (!args.id_token) {
+      return HttpResponse.json(
+        { exc_type: 'AuthenticationError', exception: 'frappe.exceptions.AuthenticationError: Missing Google ID token' },
+        { status: 401 },
+      )
     }
-    if (args.credential !== 'good-google-token') {
-      return validationError('That Google sign-in could not be verified.')
+    if (args.id_token === 'forged') {
+      return HttpResponse.json(
+        {
+          exc_type: 'AuthenticationError',
+          exception: 'frappe.exceptions.AuthenticationError: Could not verify this Google sign-in',
+          _server_messages: JSON.stringify([JSON.stringify({ message: 'Could not verify this Google sign-in' })]),
+        },
+        { status: 401 },
+      )
+    }
+    if (args.id_token === 'new-partner-token' && !(args.business_name || '').trim()) {
+      return ok({ business_name_required: true, email: 'new@partner.co.za' })
+    }
+    if (args.id_token === 'new-partner-token') {
+      bench.googleVendorsCreated = [...(bench.googleVendorsCreated || []), args.business_name.trim()]
     }
     return ok({ api_key: 'GK', api_secret: 'GS' })
   }),

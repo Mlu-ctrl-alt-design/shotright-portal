@@ -115,9 +115,10 @@ const initial = () => ({
   /** Which methods exist. Flip to false to model "not deployed yet". */
   deploy: {
     login: true,
-    /* Off: the live bench has never told the portal it has this, and until it
-       does no sign-in button may appear. Flip it on to model one that does. */
-    login_with_google: false,
+    /* Off by default: until backend PR #58 is deployed the live bench has no
+       partner Google door, and no sign-in button may appear. Flip it on to
+       model a bench that has one. */
+    login_vendor_with_google: false,
     register_vendor: true,
     get_vendor_dashboard: true,
     get_venue_detail: true,

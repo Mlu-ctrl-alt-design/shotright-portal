@@ -150,60 +150,41 @@ export const login = (email, password) =>
 /**
  * Signing in with Google.
  *
- * WE DO NOT KNOW WHAT THE BENCH CALLS THIS. The mobile app has Google sign-in,
- * so something exists; the portal has never been told its name. Rather than
- * guess one and ship a button that 404s, the same shape used everywhere else
- * here applies — a list of candidates, tried in order, and the feature simply
- * does not appear when none of them is deployed.
+ * ONE METHOD, ONE PARAMETER, NO GUESSING. This used to try four method names
+ * and three parameter names, and the first name on the list was
+ * `login_with_google` — the mobile app's CUSTOMER sign-in. It accepted the
+ * token, made a customer account, and handed back a working session with no
+ * Vendor Profile behind it, so every partner call afterwards 404'd
+ * (`get_vendor_dashboard`, `list_venue_drafts`, `create_venue`…). Seen on a
+ * real sign-up, 26 Sep. The guessing also cost a 500 and an Error Log row per
+ * wrong parameter name, because Frappe raises TypeError for a wrong kwarg.
  *
- * THE PARAMETER NAME IS ALSO A GUESS, and unlike a form field a wrong kwarg on
- * a whitelisted method is fatal: Frappe raises TypeError rather than ignoring
- * it. So each method is tried with each name, and an unexpected-keyword error
- * moves on to the next rather than surfacing.
+ * `login_vendor_with_google` is the partner door (backend PR #58). It is
+ * deliberately the ONLY candidate: if it is not deployed the button hides,
+ * which is the right failure — falling back to the customer door is how the
+ * broken accounts were made.
  */
-export const GOOGLE_AUTH_METHODS = [
-  'shotright.api.login_with_google',
-  'shotright.api.google_login',
-  'shotright.api.login_google',
-  'shotright.api.social_login',
-]
-
-const GOOGLE_CREDENTIAL_PARAMS = ['credential', 'id_token', 'token']
-
-const isWrongParameter = (err) =>
-  /unexpected keyword argument|got an unexpected|missing \d+ required positional/i.test(
-    `${err?.message || ''} ${err?.detail || ''} ${err?.excType || ''}`,
-  )
+export const GOOGLE_AUTH_METHOD = 'shotright.api.login_vendor_with_google'
+export const GOOGLE_AUTH_METHODS = [GOOGLE_AUTH_METHOD]
 
 /**
  * Is there anything on the other end?
  *
- * Probed by calling each candidate with NO credential. A method that is not
- * there answers 404 `DoesNotExistError`; a method that is there rejects the
- * empty call with a validation error, and that rejection is the proof we want.
- * `isMethodMissing` reads the exception text, which is the only thing that
- * separates a missing METHOD from a missing DOCUMENT on this bench.
+ * Probed with NO token, so a probe cannot sign anybody in. The deployed method
+ * refuses that with a 401; a missing one answers with the module-has-no-
+ * attribute shape `isMethodMissing` reads.
  *
- * No credential is sent, so a probe cannot log anybody in or out.
- *
- * Cached for the tab: the login screen must not fire four requests per render.
+ * Cached for the tab: the login screen must not probe on every render.
  */
 let googleSupport = null
 
 export const googleAuthSupported = () => {
   if (USE_MOCKS) return Promise.resolve(true)
   if (!googleSupport) {
-    googleSupport = (async () => {
-      for (const method of GOOGLE_AUTH_METHODS) {
-        try {
-          await call(method, {})
-          return true
-        } catch (err) {
-          if (!isMethodMissing(err, method)) return true
-        }
-      }
-      return false
-    })()
+    googleSupport = call(GOOGLE_AUTH_METHOD, {}, { keepSession: true }).then(
+      () => true,
+      (err) => !isMethodMissing(err, GOOGLE_AUTH_METHOD),
+    )
   }
   return googleSupport
 }
@@ -211,14 +192,18 @@ export const googleAuthSupported = () => {
 /**
  * Exchange a Google ID token for the portal's own api_key/api_secret.
  *
- * The token is Google's claim about who this is; only the bench can check it
- * against Google's signing keys, so nothing here inspects or trusts it. What
- * comes back is the same shape as `login`, including the `otp_required` branch
- * — a Google account can still belong to a partner who has not finished
- * verifying, and walking them past that is how someone ends up on a dashboard
- * with nothing to authenticate with.
+ * Resolves to one of:
+ *  - the session (`{api_key, api_secret}`), token stored;
+ *  - `{businessNameRequired: true, email}` — Google has proved who this is but
+ *    they are not a partner yet, and the bench needs a business name to make
+ *    them one. NOTHING has been created. Call again with the same credential
+ *    and a `businessName`; a Google credential is good for about an hour.
+ *  - `{otpRequired: true, email}` — kept for parity with the password path.
+ *
+ * The token is Google's claim about who this is; only the bench can check it,
+ * so nothing here inspects it.
  */
-export const loginWithGoogle = async (credential) => {
+export const loginWithGoogle = async (credential, businessName) => {
   if (!credential) throw new Error('Google didn’t give us anything to sign in with.')
 
   if (USE_MOCKS) {
@@ -226,29 +211,28 @@ export const loginWithGoogle = async (credential) => {
     return { api_key: 'mock', api_secret: 'mock' }
   }
 
-  let lastError = null
-  for (const method of GOOGLE_AUTH_METHODS) {
-    for (const param of GOOGLE_CREDENTIAL_PARAMS) {
-      try {
-        const result = await call(method, { [param]: credential })
-        if (result?.otp_required) {
-          return { otpRequired: true, email: result.email }
-        }
-        setAuthToken(result)
-        return result
-      } catch (err) {
-        if (isMethodMissing(err, method)) break // wrong method, not wrong name
-        if (isWrongParameter(err)) continue // right method, try the next name
-        throw err // a real refusal: a rejected token, a blocked account
-      }
+  const args = { id_token: credential }
+  const name = (businessName || '').trim()
+  if (name) args.business_name = name
+
+  let result
+  try {
+    result = await call(GOOGLE_AUTH_METHOD, args, { keepSession: true })
+  } catch (err) {
+    if (isMethodMissing(err, GOOGLE_AUTH_METHOD)) {
+      throw new Error('Signing in with Google isn’t available on this server yet. Use your password.')
     }
+    throw err
   }
 
-  /* Every candidate was absent. The button should not have been on screen —
-     `googleAuthSupported` gates it — so this is a deployment that changed under
-     a tab that was already open. */
-  throw lastError ||
-    new Error('Signing in with Google isn’t available on this server yet. Use your password.')
+  if (result?.business_name_required) {
+    return { businessNameRequired: true, email: result.email }
+  }
+  if (result?.otp_required) {
+    return { otpRequired: true, email: result.email }
+  }
+  setAuthToken(result)
+  return result
 }
 
 /**

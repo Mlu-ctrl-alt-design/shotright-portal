@@ -57,8 +57,11 @@ export const useAuthStore = create((set) => ({
    * dashboard with nothing to authenticate with — does not care which button
    * they pressed to get there.
    */
-  async loginWithGoogle(credential) {
-    const session = await vendorApi.loginWithGoogle(credential)
+  async loginWithGoogle(credential, businessName) {
+    const session = await vendorApi.loginWithGoogle(credential, businessName)
+    // Not signed in yet: Google proved who this is, and the bench needs a
+    // business name before it will make them a partner. Nothing was created.
+    if (session?.businessNameRequired) return session
     if (session?.otpRequired) return session
     if (!hasAuthToken()) {
       throw new Error('We couldn’t sign you in. Please try again.')

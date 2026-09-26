@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore'
 import { Button, Input, PasswordInput, Alert } from '../../components/ui'
 import GoogleSignInButton from '../../components/ui/GoogleSignInButton'
 import AuthLayout from '../../components/layout/AuthLayout'
+import GoogleBusinessNameStep from './GoogleBusinessNameStep'
 
 /**
  * Issue #14 — partner registration.
@@ -47,6 +48,8 @@ export default function Register() {
   })
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  // {credential, email} while waiting for a business name — see Login.
+  const [pendingGoogle, setPendingGoogle] = useState(null)
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
   const strength = strengthOf(form.password)
@@ -104,12 +107,32 @@ export default function Register() {
     setBusy(true)
     setError(null)
     try {
-      land(await loginWithGoogle(credential))
+      // A business name typed into the form above is sent with the token, so
+      // a partner who filled it in is not asked a second time.
+      const result = await loginWithGoogle(credential, form.business_name)
+      if (result?.businessNameRequired) {
+        setPendingGoogle({ credential, email: result.email })
+        return
+      }
+      land(result)
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
     }
+  }
+
+  if (pendingGoogle) {
+    return (
+      <AuthLayout>
+        <GoogleBusinessNameStep
+          email={pendingGoogle.email}
+          initialName={form.business_name}
+          onSubmit={async (name) => land(await loginWithGoogle(pendingGoogle.credential, name))}
+          onBack={() => setPendingGoogle(null)}
+        />
+      </AuthLayout>
+    )
   }
 
   return (
