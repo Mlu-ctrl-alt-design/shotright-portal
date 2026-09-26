@@ -6,6 +6,7 @@ import Logo from './Logo'
 import NavDrawer from './NavDrawer'
 import LegalBanner from './LegalBanner'
 import PaymentReturnBanner from './PaymentReturnBanner'
+import ProBadge from './ProBadge'
 
 /**
  * The authenticated partner shell.
@@ -200,8 +201,9 @@ export default function Shell() {
       </a>
 
       <aside className="hidden w-64 shrink-0 flex-col rounded-3xl bg-brand-500 py-8 lg:flex">
-        <div className="px-6">
+        <div className="flex items-center gap-2 px-6">
           <Logo />
+          <ProBadge />
         </div>
         <nav aria-label="Main" className="mt-10 flex-1 space-y-1 pl-4">
           {navItems('sidebar')}
@@ -226,6 +228,7 @@ export default function Shell() {
             <MenuIcon />
           </button>
           <Logo size="sm" />
+          <ProBadge className="ml-auto" />
         </header>
 
         <NavDrawer open={drawerOpen} onClose={closeDrawer} triggerRef={triggerRef} label="Main">

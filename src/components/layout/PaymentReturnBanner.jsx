@@ -73,6 +73,7 @@ export default function PaymentReturnBanner() {
                 setState({ kind: 'promotion', attempt, venue: payment.venue })
               } else {
                 queryClient.invalidateQueries({ queryKey: ['entitlements'] })
+                queryClient.invalidateQueries({ queryKey: ['subscription'] })
                 queryClient.invalidateQueries({ queryKey: ['dashboard'] })
                 setState({ kind: 'active', attempt, plan: payment.plan || 'Pro' })
               }
@@ -89,6 +90,7 @@ export default function PaymentReturnBanner() {
           if (cancelled) return
           if (sub?.status === 'Active') {
             queryClient.invalidateQueries({ queryKey: ['entitlements'] })
+            queryClient.invalidateQueries({ queryKey: ['subscription'] })
             queryClient.invalidateQueries({ queryKey: ['dashboard'] })
             setState({ kind: 'active', attempt, plan: sub.plan || 'Pro' })
             return

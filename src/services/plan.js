@@ -393,3 +393,19 @@ export const getSubscription = async () => {
     return undefined
   }
 }
+
+/**
+ * Is this subscription a live Pro plan — the thing the PRO badge announces?
+ *
+ * Live is the bench's LIVE_STATUSES: Active, Trialing, and Past Due (a failed
+ * charge still being retried keeps access). Cancelled/Expired are not.
+ * Grandfathered partners hold every feature without a subscription, and are
+ * deliberately NOT badged: they have not bought Pro.
+ */
+export const PRO_LIVE_STATUSES = ['Active', 'Trialing', 'Past Due']
+
+export const proStatus = (sub) => {
+  if (!sub || !/pro/i.test(String(sub.plan || ''))) return null
+  if (!PRO_LIVE_STATUSES.includes(sub.status)) return null
+  return sub.status === 'Trialing' ? 'trial' : 'active'
+}
