@@ -7,7 +7,10 @@ export default function ProtectedRoute() {
 
   if (status !== 'authenticated') {
     // Remember where they were headed so login can return them there.
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+    // The query string travels too: Payfast returns here with
+    // `?payment=success&attempt=…`, and a partner whose session lapsed while
+    // paying must still hear about it after signing back in.
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
   }
   return <Outlet />
 }
