@@ -462,6 +462,13 @@ const initial = () => ({
 
   /** Every write the app made, in order. Tests assert on this. */
   calls: [],
+
+  /**
+   * Venue Ratings, as the bench stores them (shotright PR #57). Rows:
+   * {name, venue, score, comment, customer_first_name, visit_date,
+   *  submitted_on, reply, replied_on, is_flagged}.
+   */
+  ratings: [],
 })
 
 export let bench = initial()

@@ -125,6 +125,21 @@ export default function Dashboard() {
         </p>
       )}
 
+      {/* The portal has no inbox, so this — and the email each rating sends —
+          is how a partner finds out a guest is waiting for an answer. Links
+          to the first venue with one outstanding. */}
+      {data?.ratings_unreplied > 0 && (
+        <Link
+          to={`/venues/${venues.find((v) => v.ratings_unreplied > 0)?.name}/ratings`}
+          className="block rounded-2xl bg-brand-50 px-5 py-4 text-sm font-semibold text-ink-900 ring-1 ring-brand-200 hover:bg-brand-100"
+        >
+          {data.ratings_unreplied === 1
+            ? '1 guest rating is waiting for your reply'
+            : `${data.ratings_unreplied} guest ratings are waiting for your reply`}{' '}
+          →
+        </Link>
+      )}
+
       {resumable && (
         <ResumeSetupCard
           draft={resumable}
@@ -235,6 +250,16 @@ export default function Dashboard() {
                         {venue.address || 'No address yet'}
                       </p>
                     </div>
+
+                    {venue.ratings_unreplied > 0 && (
+                      <Link
+                        to={`/venues/${venue.name}/ratings`}
+                        aria-label={`${venue.ratings_unreplied} ratings to reply to at ${venue.venue_name}`}
+                        className="relative z-10 shrink-0 rounded-full bg-brand-500 px-2 py-0.5 text-xs font-bold text-ink-900"
+                      >
+                        {venue.ratings_unreplied} to reply
+                      </Link>
+                    )}
 
                     {/* Fixed column, so every badge on the list starts at the
                         same x whatever else the row contains. */}
