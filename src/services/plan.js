@@ -346,3 +346,27 @@ const submitPayfastForm = (action, fields) => {
 const PAYWALL_EXC = /PlanRequired|EntitlementRequired|UpgradeRequired|SubscriptionRequired|PaywallError/i
 
 export const isPaywalled = (error) => Boolean(error?.excType && PAYWALL_EXC.test(error.excType))
+
+/**
+ * The partner's subscription as the bench holds it, straight off
+ * `get_entitlements` — `{plan, status, period_end, …}`, or null when there is
+ * none.
+ *
+ * Separate from `getEntitlements` because that one normalises the answer into
+ * features and fails OPEN; this is for one question only, "has the payment
+ * landed yet?", where failing open would announce Pro that was never granted.
+ * So it returns `undefined` on any error and the caller keeps waiting.
+ *
+ * Payfast grants by notifying the BENCH (the ITN), not the browser, and the
+ * browser usually gets back first — so the subscription is `Active` a few
+ * seconds after the partner lands, not when they land.
+ */
+export const getSubscription = async () => {
+  if (USE_MOCKS) return { plan: 'Pro', status: 'Active' }
+  try {
+    const payload = await call(ENTITLEMENTS_METHOD)
+    return payload?.subscription ?? null
+  } catch {
+    return undefined
+  }
+}
