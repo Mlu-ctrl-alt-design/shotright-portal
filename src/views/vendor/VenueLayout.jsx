@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useParams } from 'react-router-dom'
-import { useVenue } from '../../hooks/useVendor'
+import { useDashboard, useVenue } from '../../hooks/useVendor'
 import { Badge } from '../../components/ui'
 import { bucketOf, stateLabel, stateTone } from '../../services/workflowState'
 import { clsx } from '../../utils/clsx'
@@ -26,6 +26,7 @@ const TABS = [
   { to: 'edit', label: 'Details, hours & photos' },
   { to: 'menu', label: 'Menu' },
   { to: 'bookings', label: 'Bookings' },
+  { to: 'ratings', label: 'Ratings', counts: 'ratings_unreplied' },
   { to: 'preview', label: 'Preview' },
 ]
 
@@ -33,6 +34,10 @@ export default function VenueLayout() {
   const { venueId } = useParams()
   const { data: venue } = useVenue(venueId)
   const bucket = bucketOf(venue?.workflow_state)
+  // Unreplied ratings ride on the dashboard payload the portal already has
+  // cached, so the badge costs no request of its own.
+  const { data: dashboard } = useDashboard()
+  const dashboardRow = dashboard?.venues?.find((v) => v.name === venueId)
 
   return (
     <div className="space-y-6">
@@ -77,6 +82,14 @@ export default function VenueLayout() {
                 }
               >
                 {tab.label}
+                {tab.counts && dashboardRow?.[tab.counts] > 0 && (
+                  <span
+                    className="ml-1.5 rounded-full bg-brand-500 px-1.5 py-0.5 text-[11px] font-bold text-ink-900"
+                    aria-label={`${dashboardRow[tab.counts]} awaiting a reply`}
+                  >
+                    {dashboardRow[tab.counts]}
+                  </span>
+                )}
               </NavLink>
             </li>
           ))}

@@ -105,6 +105,9 @@ const permissionError = (html) =>
 
 const ok = (message) => HttpResponse.json({ message })
 
+/** Mirrors venue_rating.unreplied_count: visible, submitted, no reply yet. */
+const isUnreplied = (r) => !r.is_flagged && !r.reply
+
 /**
  * Drop kwargs the method doesn't declare — silently, at 200.
  *
@@ -309,13 +312,57 @@ const apiHandlers = [
   }),
 
   /* ----------------------------------------------------------- dashboard */
-  method('shotright.api.get_vendor_dashboard', () =>
-    ok({
+  method('shotright.api.get_vendor_dashboard', () => {
+    const unreplied = (venue) => bench.ratings.filter((r) => r.venue === venue && isUnreplied(r)).length
+    const venues = bench.venues.map((v) => ({ ...v, ratings_unreplied: unreplied(v.name) }))
+    return ok({
       profile: { ...bench.profile },
       stats: { venues: bench.venues.length },
-      venues: bench.venues.map((v) => ({ ...v })),
-    }),
-  ),
+      venues,
+      ratings_unreplied: venues.reduce((sum, v) => sum + v.ratings_unreplied, 0),
+    })
+  }),
+
+  /* ------------------------------------------------------------- ratings */
+  /**
+   * `get_venue_ratings`, shaped like shotright/venue_rating.py: newest first,
+   * first name only, a flagged row keeps its place but loses its comment, and
+   * `average` is the raw average even when the public `rating` is still null.
+   */
+  method('shotright.api.get_venue_ratings', ({ venue_name, start = 0, limit = 20, unreplied_only }) => {
+    if (!venueById(venue_name)) return docMissing()
+    const all = bench.ratings.filter((r) => r.venue === venue_name)
+    const counted = all.filter((r) => !r.is_flagged)
+    const average = counted.length ? counted.reduce((s, r) => s + r.score, 0) / counted.length : null
+    const wantUnreplied = ['1', 'true', 1, true].includes(unreplied_only)
+    const rows = (wantUnreplied ? all.filter(isUnreplied) : all)
+      .slice()
+      .sort((a, b) => String(b.submitted_on).localeCompare(String(a.submitted_on)))
+    const page = rows.slice(Number(start), Number(start) + Math.min(Number(limit), 100))
+    return ok({
+      venue: venue_name,
+      rating: counted.length >= 3 ? Math.round(average * 10) / 10 : null,
+      rating_count: counted.length,
+      average: average == null ? null : Math.round(average * 100) / 100,
+      unreplied: all.filter(isUnreplied).length,
+      ratings: page.map((r) => ({ ...r, comment: r.is_flagged ? null : r.comment || null })),
+      total: rows.length,
+    })
+  }),
+
+  method('shotright.api.reply_to_venue_rating', ({ rating, reply }) => {
+    const row = bench.ratings.find((r) => r.name === rating)
+    if (!row) return docMissing()
+    if (row.is_flagged) {
+      return validationError("This rating has been hidden by Sho't Right and cannot be replied to.")
+    }
+    const text = String(reply || '').trim()
+    if (!text) return validationError('A reply cannot be empty.')
+    if (text.length > 1000) return validationError('Reply is too long — 1000 characters at most.')
+    row.reply = text
+    row.replied_on = '2026-09-26 12:00:00'
+    return ok({ name: row.name, reply: row.reply, replied_on: row.replied_on })
+  }),
 
   /* -------------------------------------------------------------- venues */
   /**
