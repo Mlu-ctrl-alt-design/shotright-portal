@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert } from '../ui'
-import { getSubscription } from '../../services/plan'
+import { getPaymentStatus, getSubscription } from '../../services/plan'
 
 /** How long to wait for Payfast's notification before saying so: every 3s
     for a minute. An object so tests can shorten it. */
@@ -46,21 +46,57 @@ export default function PaymentReturnBanner() {
       return
     }
 
-    setState({ kind: 'waiting', attempt })
+    setState({ kind: 'waiting', attempt, purpose: null })
     let cancelled = false
+    let followAttempt = !!attempt
+    let purpose = null
     ;(async () => {
       for (let i = 0; i < paymentPolling.tries && !cancelled; i++) {
-        const sub = await getSubscription()
-        if (cancelled) return
-        if (sub?.status === 'Active') {
-          queryClient.invalidateQueries({ queryKey: ['entitlements'] })
-          queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-          setState({ kind: 'active', attempt, plan: sub.plan || 'Pro' })
-          return
+        /* The exact payment when the bench can say (get_payment_status) —
+           which is the only way to tell a promotion's payment from a plan's.
+           A bench without it answers null, and we fall back to watching the
+           subscription, as before. */
+        if (followAttempt) {
+          const payment = await getPaymentStatus(attempt)
+          if (cancelled) return
+          if (payment === null) {
+            followAttempt = false
+          } else if (payment) {
+            if (payment.purpose !== purpose) {
+              purpose = payment.purpose
+              setState({ kind: 'waiting', attempt, purpose })
+            }
+            if (payment.status === 'Complete') {
+              if (payment.purpose === 'Promotion') {
+                queryClient.invalidateQueries({ queryKey: ['promotions', payment.venue] })
+                queryClient.invalidateQueries({ queryKey: ['promotion-offer', payment.venue] })
+                setState({ kind: 'promotion', attempt, venue: payment.venue })
+              } else {
+                queryClient.invalidateQueries({ queryKey: ['entitlements'] })
+                queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+                setState({ kind: 'active', attempt, plan: payment.plan || 'Pro' })
+              }
+              return
+            }
+            if (payment.status === 'Failed' || payment.status === 'Cancelled') {
+              setState({ kind: 'failed', attempt })
+              return
+            }
+          }
+        }
+        if (!followAttempt) {
+          const sub = await getSubscription()
+          if (cancelled) return
+          if (sub?.status === 'Active') {
+            queryClient.invalidateQueries({ queryKey: ['entitlements'] })
+            queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+            setState({ kind: 'active', attempt, plan: sub.plan || 'Pro' })
+            return
+          }
         }
         await new Promise((r) => setTimeout(r, paymentPolling.intervalMs))
       }
-      if (!cancelled) setState({ kind: 'slow', attempt })
+      if (!cancelled) setState({ kind: 'slow', attempt, purpose })
     })()
     return () => {
       cancelled = true
@@ -90,7 +126,11 @@ export default function PaymentReturnBanner() {
               aria-hidden="true"
               className="size-4 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700"
             />
-            <p className="font-bold">Payment received — switching on Pro…</p>
+            <p className="font-bold">
+              {state.purpose === 'Promotion'
+                ? 'Payment received — confirming your promotion…'
+                : 'Payment received — switching on Pro…'}
+            </p>
           </div>
           <p className="mt-1">This usually takes a few seconds. You can keep working.</p>
         </Alert>
@@ -104,7 +144,11 @@ export default function PaymentReturnBanner() {
       )}
       {state.kind === 'slow' && (
         <Alert variant="warning">
-          <p className="font-bold">Your payment went through, but Pro isn’t on yet</p>
+          <p className="font-bold">
+            {state.purpose === 'Promotion'
+              ? 'Your payment went through, but your promotion isn’t confirmed yet'
+              : 'Your payment went through, but Pro isn’t on yet'}
+          </p>
           <p className="mt-1">
             It can take a few minutes for Payfast to confirm. Refresh this page in a little while.
             If it’s still off after that, contact us
@@ -116,6 +160,27 @@ export default function PaymentReturnBanner() {
             ) : null}
             .
           </p>
+          {dismiss}
+        </Alert>
+      )}
+      {state.kind === 'promotion' && (
+        <Alert variant="success">
+          <p className="font-bold">Your promotion is paid. Thank you!</p>
+          <p className="mt-1">
+            It goes live on its start date and shows as Sponsored to nearby customers.{' '}
+            {state.venue && (
+              <Link to={`/venues/${state.venue}/promote`} className="font-semibold underline">
+                See your promotions
+              </Link>
+            )}
+          </p>
+          {dismiss}
+        </Alert>
+      )}
+      {state.kind === 'failed' && (
+        <Alert variant="danger">
+          <p className="font-bold">The payment didn’t go through</p>
+          <p className="mt-1">Payfast didn’t complete it, so nothing was charged. You can try again.</p>
           {dismiss}
         </Alert>
       )}
