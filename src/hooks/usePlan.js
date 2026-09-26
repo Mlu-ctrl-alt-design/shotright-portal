@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getEntitlements, hasFeature } from '../services/plan'
+import { getEntitlements, getSubscription, hasFeature, proStatus } from '../services/plan'
 
 /**
  * What this account is entitled to.
@@ -11,6 +11,23 @@ import { getEntitlements, hasFeature } from '../services/plan'
  * `retry: false` for the same reason `getEntitlements` never throws: a failed
  * read means UNLOCKED, and retrying it three times only delays the unlock.
  */
+/**
+ * 'active' | 'trial' | null — whether to show the PRO badge.
+ *
+ * Its own query rather than read off `useEntitlements`: that one normalises
+ * into features and fails OPEN, and failing open here would badge someone who
+ * has not paid. An error (undefined) simply shows no badge.
+ */
+export const useProStatus = () => {
+  const { data } = useQuery({
+    queryKey: ['subscription'],
+    queryFn: getSubscription,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+  return proStatus(data)
+}
+
 export const useEntitlements = () =>
   useQuery({
     queryKey: ['entitlements'],
