@@ -119,6 +119,12 @@ const initial = () => ({
        partner Google door, and no sign-in button may appear. Flip it on to
        model a bench that has one. */
     login_vendor_with_google: false,
+    /* Sponsored listings (shotright PR #61). Off: not on the live bench until
+       it merges, and the portal must say so rather than offer a button. */
+    get_promotion_offer: false,
+    start_promotion: false,
+    get_venue_promotions: false,
+    get_payment_status: false,
     register_vendor: true,
     get_vendor_dashboard: true,
     get_venue_detail: true,
@@ -470,6 +476,23 @@ const initial = () => ({
    *  submitted_on, reply, replied_on, is_flagged}.
    */
   ratings: [],
+
+  /** What get_promotion_offer answers, per venue; see server.js. */
+  promotionOffer: {
+    price_per_week: 199,
+    currency: 'ZAR',
+    max_weeks: 4,
+    earliest_start: '2026-09-26',
+    latest_start: '2026-10-26',
+    moods: ['Romantic', 'Lively'],
+    can_promote: true,
+    reason: null,
+    booked_windows: [],
+  },
+  /** Paid promotions, as get_venue_promotions lists them. */
+  promotions: [],
+  /** Payfast payments by VPA reference, as get_payment_status reads them. */
+  payments: {},
 })
 
 export let bench = initial()

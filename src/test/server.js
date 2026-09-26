@@ -323,6 +323,47 @@ const apiHandlers = [
     })
   }),
 
+  /* ------------------------------------------------------- promotions */
+  /**
+   * Sponsored listings, shaped like shotright/venue_promotion.py: the offer
+   * carries the price and a reason code; start_promotion answers with the
+   * same {gateway, method, action, fields} as the plan checkout; only PAID
+   * promotions are listed; get_payment_status is the caller's own attempt.
+   */
+  method('shotright.api.get_promotion_offer', ({ venue_name }) => {
+    const venue = venueById(venue_name)
+    if (!venue) return docMissing()
+    return ok({ venue: venue.name, venue_name: venue.venue_name, town: 'Maboneng', ...bench.promotionOffer })
+  }),
+
+  method('shotright.api.start_promotion', ({ venue_name, weeks, starts_on, moods }) => {
+    const offer = bench.promotionOffer
+    if (!offer.can_promote) return validationError('Only an approved, live venue can be promoted.')
+    const n = Number(weeks)
+    if (!(n >= 1 && n <= offer.max_weeks)) return validationError(`A promotion runs for 1 to ${offer.max_weeks} weeks.`)
+    if (bench.promotionRefusal) return validationError(bench.promotionRefusal)
+    const amount = (offer.price_per_week * n).toFixed(2)
+    return ok({
+      gateway: 'Payfast',
+      method: 'POST',
+      action: 'https://sandbox.payfast.co.za/eng/process',
+      fields: { merchant_id: '10000100', m_payment_id: 'VPA-0000000900', amount, item_name: `Promotion ${venue_name}` },
+      promotion: 'VP-00001',
+      payment_attempt: 'VPA-0000000900',
+      _echo: { starts_on, moods },
+    })
+  }),
+
+  method('shotright.api.get_venue_promotions', ({ venue_name }) =>
+    ok({ venue: venue_name, promotions: bench.promotions.filter((p) => p.venue === venue_name) }),
+  ),
+
+  method('shotright.api.get_payment_status', ({ attempt }) => {
+    const payment = bench.payments[attempt]
+    if (!payment) return docMissing()
+    return ok({ name: attempt, ...payment })
+  }),
+
   /* ------------------------------------------------------------- ratings */
   /**
    * `get_venue_ratings`, shaped like shotright/venue_rating.py: newest first,

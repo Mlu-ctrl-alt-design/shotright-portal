@@ -1,4 +1,4 @@
-import { call, USE_MOCKS } from './api'
+import { call, callGet, USE_MOCKS } from './api'
 import { withFallback } from './vendor'
 
 /**
@@ -311,7 +311,7 @@ export const startCheckout = async (plan = 'Pro') => {
  * A real form POST rather than fetch: Payfast responds with a redirect to its
  * own hosted payment page, which the browser has to follow as a navigation.
  */
-const submitPayfastForm = (action, fields) => {
+export const submitPayfastForm = (action, fields) => {
   const form = document.createElement('form')
   form.method = 'POST'
   form.action = action
@@ -361,6 +361,29 @@ export const isPaywalled = (error) => Boolean(error?.excType && PAYWALL_EXC.test
  * browser usually gets back first — so the subscription is `Active` a few
  * seconds after the partner lands, not when they land.
  */
+/**
+ * One Payfast payment of this partner's, by its `VPA-…` reference — for a plan
+ * or a promotion alike (`get_payment_status`, shotright PR #61).
+ *
+ * Resolves `{purpose, status, promotion, venue}`; `null` when the bench does
+ * not have the method yet, so the caller can fall back to watching the
+ * subscription; `undefined` on any other error, so the caller keeps waiting.
+ */
+export const PAYMENT_STATUS_METHOD = 'shotright.api.get_payment_status'
+
+export const getPaymentStatus = async (attempt) => {
+  if (USE_MOCKS) return { purpose: 'Subscription', status: 'Complete' }
+  try {
+    return await withFallback(
+      PAYMENT_STATUS_METHOD,
+      () => callGet(PAYMENT_STATUS_METHOD, { attempt }),
+      async () => null,
+    )
+  } catch {
+    return undefined
+  }
+}
+
 export const getSubscription = async () => {
   if (USE_MOCKS) return { plan: 'Pro', status: 'Active' }
   try {

@@ -27,6 +27,7 @@ const TABS = [
   { to: 'menu', label: 'Menu' },
   { to: 'bookings', label: 'Bookings' },
   { to: 'ratings', label: 'Ratings', counts: 'ratings_unreplied' },
+  { to: 'promote', label: 'Promote' },
   { to: 'preview', label: 'Preview' },
 ]
 

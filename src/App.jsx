@@ -30,6 +30,7 @@ const VenueLayout = lazy(() => import('./views/vendor/VenueLayout'))
 const VenueOverview = lazy(() => import('./views/vendor/VenueOverview'))
 const VenueBookings = lazy(() => import('./views/vendor/VenueBookings'))
 const VenueRatings = lazy(() => import('./views/vendor/VenueRatings'))
+const VenuePromote = lazy(() => import('./views/vendor/VenuePromote'))
 const Profile = lazy(() => import('./views/vendor/Profile'))
 const Legal = lazy(() => import('./views/vendor/Legal'))
 const VenueBulkImport = lazy(() => import('./views/vendor/VenueBulkImport'))
@@ -104,6 +105,7 @@ export default function App() {
             <Route path="menu" element={<VenueMenu />} />
             <Route path="bookings" element={<VenueBookings />} />
             <Route path="ratings" element={<VenueRatings />} />
+            <Route path="promote" element={<VenuePromote />} />
             <Route path="preview" element={<VenuePreview />} />
           </Route>
           {/* A decline is a decision made ABOUT a venue, so it lives on the
