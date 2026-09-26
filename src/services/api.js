@@ -119,6 +119,11 @@ api.interceptors.response.use(
     const status = error.response?.status
     if (
       endsSession(status, error.response?.data) &&
+      // A guest call's 401 is about the credential it carried, not about a
+      // session: the Google door answers an empty probe or a bad Google token
+      // with AuthenticationError. Without this, the probe on /register would
+      // throw a partner halfway through signing up back to /login.
+      !error.config?.keepSession &&
       !window.location.pathname.startsWith('/login')
     ) {
       setAuthToken(null)

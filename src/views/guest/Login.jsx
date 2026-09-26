@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore'
 import { Button, Input, PasswordInput, Alert } from '../../components/ui'
 import GoogleSignInButton from '../../components/ui/GoogleSignInButton'
 import AuthLayout from '../../components/layout/AuthLayout'
+import GoogleBusinessNameStep from './GoogleBusinessNameStep'
 
 /**
  * Issue #14 — partner login. Auth runs through the Auth Token Service; the
@@ -40,6 +41,9 @@ export default function Login() {
   const [remember, setRemember] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Set when Google proved who this is but there is no partner account yet:
+  // {credential, email}. The same credential is sent again with a name.
+  const [pendingGoogle, setPendingGoogle] = useState(null)
 
   // Trimmed: a trailing space from an autofill or a phone keyboard must not be
   // the difference between a screen that asks for a password and one that
@@ -62,7 +66,12 @@ export default function Login() {
     setBusy(true)
     setError(null)
     try {
-      land(await loginWithGoogle(credential))
+      const result = await loginWithGoogle(credential)
+      if (result?.businessNameRequired) {
+        setPendingGoogle({ credential, email: result.email })
+        return
+      }
+      land(result)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -90,6 +99,18 @@ export default function Login() {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (pendingGoogle) {
+    return (
+      <AuthLayout minimal footer>
+        <GoogleBusinessNameStep
+          email={pendingGoogle.email}
+          onSubmit={async (name) => land(await loginWithGoogle(pendingGoogle.credential, name))}
+          onBack={() => setPendingGoogle(null)}
+        />
+      </AuthLayout>
+    )
   }
 
   return (
