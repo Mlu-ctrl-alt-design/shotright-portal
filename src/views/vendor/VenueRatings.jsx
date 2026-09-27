@@ -5,7 +5,6 @@ import { Alert, Button, Card, EmptyState, Textarea } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import {
   MAX_REPLY_LENGTH,
-  PUBLIC_THRESHOLD,
   RATINGS_MAX_PAGE,
   RATINGS_PAGE,
   getVenueRatings,
@@ -146,13 +145,6 @@ function Summary({ data }) {
       <p className="text-sm text-ink-700">
         from {data.count} {data.count === 1 ? 'rating' : 'ratings'}
       </p>
-      {/* The bench hides the average from customers below the threshold; saying
-          so stops a partner wondering why the app shows no stars. */}
-      {data.publicRating == null && (
-        <p className="w-full text-xs text-ink-500">
-          Customers see your average once you have {PUBLIC_THRESHOLD} ratings.
-        </p>
-      )}
     </div>
   )
 }

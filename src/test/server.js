@@ -382,7 +382,9 @@ const apiHandlers = [
     const page = rows.slice(Number(start), Number(start) + Math.min(Number(limit), 100))
     return ok({
       venue: venue_name,
-      rating: counted.length >= 3 ? Math.round(average * 10) / 10 : null,
+      /* MIN_RATINGS_TO_SHOW is 1 since shotright #63 (live 27 Sep): customers
+         see the average from the first rating. */
+      rating: counted.length >= 1 ? Math.round(average * 10) / 10 : null,
       rating_count: counted.length,
       average: average == null ? null : Math.round(average * 100) / 100,
       unreplied: all.filter(isUnreplied).length,
