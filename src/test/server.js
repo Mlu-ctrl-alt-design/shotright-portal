@@ -364,6 +364,28 @@ const apiHandlers = [
     return ok({ name: attempt, ...payment })
   }),
 
+  /* --------------------------------------------------------------- inbox */
+  /** shotright/inbox.py: the caller's Notification Log, newest first. */
+  method('shotright.api.list_inbox', () =>
+    ok(
+      bench.inbox
+        .slice()
+        .sort((a, b) => String(b.creation).localeCompare(String(a.creation)))
+        .map(({ name, subject, type, read, creation }) => ({ name, subject, type, read, creation })),
+    ),
+  ),
+
+  method('shotright.api.get_inbox_entry', ({ name }) => {
+    const row = bench.inbox.find((e) => e.name === name)
+    return row ? ok({ ...row }) : docMissing()
+  }),
+
+  method('shotright.api.mark_inbox_read', ({ name, all }) => {
+    const targets = ['1', 'true', 1, true].includes(all) ? bench.inbox : bench.inbox.filter((e) => e.name === name)
+    targets.forEach((e) => (e.read = 1))
+    return ok({ marked: targets.length })
+  }),
+
   /* ------------------------------------------------------------- ratings */
   /**
    * `get_venue_ratings`, shaped like shotright/venue_rating.py: newest first,
