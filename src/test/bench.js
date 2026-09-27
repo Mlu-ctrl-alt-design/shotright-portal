@@ -158,6 +158,10 @@ const initial = () => ({
        what ended the dependency on stock Frappe endpoints. */
     upload_venue_photo: true,
     save_imported_photos: true,
+    list_inbox: true,
+    get_inbox_entry: true,
+    /* shotright #64. Absent from older benches; the panel still reads. */
+    mark_inbox_read: true,
 
     /* Shipped 7 Aug, so `true` is now the truthful default. The flag stays so a
        test can still put it back to false: partners' benches are updated at
@@ -477,6 +481,13 @@ const initial = () => ({
    *  submitted_on, reply, replied_on, is_flagged}.
    */
   ratings: [],
+
+  /**
+   * The partner's Notification Log, as shotright/inbox.py serves it. Rows:
+   * {name, subject, type, read, creation, email_content}. `email_content` is
+   * HTML, as the bench writes it.
+   */
+  inbox: [],
 
   /** What get_promotion_offer answers, per venue; see server.js. */
   promotionOffer: {
