@@ -11,8 +11,8 @@ import { withFallback } from './vendor'
  * What the bench guarantees, and this file relies on:
  *  - Only customers who booked can rate, once per booking, 1–5 whole stars.
  *  - The customer arrives as a FIRST NAME only. No email, no phone.
- *  - `average` is the venue's own raw average, even below the public threshold
- *    (`rating`, which customers see, stays null until 3 ratings).
+ *  - `average` is the venue's own raw average. Customers see the same figure
+ *    (`rating`) from the first rating (shotright #63, 27 Sep; it was 3).
  *  - A rating Sho't Right has hidden comes back `is_flagged: true` with its
  *    comment withheld, and cannot be replied to.
  *  - One reply per rating. Saving again replaces it; the customer is told in
@@ -25,8 +25,6 @@ export const RATINGS_PAGE = 20
 /** The bench caps a page at 100; asking for more is clamped, so we don't. */
 export const RATINGS_MAX_PAGE = 100
 export const MAX_REPLY_LENGTH = 1000
-/** Mirrors the bench's MIN_RATINGS_TO_SHOW, for the "customers see…" note. */
-export const PUBLIC_THRESHOLD = 3
 
 const normaliseRow = (raw) => ({
   id: raw.name,

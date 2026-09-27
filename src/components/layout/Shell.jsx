@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/authStore'
 import { clsx } from '../../utils/clsx'
 import Logo from './Logo'
@@ -7,6 +8,7 @@ import NavDrawer from './NavDrawer'
 import LegalBanner from './LegalBanner'
 import PaymentReturnBanner from './PaymentReturnBanner'
 import ProBadge from './ProBadge'
+import { INBOX_QUERY, listInbox } from '../../services/inbox'
 
 /**
  * The authenticated partner shell.
@@ -45,6 +47,8 @@ const NAV = [
   { to: '/', label: 'Dashboard', end: true, icon: GaugeIcon },
   { to: '/venues', label: 'My Venues', end: true, icon: StorefrontIcon },
   { to: '/venues/new', label: 'Add New', icon: PlusIcon },
+  /* Carries the unread count; see `unread` in Shell. */
+  { to: '/messages', label: 'Messages', icon: EnvelopeIcon, counts: 'unread' },
   { to: '/profile', label: 'Settings', icon: GearIcon },
 ]
 
@@ -97,6 +101,15 @@ function StorefrontIcon() {
 
 /** Settings — sliders rather than a cog. A cog reads as "system settings"; this
     screen is the partner's own details, and sliders read as "your preferences". */
+function EnvelopeIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className={iconClass} aria-hidden="true">
+      <rect x="2.5" y="4.5" width="15" height="11" rx="2" />
+      <path d="M3 5.5l7 5.5 7-5.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function GearIcon() {
   return (
     <svg viewBox="0 0 20 20" className={iconClass} aria-hidden="true">
@@ -138,6 +151,11 @@ export default function Shell() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const triggerRef = useRef(null)
 
+  /* The nav's unread count. Polled gently, so a booking that lands while the
+     partner is on another page still shows; a failed load just shows no count. */
+  const inbox = useQuery({ queryKey: INBOX_QUERY, queryFn: listInbox, refetchInterval: 60_000, retry: false })
+  const unread = (inbox.data || []).filter((row) => !row.read).length
+
   // Stable identity: NavDrawer's effects depend on it, and a fresh function each
   // render would tear down and rebuild the focus trap on every parent render.
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
@@ -177,6 +195,14 @@ export default function Shell() {
       >
         {item.icon ? <item.icon /> : <PlusIcon />}
         {item.label}
+        {item.counts === 'unread' && unread > 0 && (
+          <>
+            <span aria-hidden="true" className="ml-auto rounded-full bg-ink-900 px-2 py-0.5 text-xs text-white">
+              {unread}
+            </span>
+            <span className="sr-only">, {unread} unread</span>
+          </>
+        )}
       </NavLink>
     ))
 

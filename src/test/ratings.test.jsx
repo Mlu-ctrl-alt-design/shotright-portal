@@ -42,20 +42,12 @@ describe('the ratings tab', () => {
     expect(within(rows[1]).getByText('“Cold food”')).toBeInTheDocument()
   })
 
-  it('shows the raw average, and says customers cannot see it yet below three', async () => {
+  it('shows the average and count, with no threshold note: customers see it from the first rating', async () => {
     bench.ratings.push(rating('VR-1', { score: 5 }), rating('VR-2', { score: 4 }))
     renderApp({ route: RATINGS, signedIn: true })
 
     expect(await screen.findByText('4.5')).toBeInTheDocument()
     expect(screen.getByText(/from 2 ratings/i)).toBeInTheDocument()
-    expect(screen.getByText(/customers see your average once you have 3 ratings/i)).toBeInTheDocument()
-  })
-
-  it('drops the threshold note once customers can see the average', async () => {
-    bench.ratings.push(rating('VR-1'), rating('VR-2'), rating('VR-3'))
-    renderApp({ route: RATINGS, signedIn: true })
-
-    expect(await screen.findByText(/from 3 ratings/i)).toBeInTheDocument()
     expect(screen.queryByText(/customers see your average/i)).not.toBeInTheDocument()
   })
 

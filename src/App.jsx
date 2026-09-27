@@ -32,6 +32,7 @@ const VenueBookings = lazy(() => import('./views/vendor/VenueBookings'))
 const VenueRatings = lazy(() => import('./views/vendor/VenueRatings'))
 const VenuePromote = lazy(() => import('./views/vendor/VenuePromote'))
 const Profile = lazy(() => import('./views/vendor/Profile'))
+const Messages = lazy(() => import('./views/vendor/Messages'))
 const Legal = lazy(() => import('./views/vendor/Legal'))
 const VenueBulkImport = lazy(() => import('./views/vendor/VenueBulkImport'))
 
@@ -112,6 +113,7 @@ export default function App() {
               venue rather than in a notifications pile — it is still there in
               a week, when the partner finally has an hour to deal with it. */}
           <Route path="/venues/:venueId/review" element={<VenueReview />} />
+          <Route path="/messages" element={<Messages />} />
           <Route path="/profile" element={<Profile />} />
           {/* Reachable from the banner, from Settings, and from a blocked
               submit. Always reachable — a partner must be able to re-read what
