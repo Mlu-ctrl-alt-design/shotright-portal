@@ -157,6 +157,7 @@ const initial = () => ({
     /* The whitelisted uploader that elevates internally. Live 22 Aug — this is
        what ended the dependency on stock Frappe endpoints. */
     upload_venue_photo: true,
+    save_imported_photos: true,
 
     /* Shipped 7 Aug, so `true` is now the truthful default. The flag stays so a
        test can still put it back to false: partners' benches are updated at

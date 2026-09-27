@@ -871,6 +871,24 @@ const apiHandlers = [
     ok(bench.importedByUrl?.[String(url || '')] || null),
   ),
 
+  /** shotright #64: confirmed suggestions become unattached files for the wizard. */
+  method('shotright.api.save_imported_photos', ({ urls = [], confirm_rights }) => {
+    if (!['1', 1, true].includes(confirm_rights)) {
+      return validationError('Confirm these photos are yours to use before importing them.')
+    }
+    return ok(
+      urls.map((url, i) => ({
+        url,
+        saved: true,
+        error: null,
+        name: `FILE-IMP-${i + 1}`,
+        file_url: `/files/imported-${i + 1}.jpg`,
+        file_name: `imported-${i + 1}.jpg`,
+        attached: false,
+      })),
+    )
+  }),
+
   /* --------------------------------------------------------------- legal */
 
   /**

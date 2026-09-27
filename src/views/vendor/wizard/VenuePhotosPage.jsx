@@ -2,6 +2,7 @@ import { Alert, Button } from '../../../components/ui'
 import PhotoUploader from '../../../components/ui/PhotoUploader'
 import { useVenuePhotoSupport } from '../../../hooks/useVendor'
 import { MAX_VENUE_PHOTOS, uploadVenuePhoto } from '../../../services/vendor'
+import ImportedPhotoOffer from '../../../components/venue/ImportedPhotoOffer'
 
 /**
  * Photographs, on a screen of their own — the last thing before review.
@@ -33,6 +34,8 @@ export default function VenuePhotosPage({
   onFinishLater,
   submitting,
   venueName,
+  suggestions = [],
+  onSuggestionsDone,
 }) {
   const { data: photosSupported } = useVenuePhotoSupport()
 
@@ -51,6 +54,17 @@ export default function VenuePhotosPage({
           )}
         </p>
       </header>
+
+      {suggestions.length > 0 && photos.length < MAX_VENUE_PHOTOS && (
+        <div className="mt-7">
+          <ImportedPhotoOffer
+            suggestions={suggestions}
+            room={MAX_VENUE_PHOTOS - photos.length}
+            onAdded={(saved) => onChange([...photos, ...saved].slice(0, MAX_VENUE_PHOTOS))}
+            onDone={() => onSuggestionsDone?.()}
+          />
+        </div>
+      )}
 
       <div className="mt-7">
         <PhotoUploader

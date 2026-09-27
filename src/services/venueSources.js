@@ -74,7 +74,29 @@ export const normaliseImported = (raw) => {
     phone: raw.phone || raw.national_phone_number || raw.nationalPhoneNumber || '',
     hours: Array.isArray(raw.operating_hours) ? raw.operating_hours : null,
     attribution: raw.attribution || raw.attributions || '',
+    /* Image URLs off the partner's own page (shotright #64). Suggestions only:
+       nothing is fetched until they tick the ones to use and confirm they are
+       theirs. A Google place never has any — its photos may not be kept. */
+    photoSuggestions: Array.isArray(raw.photo_suggestions)
+      ? raw.photo_suggestions.filter((url) => /^https?:\/\//.test(String(url)))
+      : [],
   }
+}
+
+export const IMPORT_PHOTOS_METHOD = 'shotright.api.save_imported_photos'
+
+/**
+ * Store the suggested photos the partner confirmed are theirs, as unattached
+ * files the wizard holds until create_venue links them — the same thing the
+ * wizard's own uploads are.
+ *
+ * @returns the saved ones in the photo tile's shape; failures are left out.
+ */
+export const importPhotos = async (urls) => {
+  const rows = (await call(IMPORT_PHOTOS_METHOD, { urls, confirm_rights: 1 })) || []
+  return rows
+    .filter((row) => row.saved && row.file_url)
+    .map(({ name, file_url, file_name, attached }) => ({ name, file_url, file_name, attached: Boolean(attached) }))
 }
 
 /**
