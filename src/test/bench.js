@@ -157,6 +157,7 @@ const initial = () => ({
     /* The whitelisted uploader that elevates internally. Live 22 Aug — this is
        what ended the dependency on stock Frappe endpoints. */
     upload_venue_photo: true,
+    save_imported_photos: true,
     list_inbox: true,
     get_inbox_entry: true,
     /* shotright #64. Absent from older benches; the panel still reads. */

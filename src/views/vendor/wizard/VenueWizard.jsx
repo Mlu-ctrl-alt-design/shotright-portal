@@ -119,6 +119,10 @@ function AddVenue({ resumeId, draft, draftError }) {
   // held here is a list of `file_url`s, which is exactly why a draft can carry
   // them across a device and a File object never could.
   const [photos, setPhotos] = useState(() => saved.photos || [])
+  /* Image URLs the importer found on the partner's page, offered on the photos
+     step. Not kept in the draft: they are only suggestions, and stale ones on
+     a resumed draft would be offers of pictures that may be gone. */
+  const [photoSuggestions, setPhotoSuggestions] = useState([])
 
   /**
    * Which fields came from an imported listing rather than from the partner.
@@ -340,6 +344,7 @@ function AddVenue({ resumeId, draft, draftError }) {
     setFromImport(marked)
     setImportSource(source)
     setHoursFromImport(describeHours(place.hours))
+    setPhotoSuggestions(place.photoSuggestions || [])
     setStage('form')
   }
 
@@ -731,6 +736,8 @@ function AddVenue({ resumeId, draft, draftError }) {
               onFinishLater={() => navigate('/')}
               submitting={submitting}
               venueName={details.venue_name}
+              suggestions={photoSuggestions}
+              onSuggestionsDone={() => setPhotoSuggestions([])}
             />
           </div>
         )}
