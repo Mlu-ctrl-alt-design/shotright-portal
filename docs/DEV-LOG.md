@@ -21,7 +21,65 @@ Session ID for all of this work: `session_01KxKyuWPd63AtzWiGo91Pr3`.
 
 ---
 
-## 21 Sep 2026 (latest) — the server half of the venue import
+## 28 Sep 2026 (latest) — claiming a catalogue venue
+
+The partner asked why they had never seen the claim-a-venue flow on the site.
+The answer was that it did not exist anywhere a person could see it. The
+backend (shotright #40–#51) has been live since 19 Sep, but nothing ever called
+it: no screen in the customer app, no `/claim` route here (Vercel answered
+`/claim/anything` with the SPA shell and a 200, so a curl looked fine), and
+`shotright_portal_url` unset on the bench, so the one link the flow hands out
+was a bare `/claim/<token>` nobody could open. **0 claims had ever been filed.**
+
+Built, on `feat/claim-venue`:
+
+- **`/claim`** (in the shell, nav item "Claim a Venue"): search the catalogue,
+  "This is my venue" → `start_venue_claim` → straight on to the claim page. A
+  venue someone else already listed is labelled *before* the tap and is still
+  claimable (that is the real owner's case). "Your claims" underneath.
+- **`/claim/:token`**: the page the customer app will open. It is the one route
+  outside both guards. A guest sees the venue's name and "create an account / I
+  have one", and comes back **here** after signing in, registering or
+  verifying, via `services/returnTo.js` (sessionStorage, in-app paths only).
+  Router state alone does not survive register → verify.
+- Filing: role (the DocType's own Select values), optional note, evidence
+  (PDF/images, token as the handle before filing, the claim docname after), then
+  a "Venue Claim" code to the **partner's** address → `file_venue_claim`.
+
+### Worth knowing
+
+- **Never call `verify_otp` before `file_venue_claim`.** The claim endpoint
+  consumes the code itself; verifying first spends it and the filing then fails
+  with "invalid or expired". The test asserts `verify_otp` is never called.
+- **jsdom drops a multipart part's filename** on the way through MSW (it arrives
+  as `blob`; the type survives). A browser keeps it. The fake bench falls back
+  to the MIME type for that case and the tests assert on type, not name.
+- **user-event filters `upload()` by `accept`** unless set up with
+  `applyAccept: false`. `accept` is only a hint to the picker, so the refusal
+  test uses that to reach the bench's own message.
+- `render.jsx`'s `signIn` helper queries the login form synchronously, which
+  no longer works now that views are lazy. Nothing else used it; the claim test
+  signs in inline instead.
+
+### Bench side
+
+`shotright_portal_url = https://shotright-portal.vercel.app` set in the live
+site_config. Verified that `_claim_url("X")` now returns the full portal link.
+No backend code changed.
+
+### Still owed
+
+- The customer app's entry point (Settings → "Own a venue?") does not exist.
+  It needs an App Store / Play release, and the Android release job keeps
+  failing.
+- `get_my_venue_claims` lists claims by who *started* them. A claim started in
+  the app under a personal address and filed here under a business one shows
+  under the app account, not in this list.
+- The claimant `withdraw` status still has no endpoint.
+
+---
+
+## 21 Sep 2026 — the server half of the venue import
 
 Wrote the two backend methods the add-venue import screen has been waiting on,
 as drop-in reference implementations in `backend/` — the same way every other

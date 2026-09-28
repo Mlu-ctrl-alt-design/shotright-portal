@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { Button, Input, PasswordInput, Alert } from '../../components/ui'
 import GoogleSignInButton from '../../components/ui/GoogleSignInButton'
+import { takeReturnTo } from '../../services/returnTo'
 import AuthLayout from '../../components/layout/AuthLayout'
 import GoogleBusinessNameStep from './GoogleBusinessNameStep'
 
@@ -59,7 +60,10 @@ export default function Login() {
       navigate('/verify', { replace: true, state: { email: result.email } })
       return
     }
-    navigate(location.state?.from || '/', { replace: true })
+    // Router state first: it is this navigation's own answer. The stored path
+    // is still taken (and so cleared) either way, so it cannot fire later.
+    const stored = takeReturnTo()
+    navigate(location.state?.from || stored, { replace: true })
   }
 
   const onGoogleCredential = async (credential) => {

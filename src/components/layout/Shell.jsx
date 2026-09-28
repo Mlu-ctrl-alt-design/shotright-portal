@@ -47,6 +47,7 @@ const NAV = [
   { to: '/', label: 'Dashboard', end: true, icon: GaugeIcon },
   { to: '/venues', label: 'My Venues', end: true, icon: StorefrontIcon },
   { to: '/venues/new', label: 'Add New', icon: PlusIcon },
+  { to: '/claim', label: 'Claim a Venue', icon: FlagIcon },
   /* Carries the unread count; see `unread` in Shell. */
   { to: '/messages', label: 'Messages', icon: EnvelopeIcon, counts: 'unread' },
   { to: '/profile', label: 'Settings', icon: GearIcon },
@@ -68,6 +69,14 @@ const NAV = [
  * anything about it.
  */
 const iconClass = 'size-4 shrink-0 fill-none stroke-current stroke-[1.75]'
+
+function FlagIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className={iconClass} aria-hidden="true">
+      <path d="M4.5 17.5V3.5M4.5 4h9.5l-2 3.25 2 3.25H4.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
 
 function PlusIcon() {
   return (
