@@ -489,6 +489,18 @@ const initial = () => ({
    */
   inbox: [],
 
+  /**
+   * The editorial catalogue a partner can claim from, as
+   * search_claimable_venues sees it: {venue, venue_name, town, province, owned}.
+   */
+  catalogue: [],
+  /**
+   * Venue Claims, as venue_claims.py keeps them: {name, venue, status, token,
+   * claimant_role, note, files: [{file, file_name, file_size}]}. `token` is the
+   * live one-time link, null once filed — the bench stores only its hash.
+   */
+  claims: [],
+
   /** What get_promotion_offer answers, per venue; see server.js. */
   promotionOffer: {
     price_per_week: 199,

@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import GuestRoute from './routes/GuestRoute'
 import ProtectedRoute from './routes/ProtectedRoute'
 import Shell from './components/layout/Shell'
+import AuthLayout from './components/layout/AuthLayout'
 import Spinner from './components/ui/Spinner'
 
 /**
@@ -35,6 +36,8 @@ const Profile = lazy(() => import('./views/vendor/Profile'))
 const Messages = lazy(() => import('./views/vendor/Messages'))
 const Legal = lazy(() => import('./views/vendor/Legal'))
 const VenueBulkImport = lazy(() => import('./views/vendor/VenueBulkImport'))
+const ClaimSearch = lazy(() => import('./views/vendor/ClaimSearch'))
+const ClaimHandoff = lazy(() => import('./views/claim/ClaimHandoff'))
 
 export default function App() {
   const rehydrate = useAuthStore((s) => s.rehydrate)
@@ -113,6 +116,10 @@ export default function App() {
               venue rather than in a notifications pile — it is still there in
               a week, when the partner finally has an hour to deal with it. */}
           <Route path="/venues/:venueId/review" element={<VenueReview />} />
+          {/* Finding a venue that is already in the catalogue, instead of
+              adding a duplicate of it. Starts a claim and hands over to
+              /claim/:token below. */}
+          <Route path="/claim" element={<ClaimSearch />} />
           <Route path="/messages" element={<Messages />} />
           <Route path="/profile" element={<Profile />} />
           {/* Reachable from the banner, from Settings, and from a blocked
@@ -122,8 +129,28 @@ export default function App() {
         </Route>
       </Route>
 
+        {/* The one page OUTSIDE both guards. The customer app opens it for
+            somebody who may have no partner account yet, and the token in the
+            URL is the authorisation, so a guest must be able to read it — but
+            a signed-in partner should see it in their portal, not in the
+            sign-in chrome. Same page, two frames. */}
+        <Route
+          path="/claim/:token"
+          element={status === 'authenticated' ? <Shell /> : <GuestFrame />}
+        >
+          <Route index element={<ClaimHandoff />} />
+        </Route>
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
+  )
+}
+
+function GuestFrame() {
+  return (
+    <AuthLayout wide>
+      <Outlet />
+    </AuthLayout>
   )
 }

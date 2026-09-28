@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { resendOtp } from '../../services/vendor'
 import { Button, Alert } from '../../components/ui'
+import { takeReturnTo } from '../../services/returnTo'
 import AuthLayout from '../../components/layout/AuthLayout'
 
 /**
@@ -64,7 +65,7 @@ export default function VerifyEmail() {
     setNotice(null)
     try {
       await verify(email, value)
-      navigate('/', { replace: true })
+      navigate(takeReturnTo(), { replace: true })
     } catch (err) {
       setError(err.message)
       // Clear on failure. Leaving a wrong code in place means the next attempt

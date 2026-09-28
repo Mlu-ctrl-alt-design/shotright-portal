@@ -123,6 +123,10 @@ const declaredOnly = (method, args) => {
 
 const record = (method, args) => bench.calls.push({ method, args })
 
+/** Token before filing, docname after — see venue_claims._claim_for_evidence. */
+const claimForHandle = (handle) =>
+  bench.claims.find((c) => (c.token && c.token === handle) || (c.status !== 'Started' && c.name === handle))
+
 /**
  * Frappe's answer to being called with the wrong argument name.
  *
@@ -362,6 +366,107 @@ const apiHandlers = [
     const payment = bench.payments[attempt]
     if (!payment) return docMissing()
     return ok({ name: attempt, ...payment })
+  }),
+
+  /* ------------------------------------------------------- venue claims */
+  /**
+   * shotright/venue_claims.py. The rules the portal leans on are modelled, not
+   * just the shapes: two characters to search, one live claim per venue for
+   * this partner, a token that dies when the claim is filed, and a code that is
+   * checked BY file_venue_claim — there is no separate verify step to call.
+   */
+  method('shotright.api.search_claimable_venues', ({ query }) => {
+    const q = String(query || '').trim().toLowerCase()
+    if (q.length < 2) return validationError("Type at least 2 characters of the venue's name.")
+    return ok(bench.catalogue.filter((v) => v.venue_name.toLowerCase().includes(q)).slice(0, 20))
+  }),
+
+  method('shotright.api.start_venue_claim', ({ venue_name }) => {
+    const venue = bench.catalogue.find((v) => v.venue === venue_name)
+    if (!venue) return docMissing('Venue', venue_name)
+    let claim = bench.claims.find((c) => c.venue === venue.venue && ['Started', 'Submitted'].includes(c.status))
+    if (claim?.status === 'Submitted') {
+      return ok({ claim: claim.name, venue_name: venue.venue_name, status: 'Submitted', claim_url: null, expires_at: null })
+    }
+    if (!claim) {
+      claim = { name: `VC-${bench.claims.length + 1}`, venue: venue.venue, status: 'Started', files: [] }
+      bench.claims.push(claim)
+    }
+    claim.token = `tok${bench.claims.length}${Date.now()}`
+    return ok({
+      claim: claim.name,
+      venue_name: venue.venue_name,
+      status: 'Started',
+      // The whole-URL shape, as the bench sends it once shotright_portal_url is set.
+      claim_url: `https://shotright-portal.vercel.app/claim/${claim.token}`,
+      expires_at: '2026-10-01 12:00:00',
+    })
+  }),
+
+  method('shotright.api.get_venue_claim_handoff', ({ token }) => {
+    const claim = bench.claims.find((c) => c.token && c.token === token)
+    if (!claim) return validationError('That link is no longer valid. Start the claim again from the app.')
+    const venue = bench.catalogue.find((v) => v.venue === claim.venue)
+    return ok({ claim: claim.name, venue: claim.venue, venue_name: venue?.venue_name, status: claim.status })
+  }),
+
+  method('shotright.api.file_venue_claim', ({ token, code, claimant_role, note }) => {
+    const claim = bench.claims.find((c) => c.token && c.token === token)
+    if (!claim) return validationError('That link is no longer valid. Start the claim again from the app.')
+    if (String(code) !== bench.otpCode) return validationError('That code is invalid or has expired. Request a new one.')
+    Object.assign(claim, { status: 'Submitted', token: null, claimant_role, note })
+    const owned = !!bench.catalogue.find((v) => v.venue === claim.venue)?.owned
+    return ok({ claim: claim.name, status: 'Submitted', venue: claim.venue, disputed: owned })
+  }),
+
+  method('shotright.api.get_my_venue_claims', () =>
+    ok(
+      bench.claims.map((c) => ({
+        claim: c.name,
+        venue: c.venue,
+        venue_name: bench.catalogue.find((v) => v.venue === c.venue)?.venue_name,
+        status: c.status,
+        started_at: '2026-09-28 09:00:00',
+        decided_at: c.decided_at || null,
+        decision_reason: c.decision_reason || null,
+        disputed: false,
+      })),
+    ),
+  ),
+
+  method('shotright.api.get_venue_claim_evidence', ({ handle }) => {
+    const claim = claimForHandle(handle)
+    return claim ? ok(claim.files) : validationError('That link is no longer valid.')
+  }),
+
+  method('shotright.api.remove_venue_claim_evidence', ({ handle, file }) => {
+    const claim = claimForHandle(handle)
+    if (!claim) return validationError('That link is no longer valid.')
+    if (!claim.files.some((f) => f.file === file)) return validationError('That document is not on this claim.')
+    claim.files = claim.files.filter((f) => f.file !== file)
+    return ok(claim.files)
+  }),
+
+  http.all('*/api/method/shotright.api.upload_venue_claim_evidence', async ({ request }) => {
+    const form = await request.formData()
+    const file = form.get('file')
+    const handle = form.get('handle')
+    record('upload_venue_claim_evidence', { handle, fileName: file?.name, type: file?.type, size: file?.size })
+    const claim = claimForHandle(handle)
+    if (!claim) return validationError('That link is no longer valid.')
+    /* The bench judges by the part's FILENAME (guess_type). jsdom's FormData
+       loses that on the way through MSW and sends "blob", though a browser
+       keeps it — so the double falls back to the part's type, which survives.
+       Tests assert on the type and size for the same reason. */
+    const allowed = /\.(pdf|png|jpe?g|webp)$/i.test(file?.name || '') ||
+      (file?.name === 'blob' && ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'].includes(file?.type))
+    if (!allowed) {
+      return validationError(`Send a PDF or a photo (PNG, JPEG or WebP). ${file?.name} is neither.`)
+    }
+    if (claim.files.length >= 6) return validationError('That is already 6 documents. Remove one before adding another.')
+    const row = { file: `FILE-C${claim.files.length + 1}`, file_name: file.name, file_size: file.size }
+    claim.files.push(row)
+    return ok({ file: row.file, file_name: row.file_name, claim: claim.name, evidence: claim.files })
   }),
 
   /* --------------------------------------------------------------- inbox */
