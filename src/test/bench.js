@@ -294,6 +294,9 @@ const initial = () => ({
   /** URL → the payload a working social/website importer would return. */
   importedByUrl: {},
 
+  /** true: import_venue_from_url refuses with FeatureLockedError, as the bench does for a free account. */
+  importLocked: false,
+
   /** Registration path: true makes register_vendor return otp_required. */
   otpRequired: false,
   /** Login path: an unverified account answers with otp_required, not an error. */

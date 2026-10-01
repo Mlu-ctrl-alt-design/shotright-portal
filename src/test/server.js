@@ -996,9 +996,21 @@ const apiHandlers = [
    * state this suite has to be correct in. `bench.importedByUrl` maps a URL to
    * the payload a working importer would return.
    */
-  method('shotright.api.import_venue_from_url', ({ url }) =>
-    ok(bench.importedByUrl?.[String(url || '')] || null),
-  ),
+  method('shotright.api.import_venue_from_url', ({ url }) => {
+    /* The bench enforces Pro itself since 1 Oct (FeatureLockedError, a 417
+       ValidationError subclass), whatever the portal's locks say. */
+    if (url && bench.importLocked) {
+      return HttpResponse.json(
+        {
+          exc_type: 'FeatureLockedError',
+          exception: 'shotright.entitlements.FeatureLockedError: Website import is a Pro feature. Upgrade to use it.',
+          _server_messages: JSON.stringify([JSON.stringify({ message: 'Website import is a Pro feature. Upgrade to use it.' })]),
+        },
+        { status: 417 },
+      )
+    }
+    return ok(bench.importedByUrl?.[String(url || '')] || null)
+  }),
 
   /** shotright #64: confirmed suggestions become unattached files for the wizard. */
   method('shotright.api.save_imported_photos', ({ urls = [], confirm_rights }) => {

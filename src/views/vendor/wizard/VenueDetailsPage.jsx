@@ -255,6 +255,7 @@ export default function VenueDetailsPage({
   pinProvisional = false,
   onPinMoved,
   hoursFromImport = null,
+  hoursNotFitted = false,
   onEditHours = () => {},
 }) {
   const { data: lookups, isLoading: lookupsLoading } = useVenueLookups()
@@ -704,6 +705,12 @@ export default function VenueDetailsPage({
           </div>
         ) : (
           <div className="mt-4">
+            {hoursNotFitted && (
+              <p role="status" className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[13px] text-ink-800">
+                Your listing has opening hours that don’t fit one weekday and one weekend time, so
+                we haven’t filled them in. Set them here.
+              </p>
+            )}
             <p className="mb-2.5 text-[13px] font-semibold text-ink-700">Days open</p>
             <div
               data-field="days"
