@@ -9,7 +9,8 @@ Root Directory can be left at its default.
 
 The portal is a decoupled SPA, but it does **not** call the bench cross-origin.
 `vercel.json` proxies three paths straight through to
-`shotright.thedaystar.co.za`:
+`shotright.thedaystar.co.za` (non-production deployments are redirected to the
+staging bench by `middleware.js`; see "Staging and preview deployments"):
 
 ```
 /api/*      ->  https://shotright.thedaystar.co.za/api/*
@@ -137,17 +138,56 @@ gives you (a `CNAME` to `cname.vercel-dns.com`).
 
 ---
 
-## Preview deployments
+## Staging and preview deployments
 
-Vercel builds every branch and pull request. Those preview URLs proxy to the
-**same production bench**, so while `VITE_USE_MOCKS=false` any preview can write
-real data. Two options once the backend is live:
+There are two benches:
 
-- Set `VITE_USE_MOCKS=true` for the Preview environment only, so previews stay on
-  fixtures and production talks to the bench, or
-- Stand up a staging bench and point a preview-scoped rewrite at it.
+| | Production | Staging |
+|---|---|---|
+| Bench | `https://shotright.thedaystar.co.za` | `https://shotright-staging.thedaystar.co.za` |
+| Data | live | a scrubbed copy of production (fake addresses, no real phones) |
+| Mail | delivered | only to `@thedaystar.co.za` and the team allowlist, subject `[STAGING]` |
+| Payfast | live merchant | Payfast sandbox |
 
-Worth deciding before the first `false` deploy rather than after.
+`vercel.json` can only proxy to one fixed host, so **`middleware.js`** decides per
+deployment. It reads `SHOTRIGHT_BACKEND_ORIGIN`:
+
+- **unset** → the middleware steps aside and the `vercel.json` rewrites send
+  `/api`, `/files` and `/private` to production. This is what Production uses,
+  so a missing variable can never point the live portal anywhere else.
+- **set** → those three paths are proxied to that origin instead.
+
+### One-time Vercel setup
+
+1. **Settings → Environment Variables** → add
+   `SHOTRIGHT_BACKEND_ORIGIN = https://shotright-staging.thedaystar.co.za`,
+   scoped to **Preview only**. Do *not* tick Production.
+2. Copy `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_MAPS_API_KEY` into Preview as
+   well, if they are not there already (they are inlined at build time; see
+   above).
+3. Optional, for a stable URL: **Settings → Domains → Add**
+   `shotright-portal-staging.thedaystar.co.za` and assign it to the **`staging`**
+   git branch. Create the `CNAME` to `cname.vercel-dns.com` it asks for.
+   Without this, the branch URL `shotright-portal-git-staging-<team>.vercel.app`
+   works too.
+4. Add the staging portal origin to the Google OAuth client's **Authorized
+   JavaScript origins** (see above), or Google sign-in fails on staging.
+5. Redeploy the `staging` branch so the variable takes effect.
+
+Every preview deployment (any branch, any PR) now talks to staging, never to
+production. The `staging` branch is just the one with a fixed address. Keep it
+fast-forwarded to whatever should be on staging, e.g.
+`git push origin feat/x:staging --force-with-lease`.
+
+### Checking which bench a deployment uses
+
+```bash
+curl -s https://<deployment>/api/method/frappe.auth.get_logged_user -o /dev/null -w '%{http_code}\n'
+```
+
+Then look for the request in the bench's nginx log
+(`/var/log/nginx/access.log`), or sign in with an `@thedaystar.co.za` account:
+real customer addresses do not exist on staging.
 
 ---
 
@@ -158,6 +198,7 @@ Worth deciding before the first `false` deploy rather than after.
 - [ ] Login completes and survives a hard refresh (token is being stored)
 - [ ] Custom subdomain resolves over HTTPS
 - [ ] `VITE_USE_MOCKS` is the value you actually intended for that environment
+- [ ] `SHOTRIGHT_BACKEND_ORIGIN` is **unset** in Production and set to staging in Preview
 - [ ] The Google sign-in button is **visible** on `/login` — if it is absent, `VITE_GOOGLE_CLIENT_ID` was missing at build time
 - [ ] The wizard's map picker loads a map rather than falling back to manual coordinates
 - [ ] Both Google variables were set **before** the build that shipped, not after
