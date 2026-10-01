@@ -308,23 +308,28 @@ function UrlRoute({ source, id, label, placeholder, hint, onImported }) {
   const [url, setUrl] = useState('')
   const [status, setStatus] = useState('idle')
   const [problem, setProblem] = useState(null)
+  const [problemMessage, setProblemMessage] = useState('')
 
   const run = async (event) => {
     event.preventDefault()
     if (!url.trim()) return
     setStatus('reading')
     setProblem(null)
+    setProblemMessage('')
     const result = await importFromUrl(url, source)
     setStatus('idle')
     if (result.ok) return onImported(result.venue, source)
     setProblem(result.reason)
+    setProblemMessage(result.message || '')
   }
 
   return (
     <form onSubmit={run}>
       <Input
         shape="field"
-        type="url"
+        /* text, not url: "facebook.com/yourvenue" is how people write a link,
+           and type="url" refuses it before the bench can add the https://. */
+        type="text"
         inputMode="url"
         id={id}
         label={label}
@@ -342,7 +347,20 @@ function UrlRoute({ source, id, label, placeholder, hint, onImported }) {
 
       {problem && (
         <Alert variant="warning" className="mt-3">
-          {problem === 'not-found' ? (
+          {problem === 'blocked' ? (
+            <>
+              <p className="font-bold">That page is behind a login</p>
+              <p className="mt-1">
+                {problemMessage ||
+                  'We couldn’t read it without logging in. Try your website or your Google listing, or type your details in below.'}
+              </p>
+            </>
+          ) : problem === 'locked' ? (
+            <>
+              <p className="font-bold">Importing is a Pro feature</p>
+              <p className="mt-1">Upgrade to fill this in from a link, or type your details in below.</p>
+            </>
+          ) : problem === 'not-found' ? (
             <>
               <p className="font-bold">We couldn’t read that page</p>
               <p className="mt-1">

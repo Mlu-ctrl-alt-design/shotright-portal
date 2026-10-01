@@ -22,6 +22,7 @@ import UpgradeDialog from '../../../components/paywall/UpgradeDialog'
 import VenueDetailsPage, { assembleSummary } from './VenueDetailsPage'
 import VenuePhotosPage from './VenuePhotosPage'
 import WizardSuccess from './WizardSuccess'
+import { hoursFromRows } from '../../../utils/importedHours'
 
 /**
  * Adding a venue: import → one page → photos.
@@ -134,6 +135,10 @@ function AddVenue({ resumeId, draft, draftError }) {
   const [fromImport, setFromImport] = useState(() => saved.fromImport || [])
   const [importSource, setImportSource] = useState(() => saved.importSource || null)
   const [hoursFromImport, setHoursFromImport] = useState(() => saved.hoursFromImport || null)
+  /* Hours a listing gave that the editor cannot hold (split shifts, an odd
+     day). Said out loud, because showing them would promise hours we will not
+     save. */
+  const [hoursNotFitted, setHoursNotFitted] = useState(false)
 
   const [mapOpen, setMapOpen] = useState(false)
   const [paywall, setPaywall] = useState(false)
@@ -343,7 +348,12 @@ function AddVenue({ resumeId, draft, draftError }) {
     setDetails(next)
     setFromImport(marked)
     setImportSource(source)
-    setHoursFromImport(describeHours(place.hours))
+    /* Applied, not just shown: the summary line used to describe the import
+       while the form's own 11:00–23:00 default was what got saved. */
+    const fitted = hoursFromRows(place.hours, hours)
+    if (fitted) setHours(fitted)
+    setHoursFromImport(fitted ? describeHours(place.hours) : null)
+    setHoursNotFitted(Boolean(place.hours?.length) && !fitted)
     setPhotoSuggestions(place.photoSuggestions || [])
     setStage('form')
   }
@@ -564,6 +574,7 @@ function AddVenue({ resumeId, draft, draftError }) {
     setFromImport([])
     setImportSource(null)
     setHoursFromImport(null)
+    setHoursNotFitted(false)
     setTouched(new Set())
     setStage(hasSingleVenueSource(sources) ? 'import' : 'form')
   }
@@ -700,6 +711,7 @@ function AddVenue({ resumeId, draft, draftError }) {
                   pinProvisional={defaults.pinIsProvisional}
                   onPinMoved={defaults.onPinMoved}
                   hoursFromImport={hoursFromImport}
+                  hoursNotFitted={hoursNotFitted}
                   onEditHours={() => setHoursFromImport(null)}
                 />
               </div>
@@ -817,13 +829,11 @@ function SaveState({ status }) {
 }
 
 /**
- * Turn whatever hours the importer sent into one line a partner can check.
+ * Turn imported hours into one line a partner can check.
  *
- * ⚠️ We do NOT parse them into the form. Getting seven days subtly wrong writes
- * bad trading hours onto a real business, and a partner who trusts the prefill
- * will not re-read all seven — so the imported hours are SHOWN, with a Change
- * that hands them the editor, and the form's own values are what get saved
- * until they say otherwise. See the same reasoning in `places.js`.
+ * Only shown once `hoursFromRows` has put exactly these hours into the editor,
+ * so the line describes what will be saved. Hours the editor can't hold are
+ * never summarised; the partner is told to set them instead.
  */
 function describeHours(rows) {
   if (!Array.isArray(rows) || !rows.length) return null

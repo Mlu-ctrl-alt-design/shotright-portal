@@ -18,10 +18,9 @@ import { placesAvailable } from './places'
  *   > A bench without the proxy gets the wizard exactly as it is today, with no
  *   > dead search box and no explanation owed to anybody.
  *
- * It matters more here than it did there, because as of today NONE of the
- * single-venue routes exist on the bench. `search_places` is not in `api.py`,
- * which is exactly why the portal already logs "endpoint not available on this
- * server", and the social and website importers have not been written at all.
+ * All three routes exist on the bench (shotright #64). The Google one still
+ * hides itself until the bench has a `google_places_api_key`: its probe fails
+ * without one.
  *
  * A screen that offers a partner three ways to skip the typing, accepts their
  * Instagram URL into a box, and then does nothing is worse than never having
@@ -29,10 +28,9 @@ import { placesAvailable } from './places'
  * probed, absent routes are not rendered, and if no single-venue route answers,
  * the import screen does not appear and the partner goes straight to the form.
  *
- * ⚠️ WHAT IS OWED BY THE BACKEND, and the shape the portal is ready for:
+ * The backend contract (docs/API.md, "Venue import"):
  *
- *   search_places / get_place_details   the Places proxy — already specified in
- *                                       `places.js`, still not deployed.
+ *   search_places / get_place_details   the Places proxy — see `places.js`.
  *   import_venue_from_url(url, source)  ONE method for both the social and the
  *                                       website route. They are the same job —
  *                                       fetch a page, pull out name, address,
@@ -41,10 +39,10 @@ import { placesAvailable } from './places'
  *                                       thing to deploy. `source` is a hint
  *                                       ('social' | 'website'), not a contract.
  *
- * The expected return is `normaliseImported`'s input below: the same identity
- * fields a Place gives us and nothing else. In particular NOT a description, a
- * rating or a photo set scraped off someone's page — see rule 2 in `places.js`.
- * What lands in a Venue is what the partner submitted having read it.
+ * The return is `normaliseImported`'s input below. A page that only shows its
+ * content to logged-in readers (Instagram, always) comes back `blocked`, with
+ * the bench's own sentence in `message`. What lands in a Venue is what the
+ * partner submitted having read it.
  */
 
 export const IMPORT_URL_METHOD = 'shotright.api.import_venue_from_url'
@@ -102,9 +100,10 @@ export const importPhotos = async (urls) => {
 /**
  * Pull a venue's details off a Facebook / Instagram page or a website.
  *
- * @returns `{ok, venue}` | `{ok: false, reason}` where reason is
+ * @returns `{ok, venue}` | `{ok: false, reason, message?}` where reason is
  *          'no-endpoint' (not deployed), 'not-found' (nothing readable at that
- *          URL) or 'errored'.
+ *          URL), 'blocked' (a login wall; `message` says what to do), 'locked'
+ *          (a Pro feature this account does not have) or 'errored'.
  */
 export const importFromUrl = async (url, source) => {
   const text = String(url || '').trim()
@@ -116,6 +115,7 @@ export const importFromUrl = async (url, source) => {
       IMPORT_URL_METHOD,
       async () => {
         const payload = await call(IMPORT_URL_METHOD, { url: text, source })
+        if (payload?.blocked) return { ok: false, reason: 'blocked', message: payload.message || '' }
         const venue = normaliseImported(payload)
         return venue?.name || venue?.address
           ? { ok: true, venue }
@@ -124,6 +124,8 @@ export const importFromUrl = async (url, source) => {
       async () => ({ ok: false, reason: 'no-endpoint' }),
     )
   } catch (error) {
+    const text = `${error?.excType || error?.exc_type || ''} ${error?.message || ''} ${error?.detail || ''}`
+    if (/FeatureLockedError/.test(text)) return { ok: false, reason: 'locked', error }
     return { ok: false, reason: 'errored', error }
   }
 }
