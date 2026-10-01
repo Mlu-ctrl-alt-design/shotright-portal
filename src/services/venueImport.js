@@ -1,119 +1,153 @@
-import { saveDraft, draftsArePortable } from './setupDraft'
+import api, { call, callGet } from './api'
 
 /**
- * Turn spreadsheet rows into venue DRAFTS, not venues.
+ * Bulk venue upload — the bench's importer, and nothing else.
  *
- * ⚠️ THIS USED TO CALL `create_venue` AND IT WAS THE WRONG SHAPE. A venue made
- * from a spreadsheet has no photographs, and a listing with no picture asks
- * someone to choose where to spend their evening on the strength of a name — so
- * eleven of them went into the review queue as eleven things a reviewer had to
- * send back. The partner's own words for the fix: get them onto the platform in
- * draft, then add the images.
+ * ⚠️ THIS USED TO BE A SECOND IMPORTER, IN THE BROWSER. Until 1 Oct the portal
+ * parsed the spreadsheet itself and called `save_venue_draft` once per row,
+ * falling back to localStorage — with its own column names (weekday_open,
+ * `atmosphere`, semicolon-separated moods) that the bench's importer has never
+ * read. That path had no server-side Pro check, no dedupe on a re-upload (the
+ * same file twice was every venue twice), and no row cap.
  *
- * A draft is exactly that, and it already exists: it is what the wizard writes
- * every few seconds, and every row lands in the same place the wizard would
- * have put it. So a partner opens one, finds nine fields already filled in from
- * their own file, adds photographs, and submits — through the flow that already
- * requires a photo rather than around it.
- *
- * NOTHING IS SUBMITTED. No venue exists, no reviewer sees anything, and a bad
- * row costs a deleted draft rather than a listing that cannot be deleted at all.
- * That is the whole reason this reads better than the version it replaces.
+ * The bench has had a real one since shotright #64 (`venue_import.py`): the
+ * file is uploaded, a background job reads it, venues land in Draft, and a
+ * re-upload updates on (vendor, external_ref) instead of duplicating. So the
+ * portal now only does four things: fetch the column contract, upload the
+ * file, start the job, and watch it.
  */
+
+export const TEMPLATE_METHOD = 'shotright.api.get_venue_import_template'
+const START_METHOD = 'shotright.api.start_venue_import'
+const STATUS_METHOD = 'shotright.api.get_venue_import_status'
+const CANCEL_METHOD = 'shotright.api.cancel_venue_import'
 
 /**
- * The wizard's own initial state, mirrored.
- *
- * ⚠️ These MUST stay in step with `VenueWizard`'s `INITIAL_DETAILS` and
- * `INITIAL_HOURS`. A draft is resumed by spreading `saved.details` over those
- * defaults, so a key that only exists here is one the wizard will not show and
- * a key missing here simply falls back — which is the safe direction, and the
- * reason this is a partial rather than a copy of the whole shape.
+ * How often the screen asks how the job is going. Mutable so the tests can
+ * run it fast on real timers — fake timers plus MSW hang (see render.jsx).
  */
-const draftPayload = (venue) => ({
-  moods: { moods: venue.moods },
-  details: {
-    venue_name: venue.venue_name,
-    address: venue.address,
-    latitude: venue.latitude ?? undefined,
-    longitude: venue.longitude ?? undefined,
-    dress_code: venue.dress_code,
-  },
-  hours: {
-    weekday: venue.operating_hours.weekday,
-    weekend: venue.operating_hours.weekend,
-  },
-  photos: [],
-  /* Straight to the form. A row that arrived in a spreadsheet has already been
-     "imported" — offering the import screen again would invite the partner to
-     overwrite the values they just uploaded. */
-  stage: 'form',
-})
+export const venueImportPolling = { intervalMs: 2000 }
+
+/** What the importer reads. `.xls` is not one — openpyxl cannot open it. */
+export const ACCEPTED_EXTENSIONS = ['.xlsx', '.csv']
+
+export const FINISHED_STATUSES = ['Completed', 'Failed', 'Cancelled']
+export const isFinished = (job) => FINISHED_STATUSES.includes(job?.status)
 
 /**
- * Which sections the spreadsheet actually answered.
+ * The sheet-and-column contract, straight from the bench.
  *
- * `basics` is deliberately absent even though the sheet carries a venue name:
- * it also wants a manager and a contact number, and neither is a column. A
- * section marked complete that nobody has looked at is how a partner submits a
- * venue believing they have seen it — so they land on `basics`, which is also
- * the first thing on the page.
- *
- * ⚠️ These are the SECTION keys from `wizardSteps.js`, not the old step keys.
- * They changed on 17 Sep when the wizard became one page; a draft written with
- * the old ones still opens, because `stepIndex` maps the retired names.
+ * `{max_venues, join_column, join_note, sheets: [{name, required,
+ * required_columns, optional_columns, notes}]}` — a description, not a file.
+ * Guest-readable, and derived from the parser's own constants, so it cannot
+ * describe a column the importer would then ignore.
  */
-const COMPLETED_BY_SHEET = ['vibe', 'hours']
-const LANDS_ON = 'basics'
+export const getVenueImportTemplate = () => callGet(TEMPLATE_METHOD)
 
-export async function importVenueDrafts(rows, { onProgress, signal } = {}) {
-  const created = []
-  const failed = []
+/**
+ * Columns a partner can use. `vendor` is dropped: it is honoured only for a
+ * System Manager and is noise — or worse, a row refused — for anyone else.
+ */
+export const partnerColumns = (sheet) =>
+  [...(sheet?.required_columns || []), ...(sheet?.optional_columns || [])].filter(
+    (column) => column !== 'vendor',
+  )
 
-  for (let i = 0; i < rows.length; i += 1) {
-    if (signal?.aborted) break
-    const row = rows[i]
-    onProgress?.({ done: i, total: rows.length, current: row.venue.venue_name })
-
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const draft = await saveDraft({
-        step: LANDS_ON,
-        completed: COMPLETED_BY_SHEET,
-        venue_name: row.venue.venue_name,
-        payload: draftPayload(row.venue),
-      })
-      created.push({
-        lineNumber: row.lineNumber,
-        name: row.venue.venue_name,
-        id: draft?.id || null,
-        notes: row.notes,
-      })
-    } catch (err) {
-      /* One failure does not end the run. Stopping at the first leaves a
-         partner with four of eleven, no record of which four, and a file they
-         dare not upload again. Nothing is retried either — a save that failed
-         may still have written, and a second attempt is how one venue becomes
-         two drafts. */
-      failed.push({
-        lineNumber: row.lineNumber,
-        name: row.venue.venue_name,
-        reason: err?.message || 'The server refused it and did not say why.',
-      })
-    }
-  }
-
-  onProgress?.({ done: rows.length, total: rows.length, current: null })
-
-  /**
-   * ⚠️ WHETHER THESE ARE ACTUALLY ON THE PLATFORM.
-   *
-   * `saveDraft` falls back to this browser's localStorage when the bench has no
-   * draft endpoint. That is right for one draft — better than losing the
-   * wizard — and it is a different promise for eleven: they are on this laptop,
-   * not on the account, and they are gone with the browser's site data. A
-   * partner told "your venues are in drafts" who then opens their phone and
-   * finds nothing has been failed by us, not by their browser.
-   */
-  return { created, failed, portable: draftsArePortable() }
+/**
+ * The `venues` sheet as a CSV header row, built from the bench's contract.
+ *
+ * Header only, no example row: the importer would read an example as a venue,
+ * and a partner who forgot to delete it would get a Draft called "Example".
+ * A `.csv` carries the venues sheet alone; hours and menus need a workbook,
+ * which the screen spells out from the same contract.
+ */
+export const templateCsv = (template) => {
+  const venues = template?.sheets?.find((s) => s.name === 'venues')
+  return `${partnerColumns(venues).join(',')}\n`
 }
+
+/**
+ * Upload the workbook as a private File the importer can read by docname.
+ *
+ * Core `upload_file` with NO doctype/docname — the shape the menu importer has
+ * used since August. That shape is open to a vendor (role `All` may create a
+ * File; core only runs `check_write_permission` when a document is named —
+ * measured on the bench 22 Aug, see BACKEND-ASKS §19.b), and it stamps the
+ * File's `owner` as the caller, which is exactly what `Venue Import` checks
+ * before it will read it. Naming `doctype=Venue` here would be the permanent
+ * 403 that `upload_venue_photo` exists to avoid — and there is no venue yet.
+ *
+ * Private, because a partner's catalogue (phone numbers, unreleased venues) is
+ * not something to publish under /files.
+ *
+ * Errors are tagged `stage: 'upload'`: a refusal here is about our request, not
+ * the partner's spreadsheet, and must not be reported as one.
+ */
+export async function uploadVenueFile(file, onProgress) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('is_private', '1')
+  try {
+    const { data } = await api.post('/api/method/upload_file', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (event) => {
+        if (!event.total) return
+        onProgress?.(Math.round((event.loaded / event.total) * 100))
+      },
+    })
+    /* Core answers the docname as `name`; the app's own uploaders as `file`.
+       Read both — reading only one is what 417'd every photo save in #23. */
+    const docname = data?.message?.name || data?.message?.file
+    if (!docname) {
+      const err = new Error('The file uploaded, but the server didn’t say where it put it.')
+      err.stage = 'upload'
+      throw err
+    }
+    return docname
+  } catch (err) {
+    err.stage = err.stage || 'upload'
+    throw err
+  }
+}
+
+/**
+ * Queue the import. Returns the same shape as the status call.
+ *
+ * `submit_for_review` is sent as an explicit 0 and never offered. A workbook
+ * cannot carry photographs, so every venue it creates fails the completeness
+ * gate on `no_photos` by construction — opting in would turn each fresh Draft
+ * into a Declined listing for a reason the partner had no way to avoid. Photos
+ * first, then submit, venue by venue, through the flow that already asks.
+ */
+export const startVenueImport = (fileName) =>
+  call(START_METHOD, { file_name: fileName, submit_for_review: 0 })
+
+export const getVenueImportStatus = (name) => callGet(STATUS_METHOD, { name })
+
+export const cancelVenueImport = (name) => call(CANCEL_METHOD, { name })
+
+/**
+ * A worker failure is stored as the tail of a Python traceback. Show its last
+ * line, without the exception's module path — the sentence, not the stack.
+ */
+export const plainImportError = (error) => {
+  const lines = String(error || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const last = lines.at(-1) || ''
+  return last.replace(/^(?:[\w.]+\.)?\w*(?:Error|Exception):\s*/, '')
+}
+
+/** Completeness blocker codes (venue_completeness.py), in a partner's words. */
+const BLOCKERS = {
+  no_photos: 'Needs photos',
+  few_photos: 'Needs more photos',
+  no_description: 'Needs a description',
+  no_address: 'Needs a street address',
+  no_coordinates: 'Needs a map location',
+  no_menu: 'Needs a menu',
+}
+
+export const blockerLabel = (code) =>
+  BLOCKERS[code] || String(code || '').replace(/_/g, ' ')

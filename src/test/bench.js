@@ -219,7 +219,85 @@ const initial = () => ({
     /* The real checkout endpoint, live on the bench since 19 Sep. It replaced
        `start_subscription`, which has never existed. */
     get_upgrade_checkout: true,
+
+    /* Bulk venue upload — shotright #64, live. The portal's only bulk path. */
+    get_venue_import_template: true,
+    start_venue_import: true,
+    get_venue_import_status: true,
+    cancel_venue_import: true,
   },
+
+  /**
+   * What `get_venue_import_template` answers — copied from the shape
+   * `venue_import.venue_import_template()` builds, Select options abridged.
+   */
+  venueImportTemplate: {
+    max_venues: 500,
+    join_column: 'venue_ref',
+    join_note:
+      'Rows on the hours and menu sheets name their venue in `venue_ref`, matching that venue\'s `external_ref` or, failing that, its `venue_name`.',
+    sheets: [
+      {
+        name: 'venues',
+        required: true,
+        required_columns: ['venue_name', 'latitude', 'longitude'],
+        optional_columns: [
+          'external_ref',
+          'vendor',
+          'address',
+          'contact_phone',
+          'category',
+          'price_level',
+          'dress_code',
+          'atmosphere_desc',
+          'moods',
+          'seating_capacity',
+          'turn_time_minutes',
+        ],
+        notes: { moods: 'Comma-separated, e.g. "Romantic, Chilled".' },
+      },
+      {
+        name: 'hours',
+        required: false,
+        required_columns: ['venue_ref', 'day_of_week', 'open_time', 'close_time'],
+        optional_columns: [],
+        notes: {},
+      },
+      {
+        name: 'menu',
+        required: false,
+        required_columns: ['venue_ref', 'heading_name', 'item_name', 'price'],
+        optional_columns: ['description'],
+        notes: {},
+      },
+    ],
+  },
+
+  /** Venue Import jobs, as the bench tracks them. See server.js. */
+  venueImports: [],
+
+  /**
+   * What the NEXT import's worker will find in the file. The fake bench does
+   * not parse spreadsheets — the real parser is tested on the backend — so a
+   * test says what the file contained and asserts on what the portal did
+   * with the answer. `fail` is a worker failure: the traceback tail the bench
+   * stores in `errors` with status Failed.
+   */
+  venueImportOutcome: {
+    venues: [
+      { venue_name: 'Corner Kitchen', external_ref: 'CK-1' },
+      { venue_name: 'The Yard', external_ref: 'YARD-1' },
+    ],
+    errors: [],
+    menu_items: 0,
+    fail: null,
+  },
+
+  /** Status polls before the job finishes. Infinity holds it mid-run. */
+  venueImportPollsToFinish: 3,
+
+  /** `start_venue_import` answers 429, as its @rate_limit does past 20/hour. */
+  venueImportRateLimited: false,
 
   /**
    * What `get_entitlements` answers when it is deployed.
@@ -303,6 +381,7 @@ const initial = () => ({
   /** Which kwargs each method actually declares. Anything else is DROPPED. */
   declared: {
     update_vendor_profile: ['first_name', 'last_name', 'business_name', 'phone', 'new_password'],
+    start_venue_import: ['file_name', 'submit_for_review', 'default_vendor'],
   },
 
   /**

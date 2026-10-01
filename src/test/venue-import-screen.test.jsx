@@ -253,31 +253,22 @@ describe('importing is Pro', () => {
 })
 
 describe('the spreadsheet route', () => {
-  it('hands the file to the screen that reviews it, rather than reading it here', async () => {
-    /* ⚠️ THE REVIEW STEP IS THE FEATURE. A venue enters a review queue, is what
-       customers see, and cannot be reliably deleted afterwards — so nothing is
-       created until the partner has seen what we understood. Reading the file
-       on this panel would quietly route around the one screen that makes bulk
-       import safe. */
+  it('hands the file to the bulk import screen, selected but not sent', async () => {
+    /* The partner still presses Import there: dropping a file is choosing it,
+       not agreeing to upload a catalogue. */
     withPlaces()
     asPro()
     const { user } = renderApp({ route: ROUTE, signedIn: true })
 
     await user.click(await screen.findByRole('tab', { name: /several venues/i }))
 
-    const file = new File(
-      [
-        'venue_name,address,latitude,longitude,moods,dress_code,atmosphere,weekday_open,weekday_close,weekend_open,weekend_close\n' +
-          'Corner Kitchen,12 Long St,-33.92,18.42,Chilled,Smart casual,Low light,17:00,23:00,12:00,23:00',
-      ],
-      'venues.csv',
-      { type: 'text/csv' },
-    )
+    const file = new File(['venue_name,latitude,longitude\nCorner Kitchen,-33.92,18.42'], 'venues.csv', {
+      type: 'text/csv',
+    })
     await user.upload(await screen.findByLabelText(/venue spreadsheet/i), file)
 
-    // Landed on the bulk import screen, with the row already read and nothing
-    // created yet.
-    expect(await screen.findByText(/1 ready/i, {}, { timeout: 5000 })).toBeInTheDocument()
-    expect(screen.getByText(/nothing has been created yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/venues\.csv/, {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /import venues/i })).toBeInTheDocument()
+    expect(bench.calls.some((c) => c.method === 'upload_file')).toBe(false)
   })
 })

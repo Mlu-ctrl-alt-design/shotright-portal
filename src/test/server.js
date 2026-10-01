@@ -163,6 +163,91 @@ const itemParamError = (fn, args) => {
   return null
 }
 
+/* -------------------------------------------------------- venue imports */
+
+const venueImportStatus = (job) => {
+  // eslint-disable-next-line no-unused-vars
+  const { owner, file, polls, outcome, ...wire } = job
+  return structuredClone({ ...wire, vendor: owner })
+}
+
+const ownVenueImport = (name) =>
+  bench.venueImports.find((j) => j.name === name && j.owner === bench.profile.email)
+
+const importMissing = () =>
+  HttpResponse.json(
+    {
+      exc_type: 'DoesNotExistError',
+      exception: 'frappe.exceptions.DoesNotExistError',
+    },
+    { status: 404 },
+  )
+
+/**
+ * One poll, one step of the worker: scanning, then reading (half done), then
+ * done — writing the venues into `bench.venues` as Draft, upserted on
+ * (vendor, external_ref) exactly as `_existing_venue` matches them.
+ */
+const advanceVenueImport = (job) => {
+  if (['Completed', 'Failed', 'Cancelled'].includes(job.status)) return
+  job.polls += 1
+  const { outcome } = job
+  const total = outcome.venues.length
+
+  if (job.polls >= bench.venueImportPollsToFinish) {
+    if (outcome.fail) {
+      Object.assign(job, { status: 'Failed', stage: 'failed', errors: [outcome.fail] })
+      return
+    }
+    for (const row of outcome.venues) {
+      const existing = row.external_ref
+        ? bench.venues.find(
+            (v) => v.external_ref === row.external_ref && v.vendor === job.owner,
+          )
+        : null
+      let venue = existing
+      if (existing) {
+        existing.venue_name = row.venue_name
+        job.updated_count += 1
+      } else {
+        venue = {
+          name: `VEN-${String(bench.venues.length + 1).padStart(5, '0')}`,
+          venue_name: row.venue_name,
+          external_ref: row.external_ref || null,
+          vendor: job.owner,
+          workflow_state: 'Draft',
+          moods: [],
+          operating_hours: [],
+        }
+        bench.venues.push(venue)
+        job.created_count += 1
+      }
+      job.venues.push({
+        venue: venue.name,
+        venue_name: venue.venue_name,
+        external_ref: venue.external_ref,
+        vendor: job.owner,
+        action: existing ? 'updated' : 'created',
+        workflow_state: venue.workflow_state,
+        blockers: [],
+      })
+    }
+    Object.assign(job, {
+      status: 'Completed',
+      stage: 'done',
+      processed: total,
+      total,
+      skipped_count: outcome.skipped || 0,
+      menu_items_count: outcome.menu_items || 0,
+      errors: outcome.errors || [],
+    })
+    return
+  }
+
+  if (job.polls === 1) Object.assign(job, { status: 'Running', stage: 'scanning' })
+  else Object.assign(job, { status: 'Running', stage: 'reading', total, processed: Math.floor(total / 2) })
+}
+
 /* ------------------------------------------------------------------ handlers */
 
 /**
@@ -1287,6 +1372,97 @@ const apiHandlers = [
   ),
   method('shotright.api.bulk_import_products', () => ok({ created: 0 })),
 
+  /* --------------------------------------------------- bulk venue upload */
+  /**
+   * shotright.api.{get_venue_import_template, start_venue_import,
+   * get_venue_import_status, cancel_venue_import} — venue_import.py.
+   *
+   * Frappe-faithful where it has bitten before: undeclared kwargs dropped,
+   * a missing required one is a TypeError 417, a gated caller is
+   * `FeatureLockedError` 417, a file the caller does not own is a 403
+   * PermissionError, and somebody else's import is a 404 indistinguishable
+   * from no import at all (`_own_job`). The job advances one stage per poll.
+   */
+  method('shotright.api.get_venue_import_template', () =>
+    ok(structuredClone(bench.venueImportTemplate)),
+  ),
+
+  method('shotright.api.start_venue_import', (raw) => {
+    const args = declaredOnly('start_venue_import', raw)
+    if (bench.venueImportRateLimited) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TooManyRequestsError',
+          exception: 'frappe.exceptions.TooManyRequestsError',
+          _server_messages: JSON.stringify([
+            JSON.stringify({ message: 'You hit the rate limit because of too many requests. Please try after sometime.' }),
+          ]),
+        },
+        { status: 429 },
+      )
+    }
+    if (!args.file_name) {
+      return HttpResponse.json(
+        {
+          exc_type: 'TypeError',
+          exception: "TypeError: start_venue_import() missing 1 required positional argument: 'file_name'",
+        },
+        { status: 417 },
+      )
+    }
+    if (!(bench.entitlements?.features || []).includes('venue_bulk_import')) {
+      const html = 'Bulk venue upload is a Pro feature. Upgrade to use it.'
+      return HttpResponse.json(
+        {
+          exc_type: 'FeatureLockedError',
+          exception: `shotright.entitlements.FeatureLockedError: ${html}`,
+          _server_messages: JSON.stringify([JSON.stringify({ message: html })]),
+        },
+        { status: 417 },
+      )
+    }
+    const file = bench.files.find((f) => f.name === args.file_name)
+    if (!file || file.owner !== bench.profile.email) {
+      return permissionError('You do not own this file')
+    }
+    const job = {
+      name: `VI-${String(bench.venueImports.length + 1).padStart(5, '0')}`,
+      owner: bench.profile.email,
+      file: file.name,
+      submit_for_review: ['1', 1, true, 'true'].includes(args.submit_for_review),
+      status: 'Queued',
+      stage: 'uploaded',
+      processed: 0,
+      total: 0,
+      created_count: 0,
+      updated_count: 0,
+      skipped_count: 0,
+      menu_items_count: 0,
+      submitted_count: 0,
+      declined_count: 0,
+      venues: [],
+      errors: [],
+      polls: 0,
+      outcome: structuredClone(bench.venueImportOutcome),
+    }
+    bench.venueImports.push(job)
+    return ok(venueImportStatus(job))
+  }),
+
+  method('shotright.api.get_venue_import_status', ({ name }) => {
+    const job = ownVenueImport(name)
+    if (!job) return importMissing()
+    advanceVenueImport(job)
+    return ok(venueImportStatus(job))
+  }),
+
+  method('shotright.api.cancel_venue_import', ({ name }) => {
+    const job = ownVenueImport(name)
+    if (!job) return importMissing()
+    if (!['Completed', 'Failed', 'Cancelled'].includes(job.status)) job.status = 'Cancelled'
+    return ok(venueImportStatus(job))
+  }),
+
   /* ------------------------------------------------------ review screens */
   method('shotright.api.get_review_fix_items', () => ok([])),
   method('shotright.api.get_venue_review', () => ok(null)),
@@ -1358,11 +1534,16 @@ const apiHandlers = [
       )
     }
 
+    /* `owner` is the session user, as core stamps it — `Venue Import` refuses
+       a file its caller does not own. */
+    const isPrivate = ['1', 'true'].includes(String(form.get('is_private')))
     const row = {
       name: `FILE-${bench.files.length + 1}`,
-      file_url: `/files/${bench.files.length + 1}-${file?.name || 'photo.jpg'}`,
+      file_url: `/${isPrivate ? 'private/' : ''}files/${bench.files.length + 1}-${file?.name || 'photo.jpg'}`,
       file_name: file?.name || 'photo.jpg',
       attached_to_name: docname || null,
+      is_private: isPrivate ? 1 : 0,
+      owner: bench.profile.email,
     }
     bench.files.push(row)
     return ok(row)
