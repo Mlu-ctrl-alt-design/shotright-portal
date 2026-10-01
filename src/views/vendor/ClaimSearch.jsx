@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Badge, Button, Card, EmptyState, Input } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import {
   MIN_QUERY,
   MY_CLAIMS_QUERY,
+  OPEN_STATUSES,
   getMyClaims,
   searchClaimable,
   startClaim,
+  withdrawClaim,
 } from '../../services/claims'
 
 /**
@@ -159,21 +161,83 @@ function MyClaims({ query }) {
 
   return (
     <Card title="Your claims">
-      <ul className="divide-y divide-ink-100">
+      <ul aria-label="Your claims" className="divide-y divide-ink-100">
         {query.data.map((row) => (
-          <li key={row.claim} className="flex flex-wrap items-start justify-between gap-3 py-3">
-            <div className="min-w-0">
-              <p className="font-semibold text-ink-900">{row.venueName}</p>
-              {row.status === 'Started' && (
-                <p className="text-sm text-ink-500">Search for it again above to finish this claim.</p>
-              )}
-              {row.reason && <p className="text-sm text-ink-500">{row.reason}</p>}
-            </div>
-            <Badge tone={STATUS_TONE[row.status]}>{STATUS_LABEL[row.status] || row.status}</Badge>
-          </li>
+          <MyClaim key={row.claim} row={row} />
         ))}
       </ul>
     </Card>
+  )
+}
+
+/**
+ * One of the partner's own claims, with a way to take it back while it is open.
+ *
+ * Withdrawing asks first, inline, because it cannot be undone — a withdrawn
+ * claim is closed for good, and claiming again means starting from the search
+ * — and because a filed claim on somebody else's listing tells that partner it
+ * has been withdrawn.
+ */
+function MyClaim({ row }) {
+  const queryClient = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+
+  const withdraw = useMutation({
+    mutationFn: () => withdrawClaim(row.claim),
+    onSuccess: () => {
+      setConfirming(false)
+      queryClient.invalidateQueries({ queryKey: MY_CLAIMS_QUERY })
+    },
+  })
+
+  const open = OPEN_STATUSES.includes(row.status)
+
+  return (
+    <li className="space-y-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold text-ink-900">{row.venueName}</p>
+          {row.status === 'Started' && (
+            <p className="text-sm text-ink-500">Search for it again above to finish this claim.</p>
+          )}
+          {row.reason && <p className="text-sm text-ink-500">{row.reason}</p>}
+        </div>
+        <div className="flex items-center gap-3">
+          <Badge tone={STATUS_TONE[row.status]}>{STATUS_LABEL[row.status] || row.status}</Badge>
+          {open && !confirming && (
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label={`Withdraw your claim on ${row.venueName}`}
+              onClick={() => {
+                withdraw.reset()
+                setConfirming(true)
+              }}
+            >
+              Withdraw
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {confirming && (
+        <div role="group" aria-label={`Withdraw your claim on ${row.venueName}?`} className="space-y-3 rounded-2xl bg-canvas p-4">
+          <p className="text-sm text-ink-900">
+            Withdraw your claim on <strong>{row.venueName}</strong>? It closes for good, and to claim the venue later
+            you would start again.
+          </p>
+          <Alert variant="danger">{withdraw.error?.message}</Alert>
+          <div className="flex flex-wrap gap-3">
+            <Button size="sm" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>
+              {withdraw.isPending ? 'Withdrawing…' : 'Yes, withdraw it'}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setConfirming(false)} disabled={withdraw.isPending}>
+              Keep my claim
+            </Button>
+          </div>
+        </div>
+      )}
+    </li>
   )
 }
 

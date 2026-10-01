@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Card, EmptyState } from '../../components/ui'
 import Spinner from '../../components/ui/Spinner'
 import { INBOX_QUERY, getInboxEntry, listInbox, markRead } from '../../services/inbox'
 import { htmlToParagraphs } from '../../utils/htmlToText'
 import { clsx } from '../../utils/clsx'
+import { ON_MY_VENUES_PATH } from '../../services/claims'
 
 /**
  * Messages: every notification the bench has sent this partner, newest first.
@@ -65,7 +67,7 @@ export default function Messages() {
                     <span className="block text-xs text-ink-500">{formatWhen(row.createdAt)}</span>
                   </span>
                 </button>
-                {openId === row.id && <MessageBody id={row.id} wasRead={row.read} />}
+                {openId === row.id && <MessageBody id={row.id} wasRead={row.read} about={row.documentType} />}
               </li>
             ))}
           </ul>
@@ -75,7 +77,7 @@ export default function Messages() {
   )
 }
 
-function MessageBody({ id, wasRead }) {
+function MessageBody({ id, wasRead, about }) {
   const queryClient = useQueryClient()
   const entry = useQuery({
     queryKey: ['inbox', id],
@@ -96,6 +98,15 @@ function MessageBody({ id, wasRead }) {
       {htmlToParagraphs(entry.data.body).map((text, i) => (
         <p key={i}>{text}</p>
       ))}
+      {/* A claim notice says "answer it under Claims on your venues"; the
+          body is flattened to text, so the way there has to be added here. */}
+      {about === 'Venue Claim' && (
+        <p>
+          <Link to={ON_MY_VENUES_PATH} className="font-semibold text-brand-ink underline">
+            Go to claims on your venues
+          </Link>
+        </p>
+      )}
     </div>
   )
 }

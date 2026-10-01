@@ -469,6 +469,75 @@ const apiHandlers = [
     return ok({ file: row.file, file_name: row.file_name, claim: claim.name, evidence: claim.files })
   }),
 
+  /**
+   * venue_claims.withdraw_claim: the claimant's own open claim only. The bench
+   * answers an unknown claim with DoesNotExistError and an answered one with a
+   * ValidationError naming where it is.
+   */
+  method('shotright.api.withdraw_venue_claim', ({ claim: name }) => {
+    const claim = bench.claims.find((c) => c.name === name)
+    if (!claim) return docMissing()
+    if (!['Started', 'Submitted'].includes(claim.status)) {
+      return validationError(`This claim is already ${claim.status.toLowerCase()}. It can no longer be withdrawn.`)
+    }
+    Object.assign(claim, { status: 'Withdrawn', token: null, decided_at: '2026-10-01 09:00:00' })
+    return ok({ claim: claim.name, status: 'Withdrawn', venue: claim.venue })
+  }),
+
+  /* The owner's side. The incumbent is whoever holds the venue NOW; a claim
+     that is not open is refused with the bench's own words. */
+  method('shotright.api.get_claims_on_my_venues', () =>
+    ok(bench.claimsOnMine.map((row) => ({ ...row, evidence: row.evidence.map((f) => ({ ...f })) }))),
+  ),
+
+  method('shotright.api.respond_to_venue_claim', ({ claim: name, response }) => {
+    const row = bench.claimsOnMine.find((c) => c.claim === name)
+    if (!row) return permissionError('That claim is not on one of your venues.')
+    if (row.status !== 'Submitted') {
+      return validationError('This claim has been answered, so it can no longer be responded to.')
+    }
+    const text = String(response || '').trim()
+    if (!text) return validationError('Write your answer before sending it.')
+    if (text.length > 4000) {
+      return validationError('Keep it under 4000 characters. Send documents for anything longer.')
+    }
+    Object.assign(row, { response: text, responded: true, responded_at: '2026-10-01 09:30:00' })
+    return ok({ ...row })
+  }),
+
+  http.all('*/api/method/shotright.api.upload_venue_claim_response_evidence', async ({ request }) => {
+    if (bench.deploy.upload_venue_claim_response_evidence === false) {
+      return methodMissing('shotright.api.upload_venue_claim_response_evidence')
+    }
+    const form = await request.formData()
+    const file = form.get('file')
+    const name = form.get('claim')
+    record('upload_venue_claim_response_evidence', { claim: name, fileName: file?.name, type: file?.type, size: file?.size })
+    const row = bench.claimsOnMine.find((c) => c.claim === name)
+    if (!row) return permissionError('That claim is not on one of your venues.')
+    if (row.status !== 'Submitted') {
+      return validationError('This claim has been answered, so it can no longer be responded to.')
+    }
+    /* Same filename-or-type fallback as the claimant's upload above. */
+    const allowed = /\.(pdf|png|jpe?g|webp)$/i.test(file?.name || '') ||
+      (file?.name === 'blob' && ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'].includes(file?.type))
+    if (!allowed) {
+      return validationError(`Send a PDF or a photo (PNG, JPEG or WebP). ${file?.name} is neither.`)
+    }
+    if (row.evidence.length >= 6) return validationError('That is already 6 documents. Remove one before adding another.')
+    const doc = { file: `FILE-R${row.evidence.length + 1}`, file_name: file.name, file_size: file.size }
+    row.evidence.push(doc)
+    return ok({ file: doc.file, file_name: doc.file_name, claim: row.claim, evidence: row.evidence })
+  }),
+
+  method('shotright.api.remove_venue_claim_response_evidence', ({ claim: name, file }) => {
+    const row = bench.claimsOnMine.find((c) => c.claim === name)
+    if (!row) return permissionError('That claim is not on one of your venues.')
+    if (!row.evidence.some((f) => f.file === file)) return validationError('That document is not one of yours on this claim.')
+    row.evidence = row.evidence.filter((f) => f.file !== file)
+    return ok(row.evidence)
+  }),
+
   /* --------------------------------------------------------------- inbox */
   /** shotright/inbox.py: the caller's Notification Log, newest first. */
   method('shotright.api.list_inbox', () =>
@@ -476,7 +545,14 @@ const apiHandlers = [
       bench.inbox
         .slice()
         .sort((a, b) => String(b.creation).localeCompare(String(a.creation)))
-        .map(({ name, subject, type, read, creation }) => ({ name, subject, type, read, creation })),
+        .map(({ name, subject, type, read, creation, document_type }) => ({
+          name,
+          subject,
+          type,
+          read,
+          creation,
+          document_type: document_type || null,
+        })),
     ),
   ),
 

@@ -37,6 +37,7 @@ const Messages = lazy(() => import('./views/vendor/Messages'))
 const Legal = lazy(() => import('./views/vendor/Legal'))
 const VenueBulkImport = lazy(() => import('./views/vendor/VenueBulkImport'))
 const ClaimSearch = lazy(() => import('./views/vendor/ClaimSearch'))
+const ClaimsOnMyVenues = lazy(() => import('./views/vendor/ClaimsOnMyVenues'))
 const ClaimHandoff = lazy(() => import('./views/claim/ClaimHandoff'))
 
 export default function App() {
@@ -120,6 +121,11 @@ export default function App() {
               adding a duplicate of it. Starts a claim and hands over to
               /claim/:token below. */}
           <Route path="/claim" element={<ClaimSearch />} />
+          {/* The other side: claims somebody has filed on THIS partner's
+              venues, and where they answer them. Reached from the dashboard
+              notice, the nav (only while there is something to show) and the
+              Messages entry each claim notice leaves. */}
+          <Route path="/claims-on-your-venues" element={<ClaimsOnMyVenues />} />
           <Route path="/messages" element={<Messages />} />
           <Route path="/profile" element={<Profile />} />
           {/* Reachable from the banner, from Settings, and from a blocked

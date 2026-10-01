@@ -24,6 +24,9 @@ export const listInbox = async () => {
     type: row.type || '',
     createdAt: row.creation || '',
     read: isRead(row),
+    /* What the message is about, e.g. 'Venue Claim', so the panel can link to
+       the screen that acts on it. Absent on a bench older than claims-owner-side. */
+    documentType: row.document_type || '',
   }))
 }
 
