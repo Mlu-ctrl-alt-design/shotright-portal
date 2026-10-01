@@ -1,4 +1,5 @@
 import api, { call, callGet } from './api'
+import { withFallback } from './vendor'
 
 /**
  * Claiming a venue that is already in the Sho't Right catalogue.
@@ -32,6 +33,14 @@ export const MY_CLAIMS_METHOD = 'shotright.api.get_my_venue_claims'
 export const UPLOAD_EVIDENCE_METHOD = 'shotright.api.upload_venue_claim_evidence'
 export const LIST_EVIDENCE_METHOD = 'shotright.api.get_venue_claim_evidence'
 export const REMOVE_EVIDENCE_METHOD = 'shotright.api.remove_venue_claim_evidence'
+/* The claimant taking a claim back, and the other side of a dispute: the
+   partner who holds a venue somebody has claimed. Backend branch
+   feat/claims-owner-side; on an older bench these are absent. */
+export const WITHDRAW_METHOD = 'shotright.api.withdraw_venue_claim'
+export const ON_MY_VENUES_METHOD = 'shotright.api.get_claims_on_my_venues'
+export const RESPOND_METHOD = 'shotright.api.respond_to_venue_claim'
+export const UPLOAD_RESPONSE_EVIDENCE_METHOD = 'shotright.api.upload_venue_claim_response_evidence'
+export const REMOVE_RESPONSE_EVIDENCE_METHOD = 'shotright.api.remove_venue_claim_response_evidence'
 
 export const MIN_QUERY = 2
 /** The Select options on `Venue Claim.claimant_role`, verbatim. */
@@ -41,6 +50,14 @@ export const MAX_EVIDENCE_MB = 10
 export const EVIDENCE_ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp'
 
 export const MY_CLAIMS_QUERY = ['venue-claims', 'mine']
+/** One cache for the claims page, the dashboard notice and the nav item. */
+export const ON_MY_VENUES_QUERY = ['venue-claims', 'on-my-venues']
+/** Where those claims are answered. */
+export const ON_MY_VENUES_PATH = '/claims-on-your-venues'
+/** `respond_to_venue_claim` refuses anything longer. */
+export const MAX_RESPONSE_CHARS = 4000
+/** Claims a claimant can still withdraw. */
+export const OPEN_STATUSES = ['Started', 'Submitted']
 
 export const searchClaimable = async (query) => {
   const rows = await callGet(SEARCH_METHOD, { query })
@@ -130,3 +147,55 @@ export const uploadEvidence = async (handle, file) => {
 
 export const removeEvidence = async (handle, fileId) =>
   ((await call(REMOVE_EVIDENCE_METHOD, { handle, file: fileId })) || []).map(evidenceRow)
+
+/** The claimant takes back their own open claim. */
+export const withdrawClaim = async (claim) => {
+  const result = await call(WITHDRAW_METHOD, { claim })
+  return { claim: result.claim, status: result.status, venue: result.venue }
+}
+
+/**
+ * Filed claims on the partner's venues, as the bench lets an OWNER see them:
+ * the claimant's role, never who they are. An older bench has no such list,
+ * and having nothing to show is the truthful answer there — the nav item and
+ * the dashboard notice simply do not appear.
+ */
+export const getClaimsOnMyVenues = () =>
+  withFallback(
+    'get_claims_on_my_venues',
+    async () => ((await callGet(ON_MY_VENUES_METHOD)) || []).map(claimOnMyVenue),
+    async () => [],
+  )
+
+const claimOnMyVenue = (row) => ({
+  claim: row.claim,
+  venue: row.venue,
+  venueName: row.venue_name || row.venue,
+  status: row.status,
+  filedAt: row.filed_at || '',
+  decidedAt: row.decided_at || '',
+  role: row.claimant_role || '',
+  venueIsYours: !!row.venue_is_yours,
+  canRespond: !!row.can_respond,
+  responded: !!row.responded,
+  response: row.response || '',
+  respondedAt: row.responded_at || '',
+  evidence: (row.evidence || []).map(evidenceRow),
+})
+
+/** @returns the claim as `getClaimsOnMyVenues` shapes it. */
+export const respondToClaim = async ({ claim, response }) =>
+  claimOnMyVenue(await call(RESPOND_METHOD, { claim, response }))
+
+export const uploadResponseEvidence = async (claim, file) => {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  form.append('claim', claim)
+  const { data } = await api.post(`/api/method/${UPLOAD_RESPONSE_EVIDENCE_METHOD}`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return (data.message?.evidence || []).map(evidenceRow)
+}
+
+export const removeResponseEvidence = async (claim, fileId) =>
+  ((await call(REMOVE_RESPONSE_EVIDENCE_METHOD, { claim, file: fileId })) || []).map(evidenceRow)

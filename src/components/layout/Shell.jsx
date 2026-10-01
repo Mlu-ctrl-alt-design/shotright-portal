@@ -9,6 +9,7 @@ import LegalBanner from './LegalBanner'
 import PaymentReturnBanner from './PaymentReturnBanner'
 import ProBadge from './ProBadge'
 import { INBOX_QUERY, listInbox } from '../../services/inbox'
+import { ON_MY_VENUES_PATH, ON_MY_VENUES_QUERY, getClaimsOnMyVenues } from '../../services/claims'
 
 /**
  * The authenticated partner shell.
@@ -48,6 +49,10 @@ const NAV = [
   { to: '/venues', label: 'My Venues', end: true, icon: StorefrontIcon },
   { to: '/venues/new', label: 'Add New', icon: PlusIcon },
   { to: '/claim', label: 'Claim a Venue', icon: FlagIcon },
+  /* Only while somebody has claimed one of this partner's venues — most
+     partners will never see it, and a permanent item for a rare event is a
+     nav that grows for nothing. Carries the count of claims still open. */
+  { to: ON_MY_VENUES_PATH, label: 'Claims on your venues', icon: FlagIcon, counts: 'claims', onlyWhen: 'claims' },
   /* Carries the unread count; see `unread` in Shell. */
   { to: '/messages', label: 'Messages', icon: EnvelopeIcon, counts: 'unread' },
   { to: '/profile', label: 'Settings', icon: GearIcon },
@@ -165,6 +170,14 @@ export default function Shell() {
   const inbox = useQuery({ queryKey: INBOX_QUERY, queryFn: listInbox, refetchInterval: 60_000, retry: false })
   const unread = (inbox.data || []).filter((row) => !row.read).length
 
+  /* Claims on this partner's venues: whether to show the nav item at all, and
+     how many are still open. Read once per visit rather than polled — a new one
+     also arrives as a Message, which IS polled. */
+  const claimsOnMine = useQuery({ queryKey: ON_MY_VENUES_QUERY, queryFn: getClaimsOnMyVenues, retry: false })
+  const hasClaims = (claimsOnMine.data || []).length > 0
+  const openClaims = (claimsOnMine.data || []).filter((row) => row.status === 'Submitted').length
+  const counts = { unread: [unread, 'unread'], claims: [openClaims, 'open'] }
+
   // Stable identity: NavDrawer's effects depend on it, and a fresh function each
   // render would tear down and rebuild the focus trap on every parent render.
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
@@ -186,7 +199,7 @@ export default function Shell() {
    * item is a plain full pill.
    */
   const navItems = (variant) =>
-    NAV.map((item) => (
+    NAV.filter((item) => item.onlyWhen !== 'claims' || hasClaims).map((item) => (
       <NavLink
         key={item.to}
         to={item.to}
@@ -204,12 +217,12 @@ export default function Shell() {
       >
         {item.icon ? <item.icon /> : <PlusIcon />}
         {item.label}
-        {item.counts === 'unread' && unread > 0 && (
+        {item.counts && counts[item.counts][0] > 0 && (
           <>
             <span aria-hidden="true" className="ml-auto rounded-full bg-ink-900 px-2 py-0.5 text-xs text-white">
-              {unread}
+              {counts[item.counts][0]}
             </span>
-            <span className="sr-only">, {unread} unread</span>
+            <span className="sr-only">{`, ${counts[item.counts][0]} ${counts[item.counts][1]}`}</span>
           </>
         )}
       </NavLink>

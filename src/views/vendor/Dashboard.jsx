@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useDashboard } from '../../hooks/useVendor'
 import { useSetupDrafts } from '../../hooks/useSetupDraft'
 import { discardDraft } from '../../services/setupDraft'
@@ -8,6 +8,7 @@ import { Badge, Button, Card, MetricCard, EmptyState, Alert } from '../../compon
 import Spinner from '../../components/ui/Spinner'
 import ResumeSetupCard from '../../components/ui/ResumeSetupCard'
 import { inBucket, stateLabel, stateTone } from '../../services/workflowState'
+import { ON_MY_VENUES_PATH, ON_MY_VENUES_QUERY, getClaimsOnMyVenues } from '../../services/claims'
 
 /**
  * Issue #18 — Vendor Portal Dashboard.
@@ -18,6 +19,8 @@ export default function Dashboard() {
   const { data, isLoading, error } = useDashboard()
   const { data: drafts = [] } = useSetupDrafts()
   const qc = useQueryClient()
+  const claimsOnMine = useQuery({ queryKey: ON_MY_VENUES_QUERY, queryFn: getClaimsOnMyVenues, retry: false })
+  const openClaims = (claimsOnMine.data || []).filter((row) => row.status === 'Submitted')
 
   /* Owned HERE, not by the card. Clearing the backlog empties the list and
      unmounts the card, so a message the card owned would be destroyed by the
@@ -123,6 +126,26 @@ export default function Dashboard() {
             ? `Cleared ${clearedNote.discarded} unfinished ${clearedNote.discarded === 1 ? 'setup' : 'setups'}.`
             : `Cleared ${clearedNote.discarded} of ${clearedNote.attempted}. The rest are still here — try again.`}
         </p>
+      )}
+
+      {/* Somebody says one of these venues is theirs. First on the page because
+          it is the one thing here with a person waiting on this partner's
+          answer — and the copy says straight away that nothing has moved. */}
+      {openClaims.length > 0 && (
+        <Link
+          to={ON_MY_VENUES_PATH}
+          className="block rounded-2xl bg-brand-50 px-5 py-4 text-sm text-ink-900 ring-1 ring-brand-200 hover:bg-brand-100"
+        >
+          <span className="font-semibold">
+            {openClaims.length === 1
+              ? `Someone has claimed ${openClaims[0].venueName}. Tell us your side`
+              : `${openClaims.length} of your venues have been claimed. Tell us your side`}{' '}
+            →
+          </span>
+          <span className="mt-1 block text-ink-700">
+            Nothing changes while a reviewer looks at it. Your listing and bookings are unaffected.
+          </span>
+        </Link>
       )}
 
       {/* The portal has no inbox, so this — and the email each rating sends —

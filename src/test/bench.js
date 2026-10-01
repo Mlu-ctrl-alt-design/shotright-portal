@@ -500,6 +500,14 @@ const initial = () => ({
    * live one-time link, null once filed — the bench stores only its hash.
    */
   claims: [],
+  /**
+   * Claims OTHER people have filed on this partner's venues, exactly as
+   * get_claims_on_my_venues returns them: {claim, venue, venue_name, status,
+   * filed_at, claimant_role, decided_at, venue_is_yours, can_respond,
+   * responded, response, responded_at, evidence: [{file, file_name, file_size}]}.
+   * Nothing about the claimant beyond their role — the bench never sends more.
+   */
+  claimsOnMine: [],
 
   /** What get_promotion_offer answers, per venue; see server.js. */
   promotionOffer: {
