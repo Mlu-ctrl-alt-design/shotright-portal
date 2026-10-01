@@ -337,13 +337,14 @@ export const submitPayfastForm = (action, fields) => {
  * precisely so clients can branch on `exc_type` instead of matching English
  * prose, which is what makes this a stable check rather than a fragile one.
  *
- * ⚠️ THE EXACT exc_type NAME IS NOT CONFIRMED. The pattern below covers the
- * plausible names; narrow it to the real one once the bench is restarted and
- * the exception has been seen on the wire. It is deliberately anchored to the
- * exc_type FIELD rather than to the message, so a venue whose description
- * happens to contain the word "upgrade" cannot trip it.
+ * ✅ The real name, read from the backend source 1 Oct: **`FeatureLockedError`**
+ * (`shotright/entitlements.py`, a `ValidationError` subclass, so 417). The
+ * older guesses stay in the pattern — they cost nothing. It is deliberately
+ * anchored to the exc_type FIELD rather than to the message, so a venue whose
+ * description happens to contain the word "upgrade" cannot trip it.
  */
-const PAYWALL_EXC = /PlanRequired|EntitlementRequired|UpgradeRequired|SubscriptionRequired|PaywallError/i
+const PAYWALL_EXC =
+  /FeatureLocked|PlanRequired|EntitlementRequired|UpgradeRequired|SubscriptionRequired|PaywallError/i
 
 export const isPaywalled = (error) => Boolean(error?.excType && PAYWALL_EXC.test(error.excType))
 

@@ -1,123 +1,61 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
-import { useMoods } from '../../hooks/useVendor'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useFeature } from '../../hooks/usePlan'
-import { FEATURE } from '../../services/plan'
-import { Alert, Button, Card } from '../../components/ui'
+import { FEATURE, isPaywalled } from '../../services/plan'
+import { stateLabel, stateTone } from '../../services/workflowState'
+import { Alert, Badge, Button, Card, UploadProgress } from '../../components/ui'
 import ProBadge from '../../components/paywall/ProBadge'
 import UpgradeDialog from '../../components/paywall/UpgradeDialog'
 import {
-  VENUE_TEMPLATE_HEADERS,
-  MOOD_SEPARATOR,
-  buildVenueTemplateCsv,
-  parseVenueFile,
-} from '../../utils/venueImport'
-import { importVenueDrafts } from '../../services/venueImport'
+  ACCEPTED_EXTENSIONS,
+  blockerLabel,
+  cancelVenueImport,
+  getVenueImportStatus,
+  getVenueImportTemplate,
+  isFinished,
+  partnerColumns,
+  plainImportError,
+  startVenueImport,
+  templateCsv,
+  uploadVenueFile,
+  venueImportPolling,
+} from '../../services/venueImport'
 
 /**
- * Many venues from one spreadsheet.
+ * Many venues from one spreadsheet — through the bench's importer.
  *
- * ⚠️ THE REVIEW STEP IS THE FEATURE. Nothing is sent until the partner has seen
- * what we understood, because a venue is not a menu item: it enters a review
- * queue, it is what customers see, and it cannot be reliably deleted afterwards
- * — `frappe.client.delete` is not a permission the Vendor role can be counted
- * on to have. Creating eleven venues and then explaining is not recoverable in
- * the way "remove that dish" is.
+ * The file is uploaded, `start_venue_import` queues a background job, and this
+ * screen watches it. Every venue lands in **Draft**: invisible to customers, in
+ * no review queue, deletable. That is why there is no client-side review step
+ * any more — the old one existed because the browser was creating listings
+ * itself, one call per row, with nothing on the server checking the file.
  *
- * So the shape is: read the file, show every row with what is wrong, create
- * only the rows that are ready, and report what happened line by line.
+ * The running import's name lives in the URL (`?import=VI-…`), so a refresh,
+ * a closed tab or a link sent to a colleague comes back to the same job.
  */
-export default function VenueBulkImport() {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const qc = useQueryClient()
-  const { data: moods = [] } = useMoods()
-  const fileInput = useRef(null)
+/* `.xls` is accepted by the picker on purpose, so the partner is told how to
+   save it as .xlsx rather than finding the file greyed out. */
+const ACCEPT =
+  '.csv,text/csv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
-  const [fileName, setFileName] = useState('')
-  const [parsed, setParsed] = useState(null)
-  const [error, setError] = useState(null)
-  const [progress, setProgress] = useState(null)
-  const [result, setResult] = useState(null)
+export default function VenueBulkImport() {
+  const [params, setParams] = useSearchParams()
+  const importName = params.get('import')
   const [paywall, setPaywall] = useState(false)
 
   /**
    * ⚠️ PRO, as of 17 Sep — and gated HERE as well as on the add-venue screen.
    *
-   * The add screen's "Several venues" route shows the lock, but this route has
-   * its own URL, is linked from the venues list, and is in partners' history.
-   * A paywall with a hole in it is not a paywall; worse, it is one that punishes
-   * the partners who followed the UI and rewards the ones who kept a bookmark.
+   * This route has its own URL, is linked from the venues list, and is in
+   * partners' history. The bench refuses a locked caller on its own
+   * (`FeatureLockedError`), so this lock is the courtesy, not the wall.
    *
    * `locked` is false while the answer is in flight and false whenever the
-   * bench cannot be asked — see `usePlan.js` and `plan.js`. Nobody is ever shown
-   * a lock this portal is not sure about.
+   * bench cannot be asked — see `usePlan.js`. Nobody is shown a lock this
+   * portal is not sure about.
    */
   const bulk = useFeature(FEATURE.BULK_IMPORT)
-
-  const read = async (file) => {
-    if (!file) return
-    setError(null)
-    setResult(null)
-    setParsed(null)
-    setFileName(file.name)
-    try {
-      setParsed(await parseVenueFile(file, { moods }))
-    } catch (err) {
-      setParsed(null)
-      setError(err.message)
-    }
-  }
-
-  const onFile = async (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = '' // so the same file can be re-picked after a fix
-    await read(file)
-  }
-
-  /**
-   * A file handed over by the add-venue screen's dropzone.
-   *
-   * It rides on router state, which survives the navigation because history
-   * state is structured-cloned and a File clones. The point of routing it here
-   * rather than reading it there is the review step below — nothing is created
-   * until the partner has seen what we understood, and that is the feature.
-   *
-   * Waits for the mood list, because parsing checks every mood against it and a
-   * file read too early reports every mood as unknown. Cleared from history
-   * afterwards so a refresh does not silently re-read a file they have moved on
-   * from.
-   */
-  const handed = location.state?.file
-  useEffect(() => {
-    if (!handed || !moods.length || bulk.locked) return
-    read(handed)
-    navigate(location.pathname, { replace: true, state: null })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handed, moods.length, bulk.locked])
-
-  const run = async () => {
-    if (!parsed?.ready.length) return
-    setProgress({ done: 0, total: parsed.ready.length, current: null })
-    const outcome = await importVenueDrafts(parsed.ready, { onProgress: setProgress })
-    setProgress(null)
-    setResult(outcome)
-    setParsed(null)
-    /* The venue list is stale the moment the first one lands. */
-    qc.invalidateQueries({ queryKey: ['venues'] })
-    qc.invalidateQueries({ queryKey: ['dashboard'] })
-  }
-
-  const download = () => {
-    const blob = new Blob([buildVenueTemplateCsv()], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'shot-right-venues-template.csv'
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 
   return (
     <div className="space-y-6">
@@ -137,8 +75,14 @@ export default function VenueBulkImport() {
         </Link>
       </div>
 
-      {/* ----------------------------------------------------------- locked */}
-      {bulk.locked && (
+      <UpgradeDialog open={paywall} onClose={() => setPaywall(false)} />
+
+      {/* A job already started is shown whatever the lock says: the venues it
+          wrote are the partner's, and hiding them behind a paywall would be
+          hiding their own work. */}
+      {importName ? (
+        <ImportJob name={importName} onRestart={() => setParams({})} />
+      ) : bulk.locked ? (
         <Card title="This one’s on Pro">
           <p className="text-sm text-ink-700">
             Upload one spreadsheet and every row becomes a draft venue, filled in and waiting for
@@ -148,9 +92,7 @@ export default function VenueBulkImport() {
             <Button shape="field" onClick={() => setPaywall(true)}>
               See what Pro includes
             </Button>
-            {/* The way through without paying, said plainly. A paywall that
-                leaves someone with nowhere to go converts nobody and loses the
-                venue as well as the subscription. */}
+            {/* The way through without paying, said plainly. */}
             <Link
               to="/venues/new"
               className="text-sm font-medium text-ink-500 underline underline-offset-2 hover:text-ink-900"
@@ -159,210 +101,450 @@ export default function VenueBulkImport() {
             </Link>
           </div>
         </Card>
+      ) : (
+        <Picker
+          onStarted={(name) => setParams({ import: name })}
+          onPaywalled={() => setPaywall(true)}
+        />
       )}
+    </div>
+  )
+}
 
-      <UpgradeDialog open={paywall} onClose={() => setPaywall(false)} />
+/* ------------------------------------------------------------------ picking */
 
-      {error && (
-        <Alert variant="danger">
-          <p className="font-bold">We couldn’t read that file</p>
-          <p className="mt-1">{error}</p>
+const extensionOf = (name) => {
+  const dot = String(name || '').lastIndexOf('.')
+  return dot === -1 ? '' : name.slice(dot).toLowerCase()
+}
+
+/** A reason we will not send this file, or null. Checked before uploading. */
+const refusal = (file) => {
+  const ext = extensionOf(file?.name)
+  if (ext === '.xls') {
+    return 'That’s the older .xls format, which we can’t read. In Excel, choose Save As → Excel Workbook (.xlsx) and upload that.'
+  }
+  if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+    return 'Upload an Excel workbook (.xlsx) or a CSV file.'
+  }
+  return null
+}
+
+function Picker({ onStarted, onPaywalled }) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const qc = useQueryClient()
+  const fileInput = useRef(null)
+
+  const [file, setFile] = useState(null)
+  const [problem, setProblem] = useState(null)
+  const [uploading, setUploading] = useState(null)
+
+  const template = useQuery({
+    queryKey: ['venueImportTemplate'],
+    queryFn: getVenueImportTemplate,
+    staleTime: Infinity,
+  })
+
+  const choose = (picked) => {
+    if (!picked) return
+    setProblem(null)
+    const reason = refusal(picked)
+    if (reason) {
+      setFile(null)
+      setProblem({ title: 'We can’t read that kind of file', message: reason })
+      return
+    }
+    setFile(picked)
+  }
+
+  /**
+   * A file handed over by the add-venue screen's dropzone, on router state. It
+   * is SELECTED, not imported — the partner still presses the button. Cleared
+   * from history so a refresh does not re-offer a file they have moved on from.
+   */
+  const handed = location.state?.file
+  useEffect(() => {
+    if (!handed) return
+    choose(handed)
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handed])
+
+  const start = async () => {
+    if (!file) return
+    setProblem(null)
+    setUploading(0)
+    try {
+      const docname = await uploadVenueFile(file, setUploading)
+      const job = await startVenueImport(docname)
+      qc.setQueryData(['venueImport', job.name], job)
+      onStarted(job.name)
+    } catch (err) {
+      setProblem(describeStartFailure(err))
+      if (isPaywalled(err)) onPaywalled()
+    } finally {
+      setUploading(null)
+    }
+  }
+
+  const download = () => {
+    const blob = new Blob([templateCsv(template.data)], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'shot-right-venues-template.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const sheets = template.data?.sheets || []
+
+  return (
+    <>
+      {problem && (
+        <Alert variant={problem.tone || 'danger'}>
+          <p className="font-bold">{problem.title}</p>
+          <p className="mt-1">{problem.message}</p>
         </Alert>
       )}
 
-      {/* ---------------------------------------------------------- results */}
-      {result && (
-        <Card title="What happened">
-          <p className="text-sm text-ink-900">
-            <span className="font-bold">
-              {result.created.length} {result.created.length === 1 ? 'draft' : 'drafts'} ready
-            </span>
-            {result.failed.length > 0 && `, ${result.failed.length} refused`}. Nothing has gone
-            for review yet.
-          </p>
+      <Card title="Your spreadsheet">
+        <p className="text-sm text-ink-700">
+          Start from the template: one row per venue on a sheet called <strong>venues</strong>.
+          {template.data?.max_venues ? ` Up to ${template.data.max_venues} venues a file.` : ''}{' '}
+          Give each venue your own reference in <code className="font-mono">external_ref</code>{' '}
+          and uploading the file again updates those venues instead of adding them twice.
+        </p>
 
-          {result.created.length > 0 && (
-            <ul className="mt-4 divide-y divide-gray-200">
-              {result.created.map((row) => (
-                <li key={row.lineNumber} className="flex flex-wrap items-baseline gap-x-3 py-2">
-                  <span className="text-xs tabular-nums text-ink-500">Line {row.lineNumber}</span>
-                  {row.id ? (
-                    /* Straight into the wizard on the step a photograph belongs
-                       to, with their own nine fields already filled in. */
-                    <Link
-                      to={`/venues/new?draft=${encodeURIComponent(row.id)}`}
-                      className="text-sm font-medium text-brand-ink underline"
-                    >
-                      {row.name}
-                    </Link>
-                  ) : (
-                    <span className="text-sm font-medium text-ink-900">{row.name}</span>
-                  )}
-                  {/* `createVenue`'s own warnings, said here rather than
-                      swallowed — a venue with no map location is invisible to
-                      customers whether it arrived one at a time or in a file. */}
-                  {row.notes.map((n) => (
-                    <span key={n} className="w-full text-xs text-ink-500">
-                      {n}
-                    </span>
-                  ))}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {result.failed.length > 0 && (
-            <div className="mt-5">
-              <h3 className="text-sm font-bold text-ink-900">Not added</h3>
-              <ul className="mt-2 divide-y divide-gray-200">
-                {result.failed.map((row) => (
-                  <li key={row.lineNumber} className="py-2 text-sm">
-                    <span className="text-xs tabular-nums text-ink-500">Line {row.lineNumber}</span>{' '}
-                    <span className="font-medium text-ink-900">{row.name}</span>
-                    <p className="text-xs text-red-700">{row.reason}</p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* The point of drafts. Open one, add photographs, submit — through
-              the flow that already requires a photo rather than around it. */}
-          {result.created.length > 0 && (
-            <Alert variant="info" className="mt-5">
-              Open each one to add photos and send it for review. Nothing here is live, and
-              nothing is waiting on our reviewers.
-            </Alert>
-          )}
-
-          {/* ⚠️ `saveDraft` falls back to this browser's storage when the bench
-              has no draft endpoint. Right for one draft; a different promise for
-              eleven, and a partner told "they're saved" who opens their phone
-              and finds nothing has been failed by us. */}
-          {result.created.length > 0 && !result.portable && (
-            <Alert variant="warning" className="mt-3">
-              These are saved in this browser, not on your account yet — so finish them here, on
-              this device, rather than on your phone.
-            </Alert>
-          )}
-
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Button onClick={() => navigate('/')}>See your drafts</Button>
-            <Button variant="secondary" onClick={() => setResult(null)}>
-              Upload another file
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* ---------------------------------------------------------- picking */}
-      {!bulk.locked && !parsed && !result && !progress && (
-        <Card title="Your spreadsheet">
-          <p className="text-sm text-ink-700">
-            Start from the template. One row per venue, and separate moods with a semicolon.
-          </p>
-          <p className="mt-1 text-xs text-ink-500">
-            Columns:{' '}
-            <code className="rounded bg-gray-100 px-1 font-mono text-xs">
-              {VENUE_TEMPLATE_HEADERS.join(', ')}
-            </code>
-. Excel or CSV.
-          </p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button variant="secondary" size="sm" onClick={download}>
-              Download the template
-            </Button>
-            <input
-              ref={fileInput}
-              type="file"
-              aria-label="Venue spreadsheet"
-              accept=".csv,text/csv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              onChange={onFile}
-              className="block min-w-56 flex-1 text-sm text-ink-700 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100"
-            />
-          </div>
-        </Card>
-      )}
-
-      {/* --------------------------------------------------------- progress */}
-      {progress && (
-        <Card title="Adding your venues">
-          <p className="text-sm text-ink-900" role="status">
-            {progress.done} of {progress.total} saved
-            {progress.current ? ` — ${progress.current}` : ''}
-          </p>
-          <p className="mt-1 text-xs text-ink-500">
-            Leaving this page stops the ones that haven’t been saved yet. The ones already saved
-            are safe.
-          </p>
-        </Card>
-      )}
-
-      {/* ----------------------------------------------------------- review */}
-      {parsed && !progress && (
-        <Card
-          title={`${fileName} — ${parsed.rows.length} ${parsed.rows.length === 1 ? 'row' : 'rows'}`}
-        >
-          <p className="text-sm text-ink-900">
-            <span className="font-bold">{parsed.ready.length} ready</span>
-            {parsed.blocked.length > 0 && `, ${parsed.blocked.length} need a look`}. Nothing has
-            been created yet.
-          </p>
-
-          <ul className="mt-4 divide-y divide-gray-200">
-            {parsed.rows.map((row) => (
-              <li key={row.lineNumber} className="py-3">
-                <div className="flex flex-wrap items-baseline gap-x-3">
-                  <span className="text-xs tabular-nums text-ink-500">Line {row.lineNumber}</span>
-                  <span className="text-sm font-medium text-ink-900">
-                    {row.venue.venue_name || <span className="text-red-700">No name</span>}
+        {sheets.length > 0 && (
+          <dl className="mt-4 space-y-3">
+            {sheets.map((sheet) => (
+              <div key={sheet.name}>
+                <dt className="text-xs font-bold text-ink-900">
+                  {sheet.name}
+                  <span className="font-normal text-ink-500">
+                    {sheet.required ? ' — required' : ' — optional, Excel only'}
                   </span>
-                  {row.problems.length === 0 && (
-                    <span className="text-xs font-semibold text-green-700">Ready</span>
-                  )}
-                </div>
-                {row.problems.map((p) => (
-                  <p key={p} className="mt-1 text-xs font-medium text-red-700">
-                    {p}
-                  </p>
-                ))}
-                {row.notes.map((n) => (
-                  <p key={n} className="mt-1 text-xs text-ink-500">
-                    {n}
-                  </p>
-                ))}
-              </li>
+                </dt>
+                <dd className="mt-0.5 text-xs text-ink-500">
+                  <code className="rounded bg-gray-100 px-1 font-mono text-xs">
+                    {partnerColumns(sheet).join(', ')}
+                  </code>
+                </dd>
+              </div>
             ))}
-          </ul>
-
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Button onClick={run} disabled={!parsed.ready.length}>
-              {parsed.ready.length === 1
-                ? 'Create 1 draft'
-                : `Create ${parsed.ready.length} drafts`}
-            </Button>
-            <Button variant="secondary" onClick={() => fileInput.current?.click()}>
-              Upload a different file
-            </Button>
-          </div>
-          {/* The file is not modified and nothing is created for a blocked row,
-              so fixing the sheet and re-uploading is the whole recovery path. */}
-          {parsed.blocked.length > 0 && (
-            <p className="mt-3 text-xs text-ink-500">
-              Fix the lines above in your spreadsheet and upload it again — the rows that are
-              ready will still be here.
+            {template.data?.join_note && (
+              <p className="text-xs text-ink-500">{template.data.join_note}</p>
+            )}
+            <p className="text-xs text-ink-500">
+              Separate moods with a comma. A CSV carries the venues sheet only — for opening hours
+              and menus, use an Excel workbook with sheets named hours and menu.
             </p>
-          )}
+          </dl>
+        )}
+        {template.isError && (
+          <p className="mt-3 text-xs text-ink-500">
+            We couldn’t load the column list just now. You can still upload a file you already
+            have.
+          </p>
+        )}
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={download}
+            disabled={!template.data}
+          >
+            Download the template
+          </Button>
           <input
             ref={fileInput}
             type="file"
             aria-label="Venue spreadsheet"
-            accept=".csv,text/csv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            onChange={onFile}
-            className="hidden"
+            accept={ACCEPT}
+            disabled={uploading !== null}
+            onChange={(event) => {
+              choose(event.target.files?.[0])
+              event.target.value = '' // so the same file can be re-picked after a fix
+            }}
+            className="block min-w-56 flex-1 text-sm text-ink-700 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100"
           />
+        </div>
+
+        {file && (
+          <div className="mt-5 space-y-3">
+            {uploading !== null ? (
+              <UploadProgress fileName={file.name} percent={uploading} />
+            ) : (
+              <p className="text-sm text-ink-900">
+                <span className="font-bold">{file.name}</span> is ready. Every venue in it arrives
+                as a draft — nothing goes for review and customers see none of it until you add
+                photos and submit.
+              </p>
+            )}
+            <Button onClick={start} disabled={uploading !== null}>
+              Import venues
+            </Button>
+          </div>
+        )}
+      </Card>
+    </>
+  )
+}
+
+/**
+ * Three failures, three different things to say — and only the last can be
+ * about the partner's file. An upload refused is our request, not their
+ * spreadsheet; the paywall is a plan, not a mistake.
+ */
+function describeStartFailure(err) {
+  if (isPaywalled(err)) {
+    return {
+      tone: 'warning',
+      title: 'Spreadsheet upload is on Pro',
+      message: 'Your plan doesn’t include it any more. Nothing was imported.',
+    }
+  }
+  if (err?.status === 429) {
+    return {
+      title: 'That’s a lot of imports in one hour',
+      message: 'Try again in a little while. Nothing new was imported.',
+    }
+  }
+  if (err?.stage === 'upload') {
+    return {
+      title: 'Your file didn’t reach us',
+      message: `There’s nothing wrong with your spreadsheet — the upload itself failed. Try again in a moment. (${err.message})`,
+    }
+  }
+  return { title: 'We couldn’t start the import', message: err?.message || 'Please try again.' }
+}
+
+/* ---------------------------------------------------------------- the job */
+
+const STAGES = [
+  { key: 'uploaded', label: 'File received' },
+  { key: 'scanning', label: 'Reading your file' },
+  { key: 'reading', label: 'Adding your venues' },
+  { key: 'checking', label: 'Finishing up' },
+]
+
+function ImportJob({ name, onRestart }) {
+  const qc = useQueryClient()
+
+  const status = useQuery({
+    queryKey: ['venueImport', name],
+    queryFn: () => getVenueImportStatus(name),
+    /* Stop on a finished job, and on "no such import" — that is an answer.
+       Anything else (a dropped connection) keeps asking. */
+    refetchInterval: (query) =>
+      isFinished(query.state.data) || query.state.error?.status === 404
+        ? false
+        : venueImportPolling.intervalMs,
+  })
+  const job = status.data
+  const finished = isFinished(job)
+
+  /* The venue list is stale the moment the job writes; refresh it once. */
+  useEffect(() => {
+    if (!finished) return
+    qc.invalidateQueries({ queryKey: ['venues'] })
+    qc.invalidateQueries({ queryKey: ['dashboard'] })
+  }, [finished, qc])
+
+  const cancel = useMutation({
+    mutationFn: () => cancelVenueImport(name),
+    onSuccess: (next) => {
+      if (next?.name) qc.setQueryData(['venueImport', name], next)
+      else status.refetch()
+    },
+  })
+
+  if (!job) {
+    if (status.isError) {
+      return (
+        <Card title="We can’t find that import">
+          <p className="text-sm text-ink-700">
+            {status.error?.status === 404
+              ? 'It may belong to another account, or the link is incomplete.'
+              : status.error?.message}
+          </p>
+          <div className="mt-4">
+            <Button onClick={onRestart}>Upload a file</Button>
+          </div>
         </Card>
+      )
+    }
+    return (
+      <Card title="Importing your venues">
+        <p className="text-sm text-ink-500" role="status">
+          Checking on your import…
+        </p>
+      </Card>
+    )
+  }
+
+  if (!finished) {
+    return (
+      <Progress
+        job={job}
+        onCancel={() => cancel.mutate()}
+        cancelling={cancel.isPending}
+        cancelError={cancel.error}
+      />
+    )
+  }
+
+  return <Result job={job} onRestart={onRestart} />
+}
+
+function Progress({ job, onCancel, cancelling, cancelError }) {
+  const current = STAGES.findIndex((s) => s.key === job.stage)
+  const counting = job.stage === 'reading' && job.total > 0
+
+  let line = 'Waiting for its turn — this usually takes a few seconds.'
+  if (job.status === 'Running' || current > 0) {
+    line = counting
+      ? `Adding your venues — ${job.processed} of ${job.total}`
+      : `${STAGES[Math.max(current, 0)].label}…`
+  }
+
+  return (
+    <Card title="Importing your venues">
+      <p className="text-sm font-medium text-ink-900" role="status">
+        {line}
+      </p>
+      <ol className="mt-4 space-y-1.5">
+        {STAGES.map((stage, i) => (
+          <li
+            key={stage.key}
+            className={i <= current ? 'text-sm text-ink-900' : 'text-sm text-ink-500'}
+          >
+            {i < current ? '✓ ' : i === current ? '→ ' : '· '}
+            {stage.label}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-4 text-xs text-ink-500">
+        You can leave this page — the import carries on without it. Come back to this address to
+        see how it went.
+      </p>
+      {cancelError && (
+        <Alert variant="danger" className="mt-3">
+          We couldn’t stop it: {cancelError.message}
+        </Alert>
       )}
-    </div>
+      <div className="mt-4">
+        <Button variant="secondary" onClick={onCancel} disabled={cancelling}>
+          {cancelling ? 'Stopping…' : 'Cancel import'}
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+function Result({ job, onRestart }) {
+  const venues = job.venues || []
+  const errors = job.errors || []
+  const failed = job.status === 'Failed'
+  const cancelled = job.status === 'Cancelled'
+
+  const counts = [
+    [job.created_count, 'added'],
+    [job.updated_count, 'updated'],
+    [job.skipped_count, 'skipped'],
+    [job.menu_items_count, job.menu_items_count === 1 ? 'menu item' : 'menu items'],
+  ].filter(([n]) => n > 0)
+
+  return (
+    <Card title={failed ? 'The import didn’t run' : cancelled ? 'Import stopped' : 'What happened'}>
+      {failed ? (
+        <Alert variant="danger">
+          <p className="font-bold">We couldn’t import that file, so nothing was added.</p>
+          {errors.map((e) => (
+            <p key={e} className="mt-1">
+              {plainImportError(e)}
+            </p>
+          ))}
+        </Alert>
+      ) : (
+        <p className="text-sm text-ink-900" role="status">
+          {counts.length
+            ? counts.map(([n, word]) => `${n} ${word}`).join(', ')
+            : 'No venues were added.'}
+          {cancelled && '. Venues already added before you stopped it are kept.'}
+        </p>
+      )}
+
+      {venues.length > 0 && (
+        <>
+          {/* The no_photos blocker is the expected outcome, not a failure: a
+              workbook cannot carry photographs. Said once, with somewhere to go
+              on every row. */}
+          <Alert variant="info" className="mt-4">
+            These are drafts — customers can’t see them yet. Each one needs photos before it can
+            go for review: open a venue, add its photos, then send it for review from its page.
+          </Alert>
+          <ul className="mt-4 divide-y divide-gray-200" aria-label="Imported venues">
+            {venues.map((v) => (
+              <li key={v.venue} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
+                <Link
+                  to={`/venues/${encodeURIComponent(v.venue)}`}
+                  className="text-sm font-medium text-brand-ink underline"
+                >
+                  {v.venue_name}
+                </Link>
+                <span className="text-xs text-ink-500">
+                  {v.action === 'updated' ? 'Updated' : v.action === 'created' ? 'Added' : v.action}
+                </span>
+                <Badge tone={stateTone(v.workflow_state)}>{stateLabel(v.workflow_state)}</Badge>
+                {(v.blockers || []).map((code) => (
+                  <span key={code} className="text-xs font-medium text-brand-ink">
+                    {blockerLabel(code)}
+                  </span>
+                ))}
+                <Link
+                  to={`/venues/${encodeURIComponent(v.venue)}/edit`}
+                  aria-label={`Add photos to ${v.venue_name}`}
+                  className="ml-auto text-sm font-semibold text-brand-ink underline"
+                >
+                  Add photos
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {!failed && errors.length > 0 && (
+        <div className="mt-5">
+          <h3 className="text-sm font-bold text-ink-900">Rows we skipped or changed</h3>
+          <p className="mt-1 text-xs text-ink-500">
+            Fix these in your spreadsheet and upload it again — venues with an external_ref are
+            updated, not added twice.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {errors.map((e) => (
+              <li key={e} className="text-xs text-red-700">
+                {e}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        {venues.length > 0 && (
+          <Link to="/venues">
+            <Button>See your venues</Button>
+          </Link>
+        )}
+        <Button variant="secondary" onClick={onRestart}>
+          Upload another file
+        </Button>
+      </div>
+    </Card>
   )
 }

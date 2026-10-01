@@ -368,16 +368,11 @@ function UrlRoute({ source, id, label, placeholder, hint, onImported }) {
 /**
  * Many venues from one spreadsheet.
  *
- * ⚠️ THE FILE IS HANDED TO THE EXISTING BULK IMPORT SCREEN, not read here.
- *
- * That screen's review step — every row, with what is wrong, before anything is
- * created — is the feature, for the reason its own file gives: a venue enters a
- * review queue, it is what customers see, and it cannot be reliably deleted
- * afterwards. Creating eleven venues and then explaining is not recoverable.
- *
- * So this is the design's dropzone wired to the flow that already does it
- * properly. The File rides on router state, which survives the navigation
- * because history state is structured-cloned and a File clones.
+ * The file is handed to the bulk import screen (`/venues/import`), not read
+ * here: that screen uploads it to the bench's importer, which creates every
+ * venue as a Draft, and it is where the job's progress and results live. The
+ * File rides on router state, which survives the navigation because history
+ * state is structured-cloned and a File clones. It arrives selected, not sent.
  */
 function BulkRoute() {
   const navigate = useNavigate()
